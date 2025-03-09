@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from io import BytesIO
 
-
+st.set_page_config(layout='wide')
 
 # Função para exportar os dados para um arquivo Excel, incluindo os enunciados
 def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, valores):
