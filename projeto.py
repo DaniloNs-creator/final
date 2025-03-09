@@ -91,7 +91,7 @@ else:
                         respostas[subitem] = st.number_input(f"{subitem} - {subpergunta}", min_value=0, max_value=5, step=1)
 
             # Botão para enviar os dados e gerar o gráfico
-            if st.button("Enviar Dados e Gerar Gráfico"):
+            if st.button("Gerar Gráfico"):
                 st.write(f"Obrigado, {st.session_state.nome}!")
                 st.write("Respostas enviadas com sucesso!")
 
