@@ -5,9 +5,8 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 
 # Função para exportar os dados para um arquivo Excel, incluindo os enunciados
-def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, valores, fig):
-   
-    linhas = []
+def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, valores, fig): 
+   linhas = []
     for item, conteudo in perguntas_hierarquicas.items():
         for subitem, subpergunta in conteudo["subitens"].items():
             linhas.append({"Pergunta": subpergunta, "Resposta": respostas[subitem]})
