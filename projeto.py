@@ -6,7 +6,7 @@ from io import BytesIO
 st.set_page_config(layout='wide')
 
 # Função para exportar os dados para um arquivo Excel, incluindo os enunciados
-def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, valores):
+def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, valores, valores_normalizados):
     # Criando um DataFrame com as perguntas e respostas
     linhas = []
     for item, conteudo in perguntas_hierarquicas.items():
@@ -16,6 +16,7 @@ def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, 
 
     # Criando um DataFrame com os valores do gráfico
     df_grafico = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
+    df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
 
     # Salvando ambos em um arquivo Excel
     output = BytesIO()
@@ -25,6 +26,7 @@ def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, 
 
         # Salvando os dados do gráfico em outra aba
         df_grafico.to_excel(writer, index=False, sheet_name='Gráfico')
+        df_grafico_normalizado.to_excel(writer, index=False, sheet_name='Gráfico Normalizado')
 
     return output.getvalue()
 
@@ -98,35 +100,41 @@ else:
                 # Calculando os valores em porcentagem para o gráfico de radar
                 categorias = []
                 valores = []
+                valores_normalizados = []
+                soma_total_respostas = sum(respostas.values())  # Soma total de todas as respostas
+
                 for item, conteudo in perguntas_hierarquicas.items():
                     soma_respostas = sum(respostas[subitem] for subitem in conteudo["subitens"].keys())
                     num_perguntas = len(conteudo["subitens"])
                     if num_perguntas > 0:
                         valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
+                        valor_normalizado = (soma_respostas / soma_total_respostas) * 100 if soma_total_respostas > 0 else 0
                         categorias.append(conteudo["titulo"])
                         valores.append(valor_percentual)
+                        valores_normalizados.append(valor_normalizado)
 
                 # Verificando se as listas têm o mesmo comprimento
-                if len(categorias) != len(valores):
+                if len(categorias) != len(valores) or len(categorias) != len(valores_normalizados):
                     st.error("Erro: As listas de categorias e valores têm tamanhos diferentes.")
                 else:
-                    # Configurando o gráfico de radar
+                    # Configurando o gráfico de radar original
                     if categorias:
-                        valores += valores[:1]  # Fechando o gráfico
-                        categorias += categorias[:1]  # Fechando o gráfico
+                        valores_original = valores + valores[:1]  # Fechando o gráfico
+                        categorias_original = categorias + categorias[:1]  # Fechando o gráfico
 
-                        # Criando o gráfico usando Plotly
+                        # Criando o gráfico original usando Plotly
                         import plotly.graph_objects as go
 
-                        fig = go.Figure()
+                        fig_original = go.Figure()
 
-                        fig.add_trace(go.Scatterpolar(
-                            r=valores,
-                            theta=categorias,
-                            fill='toself'
+                        fig_original.add_trace(go.Scatterpolar(
+                            r=valores_original,
+                            theta=categorias_original,
+                            fill='toself',
+                            name='Gráfico Original'
                         ))
 
-                        fig.update_layout(
+                        fig_original.update_layout(
                             polar=dict(
                                 radialaxis=dict(
                                     visible=True,
@@ -135,10 +143,33 @@ else:
                             showlegend=False
                         )
 
-                        st.plotly_chart(fig)
+                        st.plotly_chart(fig_original)
+
+                        # Configurando o gráfico de radar normalizado
+                        valores_normalizados_fechado = valores_normalizados + valores_normalizados[:1]  # Fechando o gráfico
+
+                        fig_normalizado = go.Figure()
+
+                        fig_normalizado.add_trace(go.Scatterpolar(
+                            r=valores_normalizados_fechado,
+                            theta=categorias_original,
+                            fill='toself',
+                            name='Gráfico Normalizado'
+                        ))
+
+                        fig_normalizado.update_layout(
+                            polar=dict(
+                                radialaxis=dict(
+                                    visible=True,
+                                    range=[0, 100]
+                                )),
+                            showlegend=False
+                        )
+
+                        st.plotly_chart(fig_normalizado)
 
                         # Gerando o arquivo Excel para download
-                        excel_data = exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias[:-1], valores[:-1])
+                        excel_data = exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias[:-1], valores[:-1], valores_normalizados[:-1])
                         st.download_button(
                             label="Exportar para Excel",
                             data=excel_data,
