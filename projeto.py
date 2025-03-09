@@ -6,7 +6,7 @@ from io import BytesIO
 
 # Função para exportar os dados para um arquivo Excel, incluindo os enunciados
 def exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias, valores, fig):
-    # Criando um DataFrame com as perguntas e respostas
+   
     linhas = []
     for item, conteudo in perguntas_hierarquicas.items():
         for subitem, subpergunta in conteudo["subitens"].items():
