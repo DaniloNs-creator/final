@@ -150,11 +150,11 @@ else:
                         with col2:
                             st.plotly_chart(fig_normalizado, use_container_width=True)
 
-                        st.write("### Tabela de Dados para o Gráfico Original")
+                        st.write("### Gráfico 1")
                         df_grafico_original = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
                         st.dataframe(df_grafico_original)
 
-                        st.write("### Tabela de Dados para o Gráfico Normalizado")
+                        st.write("### Gráfico 2")
                         df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
                         st.dataframe(df_grafico_normalizado)
 
