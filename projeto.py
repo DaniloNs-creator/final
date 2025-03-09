@@ -143,8 +143,6 @@ else:
                             showlegend=False
                         )
 
-                        st.plotly_chart(fig_original)
-
                         # Configurando o gráfico de radar normalizado
                         valores_normalizados_fechado = valores_normalizados + valores_normalizados[:1]  # Fechando o gráfico
 
@@ -166,7 +164,14 @@ else:
                             showlegend=False
                         )
 
-                        st.plotly_chart(fig_normalizado)
+                        # Exibindo os gráficos lado a lado
+                        col1, col2 = st.columns(2)  # Criando duas colunas
+
+                        with col1:
+                            st.plotly_chart(fig_original, use_container_width=True)
+
+                        with col2:
+                            st.plotly_chart(fig_normalizado, use_container_width=True)
 
                         # Gerando o arquivo Excel para download
                         excel_data = exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias[:-1], valores[:-1], valores_normalizados[:-1])
