@@ -55,7 +55,7 @@ if not st.session_state.formulario_preenchido:
             st.error("Por favor, preencha todos os campos antes de prosseguir.")
 else:
     # Tela de questionário
-    st.title("Formulário com Itens Expansíveis e Gráfico de Radar")
+    st.title("Formulário")
 
     # Lendo as perguntas do arquivo CSV
     caminho_arquivo = "https://github.com/DaniloNs-creator/projeto01/raw/main/Pasta1.csv"
