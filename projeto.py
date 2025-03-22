@@ -57,7 +57,8 @@ else:
             st.error("Certifique-se de que o arquivo CSV contém as colunas 'classe' e 'pergunta'.")
         else:
             perguntas_hierarquicas = {}
-            respostas = {}
+            respostas = st.session_state.get("respostas", {})
+            etapa_atual = st.session_state.get("etapa_atual", 1)
             
             for _, row in perguntas_df.iterrows():
                 classe = str(row['classe'])
@@ -71,96 +72,114 @@ else:
                         perguntas_hierarquicas[item_principal] = {"titulo": "", "subitens": {}}
                     perguntas_hierarquicas[item_principal]["subitens"][classe] = pergunta
             
-            st.write("Por favor, responda às perguntas dentro de cada item:")
+            total_etapas = len(perguntas_hierarquicas)
+            st.write(f"Etapa {etapa_atual} de {total_etapas}")
             
-            for item, conteudo in perguntas_hierarquicas.items():
-                with st.expander(f"{item} - {conteudo['titulo']}"):
+            for i, (item, conteudo) in enumerate(perguntas_hierarquicas.items(), start=1):
+                if i == etapa_atual:
+                    st.subheader(f"{item} - {conteudo['titulo']}")
                     for subitem, subpergunta in conteudo["subitens"].items():
-                        respostas[subitem] = st.number_input(f"{subitem} - {subpergunta}", min_value=0, max_value=5, step=1)
+                        respostas[subitem] = st.number_input(
+                            f"{subitem} - {subpergunta}", 
+                            min_value=0, 
+                            max_value=5, 
+                            step=1, 
+                            value=respostas.get(subitem, 0)
+                        )
+                    break
             
-            if st.button("Gerar Gráfico"):
-                st.write(f"Obrigado, {st.session_state.nome}!")
-                st.write("Respostas enviadas com sucesso!")
-                
-                categorias = []
-                valores = []
-                valores_normalizados = []
-                soma_total_respostas = sum(respostas.values())
-                
-                for item, conteudo in perguntas_hierarquicas.items():
-                    soma_respostas = sum(respostas[subitem] for subitem in conteudo["subitens"].keys())
-                    num_perguntas = len(conteudo["subitens"])
-                    
-                    if num_perguntas > 0:
-                        valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
-                        valor_normalizado = (soma_respostas / valor_percentual) * 100 if valor_percentual > 0 else 0
+            st.session_state.respostas = respostas
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Voltar", disabled=(etapa_atual == 1)):
+                    st.session_state.etapa_atual = etapa_atual - 1
+            with col2:
+                if st.button("Prosseguir"):
+                    if etapa_atual < total_etapas:
+                        st.session_state.etapa_atual = etapa_atual + 1
+                    else:
+                        st.session_state.etapa_atual = 1
+                        st.success("Todas as etapas foram concluídas!")
+                        categorias = []
+                        valores = []
+                        valores_normalizados = []
+                        soma_total_respostas = sum(respostas.values())
                         
-                        categorias.append(conteudo["titulo"])
-                        valores.append(valor_percentual)
-                        valores_normalizados.append(valor_normalizado)
-                
-                if len(categorias) != len(valores) or len(categorias) != len(valores_normalizados):
-                    st.error("Erro: As listas de categorias e valores têm tamanhos diferentes.")
-                else:
-                    if categorias:
-                        valores_original = valores + valores[:1]
-                        categorias_original = categorias + categorias[:1]
+                        for item, conteudo in perguntas_hierarquicas.items():
+                            soma_respostas = sum(respostas[subitem] for subitem in conteudo["subitens"].keys())
+                            num_perguntas = len(conteudo["subitens"])
+                            
+                            if num_perguntas > 0:
+                                valor_percentual = (soma_respostas / (num_perguntas * 5)) * 100
+                                valor_normalizado = (soma_respostas / valor_percentual) * 100 if valor_percentual > 0 else 0
+                                
+                                categorias.append(conteudo["titulo"])
+                                valores.append(valor_percentual)
+                                valores_normalizados.append(valor_normalizado)
                         
-                        import plotly.graph_objects as go
-                        
-                        fig_original = go.Figure()
-                        fig_original.add_trace(go.Scatterpolar(
-                            r=valores_original,
-                            theta=categorias_original,
-                            fill='toself',
-                            name='Gráfico Original'
-                        ))
-                        fig_original.update_layout(
-                            polar=dict(
-                                radialaxis=dict(
-                                    visible=True,
-                                    range=[0, 100]
-                                )),
-                            showlegend=False
-                        )
-                        
-                        valores_normalizados_fechado = valores_normalizados + valores_normalizados[:1]
-                        fig_normalizado = go.Figure()
-                        fig_normalizado.add_trace(go.Scatterpolar(
-                            r=valores_normalizados_fechado,
-                            theta=categorias_original,
-                            fill='toself',
-                            name='Gráfico Normalizado'
-                        ))
-                        fig_normalizado.update_layout(
-                            polar=dict(
-                                radialaxis=dict(
-                                    visible=True,
-                                    range=[0, 100]
-                                )),
-                            showlegend=False
-                        )
-                        
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.plotly_chart(fig_original, use_container_width=True)
-                            st.write("### Gráfico 1")
-                            df_grafico_original = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
-                            st.dataframe(df_grafico_original)
-                        
-                        with col2:
-                            st.plotly_chart(fig_normalizado, use_container_width=True)
-                            st.write("### Gráfico 2")
-                            df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
-                            st.dataframe(df_grafico_normalizado)
-                        
-                        excel_data = exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias[:-1], valores[:-1], valores_normalizados[:-1])
-                        st.download_button(
-                            label="Exportar para Excel",
-                            data=excel_data,
-                            file_name="respostas_e_grafico.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        )
+                        if len(categorias) != len(valores) or len(categorias) != len(valores_normalizados):
+                            st.error("Erro: As listas de categorias e valores têm tamanhos diferentes.")
+                        else:
+                            if categorias:
+                                valores_original = valores + valores[:1]
+                                categorias_original = categorias + categorias[:1]
+                                
+                                import plotly.graph_objects as go
+                                
+                                fig_original = go.Figure()
+                                fig_original.add_trace(go.Scatterpolar(
+                                    r=valores_original,
+                                    theta=categorias_original,
+                                    fill='toself',
+                                    name='Gráfico Original'
+                                ))
+                                fig_original.update_layout(
+                                    polar=dict(
+                                        radialaxis=dict(
+                                            visible=True,
+                                            range=[0, 100]
+                                        )),
+                                    showlegend=False
+                                )
+                                
+                                valores_normalizados_fechado = valores_normalizados + valores_normalizados[:1]
+                                fig_normalizado = go.Figure()
+                                fig_normalizado.add_trace(go.Scatterpolar(
+                                    r=valores_normalizados_fechado,
+                                    theta=categorias_original,
+                                    fill='toself',
+                                    name='Gráfico Normalizado'
+                                ))
+                                fig_normalizado.update_layout(
+                                    polar=dict(
+                                        radialaxis=dict(
+                                            visible=True,
+                                            range=[0, 100]
+                                        )),
+                                    showlegend=False
+                                )
+                                
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.plotly_chart(fig_original, use_container_width=True)
+                                    st.write("### Tabela 1")
+                                    df_grafico_original = pd.DataFrame({'Categoria': categorias, 'Porcentagem': valores})
+                                    st.dataframe(df_grafico_original)
+                                
+                                with col2:
+                                    st.plotly_chart(fig_normalizado, use_container_width=True)
+                                    st.write("### Tabela 2")
+                                    df_grafico_normalizado = pd.DataFrame({'Categoria': categorias, 'Porcentagem Normalizada': valores_normalizados})
+                                    st.dataframe(df_grafico_normalizado)
+                                
+                                excel_data = exportar_para_excel_completo(respostas, perguntas_hierarquicas, categorias[:-1], valores[:-1], valores_normalizados[:-1])
+                                st.download_button(
+                                    label="Exportar para Excel",
+                                    data=excel_data,
+                                    file_name="respostas_e_grafico.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                )
     except Exception as e:
         st.error(f"Ocorreu um erro ao carregar o arquivo: {e}")
