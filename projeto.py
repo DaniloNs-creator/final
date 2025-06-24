@@ -3,168 +3,161 @@ import pandas as pd
 import requests
 from io import BytesIO, StringIO
 from zipfile import ZipFile, BadZipFile
-import magic  # Para detecção do tipo de arquivo
+import urllib3
 
-# Título do aplicativo
-st.title("📦 Baixador de Faixas de CEP do Brasil - Versão Atualizada")
-st.markdown("""
-Este aplicativo permite baixar todas as faixas de CEP das cidades brasileiras.
-Os dados são obtidos diretamente dos arquivos públicos dos Correios.
-""")
+# Configurações iniciais
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+st.set_page_config(page_title="Faixas de CEP Brasil", layout="wide")
 
-# URLs dos arquivos (atualizadas)
+# URLs alternativas (HTTP)
 URLS = {
-    'TXT': 'https://ftp.correios.com.br/localidades/faixa_cep_publico.txt',
-    'ZIP': 'https://ftp.correios.com.br/localidades/faixa_cep_publico.zip'
+    'TXT': 'http://dados.correios.com.br/public/localidades/faixa_cep_publico.txt',
+    'ZIP': 'http://dados.correios.com.br/public/localidades/faixa_cep_publico.zip'
 }
 
-# Função para detectar o tipo de arquivo
-def get_file_type(content):
-    mime = magic.Magic(mime=True)
-    file_type = mime.from_buffer(content)
-    return file_type
-
-# Função para baixar e processar dados
-def download_cep_data(url):
+# Função para baixar dados
+def download_data(url):
     try:
-        response = requests.get(url, stream=True)
+        response = requests.get(url, stream=True, verify=False, timeout=30)
         response.raise_for_status()
-        
-        content = response.content
-        
-        # Verificar se é um arquivo ZIP
-        if url.endswith('.zip'):
-            try:
-                with ZipFile(BytesIO(content)) as zip_file:
-                    # Procurar pelo arquivo TXT dentro do ZIP
-                    for file in zip_file.namelist():
-                        if file.lower().endswith('.txt'):
-                            with zip_file.open(file) as f:
-                                file_content = f.read()
-                                break
-                    else:
-                        st.error("Nenhum arquivo TXT encontrado no ZIP.")
-                        return None
-            except BadZipFile:
-                st.error("O arquivo baixado não é um ZIP válido. Tentando processar como TXT...")
-                file_content = content
-        else:
-            file_content = content
-        
-        # Tentar diferentes encodings
-        try:
-            text_content = file_content.decode('latin1')
-        except UnicodeDecodeError:
-            try:
-                text_content = file_content.decode('utf-8')
-            except UnicodeDecodeError:
-                st.error("Não foi possível decodificar o arquivo. Encoding desconhecido.")
-                return None
-        
-        # Processar o conteúdo do arquivo
-        try:
-            # Tentar ler com pandas
-            df = pd.read_csv(
-                StringIO(text_content),
-                sep=';',
-                header=None,
-                dtype=str,
-                names=['UF', 'Localidade', 'Faixa_Inicio', 'Faixa_Fim', 'Situacao'],
-                na_values=[''],
-                keep_default_na=False
-            )
-            
-            # Limpeza básica dos dados
-            df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-            
-            return df
-        except Exception as e:
-            st.error(f"Erro ao processar o arquivo: {str(e)}")
-            return None
-            
-    except requests.exceptions.RequestException as e:
-        st.error(f"Erro ao baixar o arquivo: {str(e)}")
-        return None
+        return response.content
     except Exception as e:
-        st.error(f"Erro inesperado: {str(e)}")
+        st.error(f"Falha ao baixar arquivo: {str(e)}")
+        return None
+
+# Função para processar conteúdo
+def process_content(content, is_zip=False):
+    try:
+        if is_zip:
+            with ZipFile(BytesIO(content)) as zip_file:
+                for file in zip_file.namelist():
+                    if file.lower().endswith('.txt'):
+                        with zip_file.open(file) as f:
+                            content = f.read()
+                            break
+                else:
+                    st.error("Arquivo TXT não encontrado no ZIP")
+                    return None
+        
+        # Tentar decodificar
+        try:
+            text = content.decode('latin1')
+        except UnicodeDecodeError:
+            text = content.decode('utf-8', errors='replace')
+        
+        # Processar DataFrame
+        df = pd.read_csv(
+            StringIO(text),
+            sep=';',
+            header=None,
+            names=['UF', 'Localidade', 'Faixa_Inicio', 'Faixa_Fim', 'Situacao'],
+            dtype=str
+        )
+        
+        # Limpeza dos dados
+        df = df.apply(lambda x: x.str.strip() if x.dtype == 'object' else x)
+        df = df.dropna(how='all')
+        
+        return df
+    
+    except Exception as e:
+        st.error(f"Erro no processamento: {str(e)}")
         return None
 
 # Interface principal
-st.sidebar.header("Configurações")
-file_source = st.sidebar.radio(
-    "Fonte dos dados:",
-    ('Arquivo TXT', 'Arquivo ZIP'),
-    help="Selecione se deseja baixar diretamente o TXT ou o arquivo ZIP"
-)
-
-if st.button("Baixar Dados de CEP"):
-    with st.spinner("Baixando e processando dados..."):
-        url = URLS['ZIP'] if file_source == 'Arquivo ZIP' else URLS['TXT']
-        cep_data = download_cep_data(url)
-        
-        if cep_data is not None:
-            st.session_state.cep_data = cep_data
-            st.success("Dados carregados com sucesso!")
+def main():
+    st.title("📊 Faixas de CEP do Brasil")
+    st.markdown("""
+    Aplicativo para download dos dados públicos de faixas de CEP disponibilizados pelos Correios.
+    """)
+    
+    # Seleção de fonte
+    fonte = st.radio(
+        "Selecione a fonte dos dados:",
+        ('Arquivo TXT', 'Arquivo ZIP'),
+        horizontal=True
+    )
+    
+    # Botão de download
+    if st.button("🔽 Baixar Dados", type="primary"):
+        with st.spinner("Obtendo dados dos Correios..."):
+            url = URLS['ZIP'] if fonte == 'Arquivo ZIP' else URLS['TXT']
+            content = download_data(url)
             
-            # Mostrar pré-visualização
-            st.subheader("Pré-visualização dos Dados")
-            st.dataframe(cep_data.head())
+            if content:
+                df = process_content(content, fonte == 'Arquivo ZIP')
+                
+                if df is not None:
+                    st.session_state.df = df
+                    st.success("Dados carregados com sucesso!")
+                    st.dataframe(df.head())
 
-# Se os dados foram carregados
-if 'cep_data' in st.session_state:
-    st.sidebar.header("Filtros")
-    
-    # Filtrar por UF
-    ufs = sorted(st.session_state.cep_data['UF'].unique())
-    selected_uf = st.sidebar.selectbox("Selecione uma UF", ['Todas'] + ufs)
-    
-    if selected_uf != 'Todas':
-        filtered_data = st.session_state.cep_data[st.session_state.cep_data['UF'] == selected_uf]
+    # Seção de filtros e exportação
+    if 'df' in st.session_state:
+        st.divider()
+        st.subheader("🔍 Filtrar Dados")
         
-        # Filtrar por cidade
-        cidades = sorted(filtered_data['Localidade'].unique())
-        selected_cidade = st.sidebar.selectbox("Selecione uma cidade", ['Todas'] + cidades)
+        col1, col2 = st.columns(2)
         
-        if selected_cidade != 'Todas':
-            filtered_data = filtered_data[filtered_data['Localidade'] == selected_cidade]
-    else:
-        filtered_data = st.session_state.cep_data
-    
-    # Mostrar dados filtrados
-    st.subheader("Dados Filtrados")
-    st.dataframe(filtered_data)
-    
-    # Opção para download
-    st.subheader("Download dos Dados")
-    output_format = st.radio("Formato de saída:", ['CSV', 'Excel', 'TXT'])
-    
-    if st.button("Gerar Arquivo para Download"):
-        if output_format == 'CSV':
-            csv = filtered_data.to_csv(index=False, sep=';').encode('utf-8')
-            st.download_button(
-                label="Baixar CSV",
-                data=csv,
-                file_name='faixas_cep.csv',
-                mime='text/csv'
+        with col1:
+            uf = st.selectbox(
+                "Selecione a UF:",
+                ['TODAS'] + sorted(st.session_state.df['UF'].unique().tolist())
             )
-        elif output_format == 'Excel':
+        
+        with col2:
+            if uf != 'TODAS':
+                cidades = sorted(st.session_state.df[st.session_state.df['UF'] == uf]['Localidade'].unique())
+                cidade = st.selectbox("Selecione a cidade:", ['TODAS'] + cidades)
+            else:
+                cidade = 'TODAS'
+        
+        # Aplicar filtros
+        filtered_df = st.session_state.df.copy()
+        if uf != 'TODAS':
+            filtered_df = filtered_df[filtered_df['UF'] == uf]
+        if cidade != 'TODAS':
+            filtered_df = filtered_df[filtered_df['Localidade'] == cidade]
+        
+        st.dataframe(filtered_df)
+        
+        # Exportação
+        st.divider()
+        st.subheader("📤 Exportar Dados")
+        
+        export_format = st.radio(
+            "Formato de exportação:",
+            ['CSV', 'Excel', 'JSON'],
+            horizontal=True
+        )
+        
+        export_name = f"faixas_cep_{uf if uf != 'TODAS' else 'BR'}{f'_{cidade}' if cidade != 'TODAS' else ''}"
+        
+        if export_format == 'CSV':
+            csv = filtered_df.to_csv(index=False, sep=';').encode('utf-8')
+            st.download_button(
+                "⬇️ Baixar CSV",
+                csv,
+                f"{export_name}.csv",
+                "text/csv"
+            )
+        elif export_format == 'Excel':
             excel = BytesIO()
-            filtered_data.to_excel(excel, index=False, engine='openpyxl')
-            excel.seek(0)
+            filtered_df.to_excel(excel, index=False, engine='openpyxl')
             st.download_button(
-                label="Baixar Excel",
-                data=excel,
-                file_name='faixas_cep.xlsx',
-                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                "⬇️ Baixar Excel",
+                excel.getvalue(),
+                f"{export_name}.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-        else:  # TXT
-            txt = filtered_data.to_csv(index=False, sep=';').encode('utf-8')
+        else:
+            json = filtered_df.to_json(orient='records', force_ascii=False)
             st.download_button(
-                label="Baixar TXT",
-                data=txt,
-                file_name='faixas_cep.txt',
-                mime='text/plain'
+                "⬇️ Baixar JSON",
+                json,
+                f"{export_name}.json",
+                "application/json"
             )
 
-# Instruções de instalação
-
+if __name__ == "__main__":
+    main()
