@@ -262,9 +262,9 @@ def task_manager_page():
     </div>
     
     <script>
-    function logout() {
+    function logout() {{
         window.location.href = "?logout=true";
-    }
+    }}
     </script>
     """, unsafe_allow_html=True)
     
