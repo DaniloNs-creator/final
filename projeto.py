@@ -9,7 +9,6 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
-from selenium.webdriver.chrome.service import Service
 
 # Configuração do Streamlit
 st.set_page_config(page_title="Scraper de Faixas de CEP", page_icon="📮", layout="wide")
@@ -24,22 +23,20 @@ Este aplicativo coleta todas as faixas de CEP de todas as cidades de todas as UF
 @st.cache_resource
 def get_driver():
     chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920x1080")
     
-    # Configurações específicas para o Streamlit Cloud
-    if os.environ.get('IS_STREAMLIT_CLOUD'):
-        chrome_options.binary_location = "/usr/bin/google-chrome"
-        service = Service(executable_path="/usr/bin/chromedriver")
-    else:
-        from webdriver_manager.chrome import ChromeDriverManager
-        service = Service(ChromeDriverManager().install())
+    # Configuração especial para o Streamlit Cloud
+    chrome_options.binary_location = "/usr/bin/google-chrome"
     
     try:
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver = webdriver.Chrome(
+            options=chrome_options,
+            service_args=["--verbose", "--log-path=/tmp/chromedriver.log"]
+        )
         return driver
     except WebDriverException as e:
         st.error(f"Erro ao iniciar o WebDriver: {str(e)}")
@@ -152,6 +149,4 @@ def main():
             st.info("Navegador encerrado.")
 
 if __name__ == "__main__":
-    # Verifica se está rodando no Streamlit Cloud
-    os.environ['IS_STREAMLIT_CLOUD'] = 'true' if 'HOSTNAME' in os.environ and 'streamlit' in os.environ['HOSTNAME'] else 'false'
     main()
