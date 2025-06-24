@@ -18,45 +18,54 @@ st.markdown("""
 Este aplicativo coleta faixas de CEP de todas as cidades das UFs selecionadas.
 """)
 
-# Configuração simplificada do Selenium
+# Configuração otimizada para o Streamlit Cloud
 @st.cache_resource
 def get_driver():
     chrome_options = Options()
-    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920x1080")
     
-    # Configuração para Streamlit Cloud
-    if 'HOSTNAME' in os.environ and 'streamlit' in os.environ['HOSTNAME']:
+    # Configurações específicas para o Streamlit Cloud
+    if os.environ.get('IS_STREAMLIT_CLOUD'):
         chrome_options.binary_location = "/usr/bin/google-chrome"
+        driver = webdriver.Chrome(
+            executable_path="/usr/bin/chromedriver",
+            options=chrome_options
+        )
+    else:
+        # Configuração para ambiente local
+        from webdriver_manager.chrome import ChromeDriverManager
+        from selenium.webdriver.chrome.service import Service
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
     
-    try:
-        driver = webdriver.Chrome(options=chrome_options)
-        return driver
-    except Exception as e:
-        st.error(f"Erro ao iniciar o navegador: {str(e)}")
-        st.stop()
+    return driver
 
 def scrape_uf(uf, driver):
     try:
         driver.get("https://buscacepinter.correios.com.br/app/faixa_cep_uf_localidade/index.php")
         
-        WebDriverWait(driver, 10).until(
+        # Seleciona a UF
+        WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.NAME, "uf"))
         )
         Select(driver.find_element(By.NAME, "uf")).select_by_value(uf)
         
+        # Clica no botão buscar
         driver.find_element(By.XPATH, "//button[contains(text(), 'Buscar')]").click()
         
-        WebDriverWait(driver, 10).until(
+        # Aguarda a tabela carregar
+        WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "table.tabela"))
         )
         
+        # Processa os dados da tabela
         data = []
         table = driver.find_element(By.CSS_SELECTOR, "table.tabela")
-        for row in table.find_elements(By.TAG_NAME, "tr")[1:]:
+        for row in table.find_elements(By.TAG_NAME, "tr")[1:]:  # Pula o cabeçalho
             cols = row.find_elements(By.TAG_NAME, "td")
             if len(cols) >= 3:
                 data.append({
@@ -68,44 +77,65 @@ def scrape_uf(uf, driver):
         
         return pd.DataFrame(data)
     except Exception as e:
-        st.warning(f"Erro na UF {uf}: {str(e)}")
+        st.warning(f"Erro ao processar UF {uf}: {str(e)}")
         return None
 
 def main():
+    # Lista completa de UFs
     ufs = ["AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", 
            "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR", 
            "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"]
     
+    # Interface do usuário
     selected_ufs = st.sidebar.multiselect("Selecione as UFs", ufs, default=["SP", "RJ"])
     
     if st.sidebar.button("Coletar Dados") and selected_ufs:
-        with st.spinner("Coletando dados..."):
-            driver = get_driver()
+        with st.spinner("Iniciando o navegador..."):
             try:
-                all_data = []
-                for i, uf in enumerate(selected_ufs):
-                    st.write(f"Processando {uf} ({i+1}/{len(selected_ufs)})")
-                    df = scrape_uf(uf, driver)
-                    if df is not None:
-                        all_data.append(df)
-                    time.sleep(1)
+                driver = get_driver()
+            except Exception as e:
+                st.error(f"Falha ao iniciar o navegador: {str(e)}")
+                return
+        
+        try:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            all_data = []
+            
+            for i, uf in enumerate(selected_ufs):
+                status_text.text(f"Processando {uf} ({i+1}/{len(selected_ufs)})")
+                progress_bar.progress((i + 1) / len(selected_ufs))
                 
-                if all_data:
-                    final_df = pd.concat(all_data)
-                    st.success(f"Dados coletados! {len(final_df)} registros.")
-                    st.dataframe(final_df)
-                    
-                    csv = final_df.to_csv(index=False, sep=";")
-                    st.download_button(
-                        "Baixar CSV",
-                        csv,
-                        "faixas_cep.csv",
-                        "text/csv"
-                    )
-                else:
-                    st.error("Nenhum dado foi coletado.")
-            finally:
-                driver.quit()
+                df = scrape_uf(uf, driver)
+                if df is not None:
+                    all_data.append(df)
+                
+                time.sleep(2)  # Intervalo entre requisições
+            
+            if all_data:
+                final_df = pd.concat(all_data, ignore_index=True)
+                st.success(f"Coleta concluída! Total de registros: {len(final_df)}")
+                
+                # Mostra uma prévia dos dados
+                st.dataframe(final_df.head())
+                
+                # Botão de download
+                csv = final_df.to_csv(index=False, sep=";", encoding="utf-8-sig")
+                st.download_button(
+                    "⬇️ Baixar CSV completo",
+                    csv,
+                    "faixas_cep_correios.csv",
+                    "text/csv",
+                    key="download-csv"
+                )
+            else:
+                st.error("Nenhum dado válido foi coletado.")
+                
+        finally:
+            driver.quit()
+            st.info("Processo finalizado.")
 
 if __name__ == "__main__":
+    # Configura variável de ambiente para detectar se está no Streamlit Cloud
+    os.environ['IS_STREAMLIT_CLOUD'] = 'true' if 'HOSTNAME' in os.environ and 'streamlit' in os.environ['HOSTNAME'] else 'false'
     main()
