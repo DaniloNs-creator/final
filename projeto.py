@@ -167,7 +167,4 @@ if 'cep_data' in st.session_state:
             )
 
 # Instruções de instalação
-st.markdown("""
-### Caso encontre erros:
 
-1. Instale a biblioteca magic-file:
