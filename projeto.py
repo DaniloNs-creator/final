@@ -29,8 +29,7 @@ def get_driver():
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920x1080")
     
-    # Para usar localmente, você precisará ter o chromedriver instalado e no PATH
-    # Para deploy no Streamlit Sharing, usamos o chromedriver auto-instalado
+    # Configuração para funcionar tanto localmente quanto no Streamlit Sharing
     driver = webdriver.Chrome(options=chrome_options)
     return driver
 
@@ -39,36 +38,25 @@ def scrape_uf(uf, driver):
     url = "https://buscacepinter.correios.com.br/app/faixa_cep_uf_localidade/index.php"
     driver.get(url)
     
-    # Seleciona a UF
     try:
-        select_uf = Select(WebDriverWait(driver, 10).until(
+        # Seleciona a UF
+        select_uf = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.NAME, "uf"))
-        ))
+        )
+        select_uf = Select(select_uf)
         select_uf.select_by_value(uf)
-    except (NoSuchElementException, TimeoutException):
-        st.error(f"Não foi possível selecionar a UF {uf}")
-        return None
-    
-    # Clica no botão de buscar
-    try:
+        
+        # Clica no botão de buscar
         buscar_button = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Buscar')]"))
         )
         buscar_button.click()
-    except (NoSuchElementException, TimeoutException):
-        st.error(f"Não foi possível clicar no botão Buscar para a UF {uf}")
-        return None
-    
-    # Aguarda a tabela carregar
-    try:
+        
+        # Aguarda a tabela carregar
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "table.tabela"))
-    except TimeoutException:
-        st.warning(f"Nenhum dado encontrado para a UF {uf}")
-        return None
-    
-    # Processa a tabela de resultados
-    try:
+        
+        # Processa a tabela de resultados
         table = driver.find_element(By.CSS_SELECTOR, "table.tabela")
         rows = table.find_elements(By.TAG_NAME, "tr")
         
@@ -87,8 +75,15 @@ def scrape_uf(uf, driver):
                 })
         
         return pd.DataFrame(data)
+        
+    except NoSuchElementException as e:
+        st.error(f"Elemento não encontrado para UF {uf}: {str(e)}")
+        return None
+    except TimeoutException:
+        st.warning(f"Tempo de espera excedido para UF {uf}. A página pode não ter carregado corretamente.")
+        return None
     except Exception as e:
-        st.error(f"Erro ao processar tabela para UF {uf}: {str(e)}")
+        st.error(f"Erro inesperado ao processar UF {uf}: {str(e)}")
         return None
 
 def main():
@@ -108,43 +103,44 @@ def main():
             st.warning("Por favor, selecione pelo menos uma UF.")
             return
         
-        driver = get_driver()
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        all_data = []
-        total_ufs = len(selected_ufs)
-        
-        for i, uf in enumerate(selected_ufs):
-            status_text.text(f"Processando UF: {uf} ({i+1}/{total_ufs})")
-            progress_bar.progress((i + 1) / total_ufs)
+        with st.spinner("Coletando dados. Por favor, aguarde..."):
+            driver = get_driver()
+            progress_bar = st.progress(0)
+            status_text = st.empty()
             
-            df_uf = scrape_uf(uf, driver)
-            if df_uf is not None and not df_uf.empty:
-                all_data.append(df_uf)
+            all_data = []
+            total_ufs = len(selected_ufs)
             
-            # Pequena pausa para evitar sobrecarregar o servidor
-            time.sleep(2)
-        
-        driver.quit()
-        
-        if all_data:
-            final_df = pd.concat(all_data, ignore_index=True)
-            st.success("Coleta concluída com sucesso!")
+            for i, uf in enumerate(selected_ufs):
+                status_text.text(f"Processando UF: {uf} ({i+1}/{total_ufs})")
+                progress_bar.progress((i + 1) / total_ufs)
+                
+                df_uf = scrape_uf(uf, driver)
+                if df_uf is not None and not df_uf.empty:
+                    all_data.append(df_uf)
+                
+                # Pequena pausa para evitar sobrecarregar o servidor
+                time.sleep(2)
             
-            # Mostra os dados
-            st.dataframe(final_df)
+            driver.quit()
             
-            # Cria um botão para download
-            csv = final_df.to_csv(index=False, encoding="utf-8-sig")
-            st.download_button(
-                label="Baixar dados como CSV",
-                data=csv,
-                file_name="faixas_cep_correios.csv",
-                mime="text/csv"
-            )
-        else:
-            st.error("Nenhum dado foi coletado. Verifique os logs para mais informações.")
+            if all_data:
+                final_df = pd.concat(all_data, ignore_index=True)
+                st.success(f"Coleta concluída! Total de registros: {len(final_df)}")
+                
+                # Mostra os dados
+                st.dataframe(final_df)
+                
+                # Cria um botão para download
+                csv = final_df.to_csv(index=False, encoding="utf-8-sig", sep=";")
+                st.download_button(
+                    label="📥 Baixar dados como CSV",
+                    data=csv,
+                    file_name="faixas_cep_correios.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.error("Nenhum dado foi coletado. Verifique os logs para mais informações.")
     
     st.sidebar.markdown("""
     ### Como usar:
@@ -152,6 +148,8 @@ def main():
     2. Clique em "Coletar Dados"
     3. Aguarde o processamento
     4. Baixe os dados em CSV
+    
+    **Observação:** A coleta pode demorar vários minutos para todas as UFs.
     """)
 
 if __name__ == "__main__":
