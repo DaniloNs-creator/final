@@ -6,3 +6,5 @@ requests==2.31.0
 python-magic==0.4.27
 python-magic-bin==0.4.14; sys_platform == 'win32'
 openpyxl==3.1.2
+selenium==4.15.2
+webdriver-manager==4.0.1
