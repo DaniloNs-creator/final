@@ -387,16 +387,19 @@ def auth_page():
 
 # Página principal do aplicativo
 def main_app():
-    st.markdown("""
+    # Verificar se username está definido no session_state
+    username = ss.get('username', 'Usuário')
+    
+    st.markdown(f"""
     <div class="header">
         <div class="logo">TaskMaster Pro</div>
         <div class="user-info">
-            <div class="avatar pulse">{(ss.username[0].upper())}</div>
-            <span>{ss.username}</span>
+            <div class="avatar pulse">{username[0].upper() if username else 'U'}</div>
+            <span>{username}</span>
             <button class="btn btn-danger" onclick="window.streamlitApi.runMethod('logout')">Sair</button>
         </div>
     </div>
-    """.format(ss.username), unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
     
     # Mostrar estatísticas
     stats = get_task_stats(ss.user_id)
@@ -558,6 +561,7 @@ def main():
     if 'logout' in query_params:
         if 'user_id' in ss:
             del ss.user_id
+        if 'username' in ss:
             del ss.username
         st.query_params.clear()
         st.rerun()
