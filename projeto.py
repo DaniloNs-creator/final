@@ -1,11 +1,10 @@
 import streamlit as st
-from streamlit import session_state as ss
 import sqlite3
-from datetime import datetime
 import hashlib
-import time
+from datetime import datetime
 import pandas as pd
 import plotly.express as px
+from streamlit.components.v1 import html
 
 # Configuração inicial do banco de dados
 def init_db():
@@ -13,22 +12,29 @@ def init_db():
     c = conn.cursor()
     
     # Tabela de usuários
-    c.execute('''CREATE TABLE IF NOT EXISTS users 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  username TEXT UNIQUE,
-                  password TEXT)''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     
     # Tabela de tarefas
-    c.execute('''CREATE TABLE IF NOT EXISTS tasks 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  user_id INTEGER,
-                  title TEXT,
-                  description TEXT,
-                  due_date TEXT,
-                  due_time TEXT,
-                  completed INTEGER DEFAULT 0,
-                  created_at TEXT,
-                  FOREIGN KEY(user_id) REFERENCES users(id))''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            due_date TIMESTAMP,
+            priority INTEGER DEFAULT 2,
+            status INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
     
     conn.commit()
     conn.close()
@@ -41,7 +47,7 @@ def create_user(username, password):
     c = conn.cursor()
     hashed_password = hashlib.sha256(password.encode()).hexdigest()
     try:
-        c.execute("INSERT INTO users (username, password) VALUES (?, ?)", 
+        c.execute('INSERT INTO users (username, password) VALUES (?, ?)', 
                  (username, hashed_password))
         conn.commit()
         return True
@@ -54,301 +60,249 @@ def verify_user(username, password):
     conn = sqlite3.connect('task_manager.db')
     c = conn.cursor()
     hashed_password = hashlib.sha256(password.encode()).hexdigest()
-    c.execute("SELECT id FROM users WHERE username = ? AND password = ?", 
+    c.execute('SELECT id FROM users WHERE username = ? AND password = ?', 
              (username, hashed_password))
     result = c.fetchone()
     conn.close()
     return result[0] if result else None
 
-# Funções de tarefas
-def add_task(user_id, title, description, due_date, due_time):
+# Funções de gerenciamento de tarefas
+def add_task(user_id, title, description, due_date, priority):
     conn = sqlite3.connect('task_manager.db')
     c = conn.cursor()
-    created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    c.execute("""INSERT INTO tasks 
-                 (user_id, title, description, due_date, due_time, created_at) 
-                 VALUES (?, ?, ?, ?, ?, ?)""",
-             (user_id, title, description, due_date, due_time, created_at))
+    c.execute('''
+        INSERT INTO tasks (user_id, title, description, due_date, priority)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (user_id, title, description, due_date, priority))
     conn.commit()
     conn.close()
 
-def get_tasks(user_id, filter_type="all"):
+def get_tasks(user_id, status=None):
     conn = sqlite3.connect('task_manager.db')
     c = conn.cursor()
     
-    if filter_type == "completed":
-        c.execute("SELECT * FROM tasks WHERE user_id = ? AND completed = 1 ORDER BY due_date, due_time", (user_id,))
-    elif filter_type == "pending":
-        c.execute("SELECT * FROM tasks WHERE user_id = ? AND completed = 0 ORDER BY due_date, due_time", (user_id,))
+    if status is not None:
+        c.execute('''
+            SELECT id, title, description, due_date, priority, status 
+            FROM tasks 
+            WHERE user_id = ? AND status = ?
+            ORDER BY due_date, priority
+        ''', (user_id, status))
     else:
-        c.execute("SELECT * FROM tasks WHERE user_id = ? ORDER BY due_date, due_time", (user_id,))
+        c.execute('''
+            SELECT id, title, description, due_date, priority, status 
+            FROM tasks 
+            WHERE user_id = ? 
+            ORDER BY due_date, priority
+        ''', (user_id,))
     
     tasks = c.fetchall()
     conn.close()
     return tasks
 
-def update_task_status(task_id, completed):
+def update_task_status(task_id, status):
     conn = sqlite3.connect('task_manager.db')
     c = conn.cursor()
-    c.execute("UPDATE tasks SET completed = ? WHERE id = ?", (completed, task_id))
+    c.execute('UPDATE tasks SET status = ? WHERE id = ?', (status, task_id))
     conn.commit()
     conn.close()
 
 def delete_task(task_id):
     conn = sqlite3.connect('task_manager.db')
     c = conn.cursor()
-    c.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+    c.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
     conn.commit()
     conn.close()
 
+# Funções para análise de progresso
 def get_task_stats(user_id):
     conn = sqlite3.connect('task_manager.db')
     c = conn.cursor()
     
-    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ?", (user_id,))
+    # Total de tarefas
+    c.execute('SELECT COUNT(*) FROM tasks WHERE user_id = ?', (user_id,))
     total = c.fetchone()[0]
     
-    c.execute("SELECT COUNT(*) FROM tasks WHERE user_id = ? AND completed = 1", (user_id,))
+    # Tarefas completas
+    c.execute('SELECT COUNT(*) FROM tasks WHERE user_id = ? AND status = 1', (user_id,))
     completed = c.fetchone()[0]
     
-    c.execute("""SELECT COUNT(*) FROM tasks 
-                 WHERE user_id = ? AND completed = 0 
-                 AND date(due_date) < date('now')""", (user_id,))
-    overdue = c.fetchone()[0]
+    # Tarefas por prioridade
+    c.execute('''
+        SELECT priority, COUNT(*) 
+        FROM tasks 
+        WHERE user_id = ? AND status = 0
+        GROUP BY priority
+        ORDER BY priority
+    ''', (user_id,))
+    priority_counts = c.fetchall()
     
     conn.close()
     
     return {
         'total': total,
         'completed': completed,
-        'pending': total - completed,
-        'overdue': overdue
+        'priority_counts': priority_counts
     }
 
-# Estilização CSS
+# CSS personalizado e animações
 def load_css():
     st.markdown("""
-    <style>
-        :root {
-            --primary: #4a6fa5;
-            --secondary: #166088;
-            --accent: #4fc3f7;
-            --background: #f5f7fa;
-            --text: #333333;
-            --card: #ffffff;
-            --success: #4caf50;
-            --warning: #ff9800;
-            --danger: #f44336;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--background);
-            color: var(--text);
-        }
-        
-        .stApp {
-            background-color: var(--background);
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
-        
-        .auth-container {
-            max-width: 500px;
-            margin: 5rem auto;
-            padding: 2rem;
-            background-color: var(--card);
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            animation: fadeIn 0.5s ease-in-out;
-        }
-        
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .task-card {
-            background-color: var(--card);
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1rem;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-            transition: all 0.3s ease;
-            border-left: 4px solid var(--primary);
-        }
-        
-        .task-card:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
-        }
-        
-        .task-card.completed {
-            border-left-color: var(--success);
-            opacity: 0.8;
-        }
-        
-        .task-card.overdue {
-            border-left-color: var(--danger);
-        }
-        
-        .task-title {
-            font-size: 1.2rem;
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-            color: var(--secondary);
-        }
-        
-        .task-due {
-            font-size: 0.9rem;
-            color: #666;
-            margin-bottom: 0.5rem;
-        }
-        
-        .task-actions {
-            display: flex;
-            gap: 0.5rem;
-            margin-top: 1rem;
-        }
-        
-        .stats-card {
-            background-color: var(--card);
-            border-radius: 8px;
-            padding: 1rem;
-            margin-bottom: 1rem;
-            text-align: center;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-        }
-        
-        .stats-value {
-            font-size: 2rem;
-            font-weight: bold;
-            color: var(--primary);
-        }
-        
-        .stats-label {
-            font-size: 0.9rem;
-            color: #666;
-        }
-        
-        .btn {
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            border: none;
-            cursor: pointer;
-            font-weight: 500;
-            transition: all 0.2s;
-        }
-        
-        .btn-primary {
-            background-color: var(--primary);
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            background-color: var(--secondary);
-        }
-        
-        .btn-success {
-            background-color: var(--success);
-            color: white;
-        }
-        
-        .btn-danger {
-            background-color: var(--danger);
-            color: white;
-        }
-        
-        .btn-warning {
-            background-color: var(--warning);
-            color: white;
-        }
-        
-        .form-group {
-            margin-bottom: 1.5rem;
-        }
-        
-        .form-control {
-            width: 100%;
-            padding: 0.5rem;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 1rem;
-        }
-        
-        .filter-buttons {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1.5rem;
-        }
-        
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2rem;
-        }
-        
-        .logo {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: var(--primary);
-        }
-        
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        
-        .avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background-color: var(--accent);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-        }
-        
-        .pulse {
-            animation: pulse 2s infinite;
-        }
-        
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.05); }
-            100% { transform: scale(1); }
-        }
-        
-        .progress-bar {
-            height: 10px;
-            background-color: #e0e0e0;
-            border-radius: 5px;
-            margin: 1rem 0;
-            overflow: hidden;
-        }
-        
-        .progress {
-            height: 100%;
-            background-color: var(--success);
-            transition: width 0.5s ease;
-        }
-    </style>
+        <style>
+            :root {
+                --primary: #4a6fa5;
+                --secondary: #166088;
+                --accent: #4fc3f7;
+                --background: #f5f7fa;
+                --text: #333333;
+                --success: #4caf50;
+                --warning: #ff9800;
+                --danger: #f44336;
+            }
+            
+            /* Estilos gerais */
+            .stApp {
+                background-color: var(--background);
+                color: var(--text);
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            }
+            
+            /* Header */
+            .header {
+                background: linear-gradient(135deg, var(--primary), var(--secondary));
+                color: white;
+                padding: 1rem;
+                border-radius: 0 0 10px 10px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                margin-bottom: 2rem;
+                animation: fadeIn 0.5s ease-in-out;
+            }
+            
+            @keyframes fadeIn {
+                from { opacity: 0; transform: translateY(-20px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            
+            /* Cards de tarefa */
+            .task-card {
+                background: white;
+                border-radius: 8px;
+                padding: 1rem;
+                margin-bottom: 1rem;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+                transition: all 0.3s ease;
+                border-left: 4px solid var(--primary);
+            }
+            
+            .task-card:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+            }
+            
+            .task-card.high-priority {
+                border-left-color: var(--danger);
+            }
+            
+            .task-card.medium-priority {
+                border-left-color: var(--warning);
+            }
+            
+            .task-card.low-priority {
+                border-left-color: var(--success);
+            }
+            
+            /* Botões */
+            .stButton>button {
+                border-radius: 20px;
+                border: none;
+                padding: 0.5rem 1rem;
+                font-weight: 500;
+                transition: all 0.3s ease;
+            }
+            
+            .stButton>button:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            }
+            
+            .primary-button {
+                background-color: var(--primary) !important;
+                color: white !important;
+            }
+            
+            .secondary-button {
+                background-color: var(--secondary) !important;
+                color: white !important;
+            }
+            
+            /* Formulários */
+            .stTextInput>div>div>input, 
+            .stTextArea>div>div>textarea,
+            .stDateInput>div>div>input,
+            .stTimeInput>div>div>input,
+            .stSelectbox>div>div>select {
+                border-radius: 8px !important;
+                border: 1px solid #ddd !important;
+                padding: 0.5rem 1rem !important;
+            }
+            
+            /* Progresso */
+            .progress-container {
+                background: white;
+                border-radius: 8px;
+                padding: 1rem;
+                margin-bottom: 1rem;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            }
+            
+            /* Animações */
+            @keyframes pulse {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.05); }
+                100% { transform: scale(1); }
+            }
+            
+            .pulse {
+                animation: pulse 2s infinite;
+            }
+            
+            /* Login container */
+            .login-container {
+                max-width: 400px;
+                margin: 0 auto;
+                background: white;
+                padding: 2rem;
+                border-radius: 10px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                animation: slideUp 0.5s ease-out;
+            }
+            
+            @keyframes slideUp {
+                from { opacity: 0; transform: translateY(20px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            
+            /* Responsividade */
+            @media (max-width: 768px) {
+                .login-container {
+                    padding: 1rem;
+                }
+            }
+        </style>
     """, unsafe_allow_html=True)
 
-# Página de autenticação
-def auth_page():
-    st.markdown("<div class='auth-container'>", unsafe_allow_html=True)
+# Página de login/cadastro
+def login_page():
+    load_css()
+    
+    st.markdown("""
+        <div class="login-container">
+            <h2 style="text-align: center; color: var(--primary); margin-bottom: 1.5rem;">Organizador de Tarefas</h2>
+    """, unsafe_allow_html=True)
     
     tab1, tab2 = st.tabs(["Login", "Cadastro"])
     
     with tab1:
-        st.markdown("<h2 style='text-align: center; margin-bottom: 2rem;'>Login</h2>", unsafe_allow_html=True)
-        
         with st.form("login_form"):
             username = st.text_input("Nome de usuário")
             password = st.text_input("Senha", type="password")
@@ -357,22 +311,20 @@ def auth_page():
             if submit:
                 user_id = verify_user(username, password)
                 if user_id:
-                    ss.user_id = user_id
-                    ss.username = username
+                    st.session_state['user_id'] = user_id
+                    st.session_state['username'] = username
                     st.rerun()
                 else:
-                    st.error("Credenciais inválidas. Tente novamente.")
+                    st.error("Credenciais inválidas. Por favor, tente novamente.")
     
     with tab2:
-        st.markdown("<h2 style='text-align: center; margin-bottom: 2rem;'>Cadastro</h2>", unsafe_allow_html=True)
-        
         with st.form("register_form"):
             new_username = st.text_input("Escolha um nome de usuário")
-            new_password = st.text_input("Escolha uma senha", type="password")
+            new_password = st.text_input("Crie uma senha", type="password")
             confirm_password = st.text_input("Confirme a senha", type="password")
-            submit = st.form_submit_button("Cadastrar", type="primary")
+            register = st.form_submit_button("Cadastrar", type="primary")
             
-            if submit:
+            if register:
                 if new_password != confirm_password:
                     st.error("As senhas não coincidem.")
                 elif len(new_password) < 6:
@@ -381,120 +333,127 @@ def auth_page():
                     if create_user(new_username, new_password):
                         st.success("Cadastro realizado com sucesso! Faça login para continuar.")
                     else:
-                        st.error("Nome de usuário já existe. Escolha outro.")
+                        st.error("Nome de usuário já em uso. Por favor, escolha outro.")
     
     st.markdown("</div>", unsafe_allow_html=True)
 
 # Página principal do aplicativo
 def main_app():
-    # Verificar se username está definido no session_state
-    username = ss.get('username', 'Usuário')
+    load_css()
     
+    # Header
     st.markdown(f"""
-    <div class="header">
-        <div class="logo">TaskMaster Pro</div>
-        <div class="user-info">
-            <div class="avatar pulse">{username[0].upper() if username else 'U'}</div>
-            <span>{username}</span>
-            <button class="btn btn-danger" onclick="window.streamlitApi.runMethod('logout')">Sair</button>
+        <div class="header">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h1 style="margin: 0;">Organizador de Tarefas</h1>
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <span style="font-weight: 500;">Olá, {st.session_state['username']}</span>
+                    <button onclick="logout()" style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 0.5rem 1rem; border-radius: 20px; cursor: pointer; transition: all 0.3s;">Sair</button>
+                </div>
+            </div>
         </div>
-    </div>
+        
+        <script>
+            function logout() {
+                window.location.href = window.location.href.split('?')[0] + '?logout=true';
+            }
+        </script>
     """, unsafe_allow_html=True)
     
-    # Mostrar estatísticas
-    stats = get_task_stats(ss.user_id)
-    if stats['total'] > 0:
-        completion_rate = (stats['completed'] / stats['total']) * 100
-    else:
-        completion_rate = 0
+    # Verificar se o usuário clicou em sair
+    query_params = st.query_params
+    if 'logout' in query_params and query_params['logout'] == 'true':
+        del st.session_state['user_id']
+        del st.session_state['username']
+        st.rerun()
     
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown(f"""
-        <div class="stats-card">
-            <div class="stats-value">{stats['total']}</div>
-            <div class="stats-label">Total de Tarefas</div>
-        </div>
-        """, unsafe_allow_html=True)
+    # Abas principais
+    tab1, tab2, tab3 = st.tabs(["Minhas Tarefas", "Adicionar Tarefa", "Progresso"])
     
-    with col2:
-        st.markdown(f"""
-        <div class="stats-card">
-            <div class="stats-value" style="color: var(--success);">{stats['completed']}</div>
-            <div class="stats-label">Concluídas</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown(f"""
-        <div class="stats-card">
-            <div class="stats-value" style="color: var(--warning);">{stats['pending']}</div>
-            <div class="stats-label">Pendentes</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown(f"""
-        <div class="stats-card">
-            <div class="stats-value" style="color: var(--danger);">{stats['overdue']}</div>
-            <div class="stats-label">Atrasadas</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown(f"""
-    <div style="margin: 1.5rem 0;">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-            <span>Progresso geral</span>
-            <span>{round(completion_rate, 1)}%</span>
-        </div>
-        <div class="progress-bar">
-            <div class="progress" style="width: {completion_rate}%;"></div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Visualização de dados
-    tasks_data = get_tasks(ss.user_id)
-    if tasks_data:
-        df = pd.DataFrame(tasks_data, columns=['id', 'user_id', 'title', 'description', 'due_date', 'due_time', 'completed', 'created_at'])
-        df['due_datetime'] = pd.to_datetime(df['due_date'] + ' ' + df['due_time'])
-        df['created_at'] = pd.to_datetime(df['created_at'])
+    with tab1:
+        st.subheader("Minhas Tarefas")
         
-        fig = px.pie(df, names=df['completed'].map({0: 'Pendente', 1: 'Concluída'}), 
-                     title="Distribuição de Tarefas",
-                     hole=0.4)
-        fig.update_traces(textposition='inside', textinfo='percent+label')
-        st.plotly_chart(fig, use_container_width=True)
+        # Filtros
+        col1, col2 = st.columns(2)
+        with col1:
+            filter_status = st.selectbox("Filtrar por status", ["Todas", "Pendentes", "Concluídas"])
         
-        # Gráfico de tarefas ao longo do tempo
-        df['day'] = df['created_at'].dt.date
-        timeline_df = df.groupby(['day', 'completed']).size().unstack().fillna(0)
-        timeline_df.columns = ['Pendentes', 'Concluídas']
+        # Lista de tarefas
+        if filter_status == "Todas":
+            tasks = get_tasks(st.session_state['user_id'])
+        elif filter_status == "Pendentes":
+            tasks = get_tasks(st.session_state['user_id'], 0)
+        else:
+            tasks = get_tasks(st.session_state['user_id'], 1)
         
-        fig2 = px.bar(timeline_df, x=timeline_df.index, y=['Pendentes', 'Concluídas'],
-                      title="Tarefas Criadas ao Longo do Tempo",
-                      labels={'value': 'Número de Tarefas', 'day': 'Data'})
-        st.plotly_chart(fig2, use_container_width=True)
+        if not tasks:
+            st.info("Nenhuma tarefa encontrada.")
+        else:
+            for task in tasks:
+                task_id, title, description, due_date, priority, status = task
+                
+                priority_class = ""
+                if priority == 1:
+                    priority_class = "high-priority"
+                elif priority == 2:
+                    priority_class = "medium-priority"
+                elif priority == 3:
+                    priority_class = "low-priority"
+                
+                due_date_str = datetime.strptime(due_date, "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y %H:%M") if due_date else "Sem data definida"
+                
+                st.markdown(f"""
+                    <div class="task-card {priority_class}">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <h3 style="margin: 0;">{title}</h3>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <button onclick="completeTask({task_id})" style="background: var(--success); color: white; border: none; border-radius: 20px; padding: 0.25rem 0.75rem; cursor: pointer; font-size: 0.8rem;">{'✔️ Concluída' if status else '✓ Concluir'}</button>
+                                <button onclick="deleteTask({task_id})" style="background: var(--danger); color: white; border: none; border-radius: 20px; padding: 0.25rem 0.75rem; cursor: pointer; font-size: 0.8rem;">🗑️ Excluir</button>
+                            </div>
+                        </div>
+                        <p style="margin: 0.5rem 0; color: #555;">{description or 'Sem descrição'}</p>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <small style="color: #777;">{due_date_str}</small>
+                            <small style="color: #777;">{'Alta prioridade' if priority == 1 else 'Média prioridade' if priority == 2 else 'Baixa prioridade'}</small>
+                        </div>
+                    </div>
+                    
+                    <script>
+                        function completeTask(taskId) {
+                            window.location.href = window.location.href.split('?')[0] + '?complete_task=' + taskId;
+                        }
+                        
+                        function deleteTask(taskId) {
+                            if (confirm('Tem certeza que deseja excluir esta tarefa?')) {
+                                window.location.href = window.location.href.split('?')[0] + '?delete_task=' + taskId;
+                            }
+                        }
+                    </script>
+                """, unsafe_allow_html=True)
+        
+        # Verificar ações nas tarefas
+        if 'complete_task' in query_params:
+            task_id = int(query_params['complete_task'])
+            update_task_status(task_id, 1)
+            st.rerun()
+        
+        if 'delete_task' in query_params:
+            task_id = int(query_params['delete_task'])
+            delete_task(task_id)
+            st.rerun()
     
-    # Filtros
-    st.markdown("""
-    <div class="filter-buttons">
-        <button class="btn" onclick="window.streamlitApi.runMethod('set_filter', {filter: 'all'})">Todas</button>
-        <button class="btn" onclick="window.streamlitApi.runMethod('set_filter', {filter: 'pending'})">Pendentes</button>
-        <button class="btn" onclick="window.streamlitApi.runMethod('set_filter', {filter: 'completed'})">Concluídas</button>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Adicionar nova tarefa
-    with st.expander("➕ Adicionar Nova Tarefa", expanded=False):
-        with st.form("new_task_form"):
-            title = st.text_input("Título da Tarefa*", placeholder="O que precisa ser feito?")
-            description = st.text_area("Descrição", placeholder="Detalhes da tarefa...")
+    with tab2:
+        st.subheader("Adicionar Nova Tarefa")
+        
+        with st.form("add_task_form", clear_on_submit=True):
+            title = st.text_input("Título da Tarefa*", placeholder="Digite o título da tarefa")
+            description = st.text_area("Descrição", placeholder="Detalhes sobre a tarefa (opcional)")
             col1, col2 = st.columns(2)
             with col1:
-                due_date = st.date_input("Data de Vencimento*", min_value=datetime.today())
+                due_date = st.date_input("Data de Vencimento")
             with col2:
-                due_time = st.time_input("Hora de Vencimento*", value=datetime.strptime("23:59", "%H:%M"))
+                due_time = st.time_input("Hora de Vencimento")
+            priority = st.selectbox("Prioridade", ["Alta", "Média", "Baixa"], index=1)
             
             submitted = st.form_submit_button("Adicionar Tarefa", type="primary")
             
@@ -502,91 +461,79 @@ def main_app():
                 if not title:
                     st.error("O título da tarefa é obrigatório!")
                 else:
-                    add_task(ss.user_id, title, description, str(due_date), due_time.strftime("%H:%M"))
+                    due_datetime = datetime.combine(due_date, due_time) if due_date and due_time else None
+                    priority_map = {"Alta": 1, "Média": 2, "Baixa": 3}
+                    
+                    add_task(
+                        st.session_state['user_id'],
+                        title,
+                        description,
+                        due_datetime.strftime("%Y-%m-%d %H:%M:%S") if due_datetime else None,
+                        priority_map[priority]
+                    )
+                    
                     st.success("Tarefa adicionada com sucesso!")
-                    time.sleep(1)
-                    st.rerun()
+                    st.balloons()
     
-    # Lista de tarefas
-    filter_type = ss.get('filter', 'all')
-    tasks = get_tasks(ss.user_id, filter_type)
-    
-    if not tasks:
-        st.markdown("""
-        <div style="text-align: center; padding: 2rem; color: #666;">
-            <h3>Nenhuma tarefa encontrada</h3>
-            <p>Adicione uma nova tarefa para começar!</p>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        for task in tasks:
-            task_id, _, title, description, due_date, due_time, completed, created_at = task
-            due_datetime = datetime.strptime(f"{due_date} {due_time}", "%Y-%m-%d %H:%M")
-            is_overdue = not completed and due_datetime < datetime.now()
-            
-            card_class = "task-card"
-            if completed:
-                card_class += " completed"
-            elif is_overdue:
-                card_class += " overdue"
-            
+    with tab3:
+        st.subheader("Meu Progresso")
+        
+        stats = get_task_stats(st.session_state['user_id'])
+        
+        if stats['total'] == 0:
+            st.info("Você ainda não tem tarefas cadastradas.")
+        else:
+            # Progresso geral
+            progress = (stats['completed'] / stats['total']) * 100 if stats['total'] > 0 else 0
             st.markdown(f"""
-            <div class="{card_class}">
-                <div class="task-title">{title}</div>
-                <div class="task-due">
-                    <strong>Prazo:</strong> {due_date} às {due_time}
-                    {is_overdue and not completed and '<span style="color: var(--danger); margin-left: 0.5rem;">(Atrasada)</span>' or ''}
+                <div class="progress-container">
+                    <h3 style="margin-top: 0;">Progresso Geral</h3>
+                    <div style="background: #e0e0e0; border-radius: 20px; height: 20px; margin-bottom: 0.5rem;">
+                        <div style="background: linear-gradient(90deg, var(--primary), var(--accent)); width: {progress}%; height: 100%; border-radius: 20px; transition: width 1s ease;"></div>
+                    </div>
+                    <p style="text-align: center; font-weight: 500; margin: 0;">{stats['completed']} de {stats['total']} tarefas concluídas ({progress:.1f}%)</p>
                 </div>
-                <p>{description or 'Sem descrição'}</p>
-                <div class="task-actions">
-                    <button class="btn {'btn-warning' if completed else 'btn-success'}" 
-                            onclick="window.streamlitApi.runMethod('toggle_task', {{task_id: {task_id}, completed: {0 if completed else 1}}})">
-                        {'Marcar como Pendente' if completed else 'Concluir'}
-                    </button>
-                    <button class="btn btn-danger" 
-                            onclick="window.streamlitApi.runMethod('delete_task', {{task_id: {task_id}}})">
-                        Excluir
-                    </button>
-                </div>
-            </div>
             """, unsafe_allow_html=True)
+            
+            # Gráfico de prioridades
+            if stats['priority_counts']:
+                df_priority = pd.DataFrame(stats['priority_counts'], columns=['Prioridade', 'Quantidade'])
+                df_priority['Prioridade'] = df_priority['Prioridade'].map({1: 'Alta', 2: 'Média', 3: 'Baixa'})
+                
+                fig = px.pie(
+                    df_priority, 
+                    values='Quantidade', 
+                    names='Prioridade', 
+                    title='Tarefas Pendentes por Prioridade',
+                    color='Prioridade',
+                    color_discrete_map={'Alta': '#f44336', 'Média': '#ff9800', 'Baixa': '#4caf50'}
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Tarefas recentes
+            recent_tasks = get_tasks(st.session_state['user_id'])[:5]
+            if recent_tasks:
+                st.subheader("Tarefas Recentes")
+                for task in recent_tasks:
+                    task_id, title, _, due_date, priority, status = task
+                    due_date_str = datetime.strptime(due_date, "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y") if due_date else "Sem data"
+                    st.markdown(f"""
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: white; padding: 0.75rem; border-radius: 8px; margin-bottom: 0.5rem;">
+                            <span>{title}</span>
+                            <div style="display: flex; align-items: center; gap: 1rem;">
+                                <small>{due_date_str}</small>
+                                <span style="color: {'var(--success)' if status else 'var(--danger)'}; font-size: 0.8rem;">
+                                    {'✔️ Concluída' if status else '⏳ Pendente'}
+                                </span>
+                            </div>
+                        </div>
+                    """, unsafe_allow_html=True)
 
-# Configuração principal do Streamlit
+# Ponto de entrada do aplicativo
 def main():
-    load_css()
-    
-    # Verificar parâmetros de query
-    query_params = st.query_params
-    
-    if 'logout' in query_params:
-        if 'user_id' in ss:
-            del ss.user_id
-        if 'username' in ss:
-            del ss.username
-        st.query_params.clear()
-        st.rerun()
-    
-    if 'toggle_task' in query_params:
-        task_id = int(query_params['toggle_task']['task_id'])
-        completed = int(query_params['toggle_task']['completed'])
-        update_task_status(task_id, completed)
-        st.query_params.clear()
-        st.rerun()
-    
-    if 'delete_task' in query_params:
-        task_id = int(query_params['delete_task']['task_id'])
-        delete_task(task_id)
-        st.query_params.clear()
-        st.rerun()
-    
-    if 'set_filter' in query_params:
-        ss.filter = query_params['set_filter']['filter']
-        st.query_params.clear()
-        st.rerun()
-    
-    # Verificar autenticação
-    if 'user_id' not in ss:
-        auth_page()
+    if 'user_id' not in st.session_state:
+        login_page()
     else:
         main_app()
 
