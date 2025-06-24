@@ -1,135 +1,158 @@
-import streamlit as st
-import pandas as pd
+import os
 import time
+import pandas as pd
+import streamlit as st
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service
-import os
-from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.utils import ChromeType
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 
 # Configuração do Streamlit
-st.set_page_config(page_title="Coletor de Faixas de CEP", layout="wide")
-st.title("Coletor de Faixas de CEP dos Correios")
-st.write("Este aplicativo coleta todas as faixas de CEP de todas as cidades brasileiras diretamente do site dos Correios.")
+st.set_page_config(page_title="Scraper de Faixas de CEP", page_icon="📮", layout="wide")
+
+# Título do aplicativo
+st.title("📮 Scraper de Faixas de CEP dos Correios")
+st.markdown("""
+Este aplicativo coleta todas as faixas de CEP de todas as cidades de todas as UFs do site dos Correios.
+""")
 
 # Configuração do Selenium
 @st.cache_resource
 def get_driver():
     chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920x1080")
     
-    try:
-        # Configuração alternativa para o ChromeDriver
-        service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        return driver
-    except Exception as e:
-        st.error(f"Erro ao iniciar o WebDriver: {str(e)}")
-        st.error("Tentando método alternativo...")
-        
-        try:
-            # Tentativa alternativa com versão fixa do ChromeDriver
-            service = Service(ChromeDriverManager(version="114.0.5735.90").install())
-            driver = webdriver.Chrome(service=service, options=chrome_options)
-            return driver
-        except Exception as e2:
-            st.error(f"Erro no método alternativo: {str(e2)}")
-            st.stop()
+    # Para usar localmente, você precisará ter o chromedriver instalado e no PATH
+    # Para deploy no Streamlit Sharing, usamos o chromedriver auto-instalado
+    driver = webdriver.Chrome(options=chrome_options)
+    return driver
 
-def get_ufs(driver):
+def scrape_uf(uf, driver):
+    """Raspa todas as cidades e faixas de CEP para uma UF específica."""
+    url = "https://buscacepinter.correios.com.br/app/faixa_cep_uf_localidade/index.php"
+    driver.get(url)
+    
+    # Seleciona a UF
     try:
-        driver.get("https://buscacepinter.correios.com.br/app/endereco/index.php")
-        WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.TAG_NAME, "iframe"))
-        )
-        
-        driver.switch_to.frame("frame")
-        
-        busca_por_cep = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.LINK_TEXT, "Busca por CEP da Localidade"))
-        )
-        busca_por_cep.click()
-        time.sleep(1.5)
-        
-        uf_select = WebDriverWait(driver, 15).until(
+        select_uf = Select(WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.NAME, "uf"))
+        ))
+        select_uf.select_by_value(uf)
+    except (NoSuchElementException, TimeoutException):
+        st.error(f"Não foi possível selecionar a UF {uf}")
+        return None
+    
+    # Clica no botão de buscar
+    try:
+        buscar_button = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Buscar')]"))
         )
-        select = Select(uf_select)
-        ufs = [option.get_attribute("value") for option in select.options if option.get_attribute("value")]
-        return ufs
+        buscar_button.click()
+    except (NoSuchElementException, TimeoutException):
+        st.error(f"Não foi possível clicar no botão Buscar para a UF {uf}")
+        return None
+    
+    # Aguarda a tabela carregar
+    try:
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "table.tabela"))
+    except TimeoutException:
+        st.warning(f"Nenhum dado encontrado para a UF {uf}")
+        return None
+    
+    # Processa a tabela de resultados
+    try:
+        table = driver.find_element(By.CSS_SELECTOR, "table.tabela")
+        rows = table.find_elements(By.TAG_NAME, "tr")
+        
+        data = []
+        for row in rows[1:]:  # Pula o cabeçalho
+            cols = row.find_elements(By.TAG_NAME, "td")
+            if len(cols) >= 3:
+                localidade = cols[0].text.strip()
+                faixa_cep = cols[1].text.strip()
+                situacao = cols[2].text.strip()
+                data.append({
+                    "UF": uf,
+                    "Localidade": localidade,
+                    "Faixa de CEP": faixa_cep,
+                    "Situação": situacao
+                })
+        
+        return pd.DataFrame(data)
     except Exception as e:
-        st.error(f"Erro ao obter UFs: {str(e)}")
-        return []
-
-# [Restante das funções get_cidades_for_uf e get_faixas_cep permanecem iguais à versão anterior]
+        st.error(f"Erro ao processar tabela para UF {uf}: {str(e)}")
+        return None
 
 def main():
-    if 'driver' not in st.session_state:
-        st.session_state.driver = get_driver()
+    # Lista de UFs brasileiras
+    ufs = [
+        "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", 
+        "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR", 
+        "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"
+    ]
     
-    driver = st.session_state.driver
-    
+    # Interface do usuário
     st.sidebar.header("Configurações")
-    ufs_disponiveis = get_ufs(driver)
+    selected_ufs = st.sidebar.multiselect("Selecione as UFs", ufs, default=ufs)
     
-    if not ufs_disponiveis:
-        st.error("Não foi possível obter a lista de UFs. Verifique sua conexão.")
-        return
+    if st.sidebar.button("Coletar Dados"):
+        if not selected_ufs:
+            st.warning("Por favor, selecione pelo menos uma UF.")
+            return
+        
+        driver = get_driver()
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        all_data = []
+        total_ufs = len(selected_ufs)
+        
+        for i, uf in enumerate(selected_ufs):
+            status_text.text(f"Processando UF: {uf} ({i+1}/{total_ufs})")
+            progress_bar.progress((i + 1) / total_ufs)
+            
+            df_uf = scrape_uf(uf, driver)
+            if df_uf is not None and not df_uf.empty:
+                all_data.append(df_uf)
+            
+            # Pequena pausa para evitar sobrecarregar o servidor
+            time.sleep(2)
+        
+        driver.quit()
+        
+        if all_data:
+            final_df = pd.concat(all_data, ignore_index=True)
+            st.success("Coleta concluída com sucesso!")
+            
+            # Mostra os dados
+            st.dataframe(final_df)
+            
+            # Cria um botão para download
+            csv = final_df.to_csv(index=False, encoding="utf-8-sig")
+            st.download_button(
+                label="Baixar dados como CSV",
+                data=csv,
+                file_name="faixas_cep_correios.csv",
+                mime="text/csv"
+            )
+        else:
+            st.error("Nenhum dado foi coletado. Verifique os logs para mais informações.")
     
-    uf_selecionada = st.sidebar.selectbox("Selecione uma UF para filtrar (ou todas)", ["Todas"] + ufs_disponiveis)
-    
-    if st.sidebar.button("Iniciar Coleta de Dados"):
-        with st.spinner("Coletando dados..."):
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            ufs = ufs_disponiveis if uf_selecionada == "Todas" else [uf_selecionada]
-            all_data = []
-            
-            total_ufs = len(ufs)
-            for i, uf in enumerate(ufs):
-                status_text.text(f"Processando UF: {uf} ({i+1}/{total_ufs})")
-                progress_bar.progress((i) / (total_ufs * 2))
-                
-                cidades = get_cidades_for_uf(driver, uf)
-                if not cidades:
-                    st.warning(f"Nenhuma cidade encontrada para UF {uf}")
-                    continue
-                
-                total_cidades = len(cidades)
-                
-                for j, cidade in enumerate(cidades):
-                    status_text.text(f"Processando: {uf} - {cidade} ({j+1}/{total_cidades})")
-                    progress_bar.progress((i + (j+1)/total_cidades) / (total_ufs * 2))
-                    
-                    faixas = get_faixas_cep(driver, uf, cidade)
-                    all_data.extend(faixas)
-            
-            if all_data:
-                df = pd.DataFrame(all_data)
-                df = df[["UF", "Cidade", "Localidade", "Faixa de CEP", "Situação"]]
-                
-                st.success(f"Coleta concluída! {len(df)} registros encontrados.")
-                st.dataframe(df)
-                
-                csv = df.to_csv(index=False, sep=';', encoding='utf-8-sig')
-                st.download_button(
-                    label="Baixar dados como CSV",
-                    data=csv,
-                    file_name='faixas_cep_brasil.csv',
-                    mime='text/csv'
-                )
-            else:
-                st.warning("Nenhum dado foi coletado. Verifique sua conexão ou tente novamente.")
+    st.sidebar.markdown("""
+    ### Como usar:
+    1. Selecione as UFs desejadas
+    2. Clique em "Coletar Dados"
+    3. Aguarde o processamento
+    4. Baixe os dados em CSV
+    """)
 
 if __name__ == "__main__":
     main()
