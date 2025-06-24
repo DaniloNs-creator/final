@@ -8,18 +8,17 @@ from selenium.webdriver.support.ui import Select
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 
 # Configuração do Streamlit
 st.set_page_config(page_title="Scraper de Faixas de CEP", page_icon="📮", layout="wide")
 
-# Título do aplicativo
 st.title("📮 Scraper de Faixas de CEP dos Correios")
 st.markdown("""
-Este aplicativo coleta todas as faixas de CEP de todas as cidades de todas as UFs do site dos Correios.
+Este aplicativo coleta faixas de CEP de todas as cidades das UFs selecionadas.
 """)
 
-# Configuração do Selenium para funcionar no Streamlit Cloud
+# Configuração simplificada do Selenium
 @st.cache_resource
 def get_driver():
     chrome_options = Options()
@@ -29,50 +28,35 @@ def get_driver():
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920x1080")
     
-    # Configuração especial para o Streamlit Cloud
-    chrome_options.binary_location = "/usr/bin/google-chrome"
+    # Configuração para Streamlit Cloud
+    if 'HOSTNAME' in os.environ and 'streamlit' in os.environ['HOSTNAME']:
+        chrome_options.binary_location = "/usr/bin/google-chrome"
     
     try:
-        driver = webdriver.Chrome(
-            options=chrome_options,
-            service_args=["--verbose", "--log-path=/tmp/chromedriver.log"]
-        )
+        driver = webdriver.Chrome(options=chrome_options)
         return driver
-    except WebDriverException as e:
-        st.error(f"Erro ao iniciar o WebDriver: {str(e)}")
+    except Exception as e:
+        st.error(f"Erro ao iniciar o navegador: {str(e)}")
         st.stop()
 
 def scrape_uf(uf, driver):
-    """Raspa todas as cidades e faixas de CEP para uma UF específica."""
-    url = "https://buscacepinter.correios.com.br/app/faixa_cep_uf_localidade/index.php"
-    
     try:
-        driver.get(url)
+        driver.get("https://buscacepinter.correios.com.br/app/faixa_cep_uf_localidade/index.php")
         
-        # Seleciona a UF
-        select_element = WebDriverWait(driver, 15).until(
+        WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.NAME, "uf"))
         )
-        select_uf = Select(select_element)
-        select_uf.select_by_value(uf)
+        Select(driver.find_element(By.NAME, "uf")).select_by_value(uf)
         
-        # Clica no botão de buscar
-        buscar_button = WebDriverWait(driver, 15).until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Buscar')]"))
-        )
-        buscar_button.click()
+        driver.find_element(By.XPATH, "//button[contains(text(), 'Buscar')]").click()
         
-        # Aguarda a tabela carregar
-        WebDriverWait(driver, 15).until(
+        WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "table.tabela"))
         )
         
-        # Processa a tabela de resultados
-        table = driver.find_element(By.CSS_SELECTOR, "table.tabela")
-        rows = table.find_elements(By.TAG_NAME, "tr")
-        
         data = []
-        for row in rows[1:]:  # Pula o cabeçalho
+        table = driver.find_element(By.CSS_SELECTOR, "table.tabela")
+        for row in table.find_elements(By.TAG_NAME, "tr")[1:]:
             cols = row.find_elements(By.TAG_NAME, "td")
             if len(cols) >= 3:
                 data.append({
@@ -83,70 +67,45 @@ def scrape_uf(uf, driver):
                 })
         
         return pd.DataFrame(data)
-        
     except Exception as e:
-        st.warning(f"Erro ao processar UF {uf}: {str(e)}")
+        st.warning(f"Erro na UF {uf}: {str(e)}")
         return None
 
 def main():
-    # Lista de UFs brasileiras
-    ufs = [
-        "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", 
-        "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR", 
-        "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"
-    ]
+    ufs = ["AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", 
+           "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR", 
+           "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"]
     
-    # Interface do usuário
-    st.sidebar.header("Configurações")
-    selected_ufs = st.sidebar.multiselect("Selecione as UFs", ufs, default=ufs)
+    selected_ufs = st.sidebar.multiselect("Selecione as UFs", ufs, default=["SP", "RJ"])
     
-    if st.sidebar.button("Coletar Dados"):
-        if not selected_ufs:
-            st.warning("Por favor, selecione pelo menos uma UF.")
-            return
-        
-        with st.spinner("Iniciando o navegador virtual..."):
+    if st.sidebar.button("Coletar Dados") and selected_ufs:
+        with st.spinner("Coletando dados..."):
+            driver = get_driver()
             try:
-                driver = get_driver()
-            except Exception as e:
-                st.error(f"Falha ao iniciar o navegador: {str(e)}")
-                return
-        
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        all_data = []
-        
-        try:
-            for i, uf in enumerate(selected_ufs):
-                status_text.text(f"Processando {uf} ({i+1}/{len(selected_ufs)})")
-                progress_bar.progress((i + 1) / len(selected_ufs))
+                all_data = []
+                for i, uf in enumerate(selected_ufs):
+                    st.write(f"Processando {uf} ({i+1}/{len(selected_ufs)})")
+                    df = scrape_uf(uf, driver)
+                    if df is not None:
+                        all_data.append(df)
+                    time.sleep(1)
                 
-                df_uf = scrape_uf(uf, driver)
-                if df_uf is not None and not df_uf.empty:
-                    all_data.append(df_uf)
-                
-                time.sleep(2)  # Delay para evitar bloqueio
-            
-            if all_data:
-                final_df = pd.concat(all_data, ignore_index=True)
-                st.success(f"Coleta concluída! Total de registros: {len(final_df)}")
-                
-                st.dataframe(final_df.head())
-                
-                csv = final_df.to_csv(index=False, sep=";", encoding="utf-8-sig")
-                st.download_button(
-                    "⬇️ Baixar CSV completo",
-                    csv,
-                    "faixas_cep_correios.csv",
-                    "text/csv",
-                    key="download-csv"
-                )
-            else:
-                st.error("Nenhum dado válido foi coletado.")
-                
-        finally:
-            driver.quit()
-            st.info("Navegador encerrado.")
+                if all_data:
+                    final_df = pd.concat(all_data)
+                    st.success(f"Dados coletados! {len(final_df)} registros.")
+                    st.dataframe(final_df)
+                    
+                    csv = final_df.to_csv(index=False, sep=";")
+                    st.download_button(
+                        "Baixar CSV",
+                        csv,
+                        "faixas_cep.csv",
+                        "text/csv"
+                    )
+                else:
+                    st.error("Nenhum dado foi coletado.")
+            finally:
+                driver.quit()
 
 if __name__ == "__main__":
     main()
