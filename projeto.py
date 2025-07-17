@@ -1,141 +1,73 @@
-import os
-import time
-import pandas as pd
 import streamlit as st
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import Select
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
+import pandas as pd
 
-# Configuração do Streamlit
-st.set_page_config(page_title="Scraper de Faixas de CEP", page_icon="📮", layout="wide")
+# Funções auxiliares para cálculo dos KPIs
+def calcular_kpis(df_i155, df_j100, df_j150):
+    kpis = {}
 
-st.title("📮 Scraper de Faixas de CEP dos Correios")
-st.markdown("""
-Este aplicativo coleta faixas de CEP de todas as cidades das UFs selecionadas.
-""")
-
-# Configuração otimizada para o Streamlit Cloud
-@st.cache_resource
-def get_driver():
-    chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--window-size=1920x1080")
-    
-    # Configurações específicas para o Streamlit Cloud
-    if os.environ.get('IS_STREAMLIT_CLOUD'):
-        chrome_options.binary_location = "/usr/bin/google-chrome"
-        driver = webdriver.Chrome(
-            executable_path="/usr/bin/chromedriver",
-            options=chrome_options
-        )
-    else:
-        # Configuração para ambiente local
-        from webdriver_manager.chrome import ChromeDriverManager
-        from selenium.webdriver.chrome.service import Service
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-    
-    return driver
-
-def scrape_uf(uf, driver):
-    try:
-        driver.get("https://buscacepinter.correios.com.br/app/faixa_cep_uf_localidade/index.php")
-        
-        # Seleciona a UF
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.NAME, "uf"))
-        )
-        Select(driver.find_element(By.NAME, "uf")).select_by_value(uf)
-        
-        # Clica no botão buscar
-        driver.find_element(By.XPATH, "//button[contains(text(), 'Buscar')]").click()
-        
-        # Aguarda a tabela carregar
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "table.tabela"))
-        )
-        
-        # Processa os dados da tabela
-        data = []
-        table = driver.find_element(By.CSS_SELECTOR, "table.tabela")
-        for row in table.find_elements(By.TAG_NAME, "tr")[1:]:  # Pula o cabeçalho
-            cols = row.find_elements(By.TAG_NAME, "td")
-            if len(cols) >= 3:
-                data.append({
-                    "UF": uf,
-                    "Localidade": cols[0].text.strip(),
-                    "Faixa de CEP": cols[1].text.strip(),
-                    "Situação": cols[2].text.strip()
-                })
-        
-        return pd.DataFrame(data)
-    except Exception as e:
-        st.warning(f"Erro ao processar UF {uf}: {str(e)}")
-        return None
-
-def main():
-    # Lista completa de UFs
-    ufs = ["AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", 
-           "MA", "MG", "MS", "MT", "PA", "PB", "PE", "PI", "PR", 
-           "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"]
-    
-    # Interface do usuário
-    selected_ufs = st.sidebar.multiselect("Selecione as UFs", ufs, default=["SP", "RJ"])
-    
-    if st.sidebar.button("Coletar Dados") and selected_ufs:
-        with st.spinner("Iniciando o navegador..."):
-            try:
-                driver = get_driver()
-            except Exception as e:
-                st.error(f"Falha ao iniciar o navegador: {str(e)}")
-                return
-        
+    def parse_valor(valor):
         try:
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            all_data = []
-            
-            for i, uf in enumerate(selected_ufs):
-                status_text.text(f"Processando {uf} ({i+1}/{len(selected_ufs)})")
-                progress_bar.progress((i + 1) / len(selected_ufs))
-                
-                df = scrape_uf(uf, driver)
-                if df is not None:
-                    all_data.append(df)
-                
-                time.sleep(2)  # Intervalo entre requisições
-            
-            if all_data:
-                final_df = pd.concat(all_data, ignore_index=True)
-                st.success(f"Coleta concluída! Total de registros: {len(final_df)}")
-                
-                # Mostra uma prévia dos dados
-                st.dataframe(final_df.head())
-                
-                # Botão de download
-                csv = final_df.to_csv(index=False, sep=";", encoding="utf-8-sig")
-                st.download_button(
-                    "⬇️ Baixar CSV completo",
-                    csv,
-                    "faixas_cep_correios.csv",
-                    "text/csv",
-                    key="download-csv"
-                )
-            else:
-                st.error("Nenhum dado válido foi coletado.")
-                
-        finally:
-            driver.quit()
-            st.info("Processo finalizado.")
+            return float(valor.replace(',', '.'))
+        except:
+            return 0.0
 
-if __name__ == "__main__":
-    # Configura variável de ambiente para detectar se está no Streamlit Cloud
-    os.environ['IS_STREAMLIT_CLOUD'] = 'true' if 'HOSTNAME' in os.environ and 'streamlit' in os.environ['HOSTNAME'] else 'false'
-    main()
+    lucro_liquido = df_j150[df_j150['DESCRICAO_CONTA'].str.contains('lucro', case=False, na=False)]['VALOR'].map(parse_valor).sum()
+    receita_total = df_j150[df_j150['DESCRICAO_CONTA'].str.contains('receita', case=False, na=False)]['VALOR'].map(parse_valor).sum()
+    despesas_total = df_j150[df_j150['DESCRICAO_CONTA'].str.contains('despesa', case=False, na=False)]['VALOR'].map(parse_valor).sum()
+    ebitda = lucro_liquido + df_j150[df_j150['DESCRICAO_CONTA'].str.contains('deprecia', case=False, na=False)]['VALOR'].map(parse_valor).sum()
+
+    ativo_total = df_j100[df_j100['DESCRICAO_CONTA'].str.contains('ativo total', case=False, na=False)]['VALOR'].map(parse_valor).sum()
+    passivo_total = df_j100[df_j100['DESCRICAO_CONTA'].str.contains('passivo total', case=False, na=False)]['VALOR'].map(parse_valor).sum()
+    ativo_circulante = df_j100[df_j100['DESCRICAO_CONTA'].str.contains('ativo circulante', case=False, na=False)]['VALOR'].map(parse_valor).sum()
+    passivo_circulante = df_j100[df_j100['DESCRICAO_CONTA'].str.contains('passivo circulante', case=False, na=False)]['VALOR'].map(parse_valor).sum()
+    patrimonio_liquido = df_j100[df_j100['DESCRICAO_CONTA'].str.contains('patrimônio líquido', case=False, na=False)]['VALOR'].map(parse_valor).sum()
+
+    kpis['Lucro Líquido'] = lucro_liquido
+    kpis['Margem de Lucro Líquido (%)'] = (lucro_liquido / receita_total * 100) if receita_total else 0
+    kpis['EBITDA'] = ebitda
+    kpis['Endividamento (%)'] = (passivo_total / ativo_total * 100) if ativo_total else 0
+    kpis['Liquidez Corrente'] = (ativo_circulante / passivo_circulante) if passivo_circulante else 0
+    kpis['ROE (%)'] = (lucro_liquido / patrimonio_liquido * 100) if patrimonio_liquido else 0
+
+    return kpis
+
+# Interface Streamlit
+st.title("📊 Análise de KPIs com base na ECD")
+
+uploaded_file = st.file_uploader("Faça upload do arquivo ECD (.txt)", type=["txt"])
+
+if uploaded_file:
+    content = uploaded_file.read().decode('latin1')
+    linhas = content.splitlines()
+
+    registros_i155 = [l for l in linhas if l.startswith('|I155|')]
+    registros_j100 = [l for l in linhas if l.startswith('|J100|')]
+    registros_j150 = [l for l in linhas if l.startswith('|J150|')]
+    registros_j210 = [l for l in linhas if l.startswith('|J210|')]
+
+    def parse_registros(registros, colunas):
+        dados = [r.strip('|').split('|')[1:] for r in registros]
+        return pd.DataFrame(dados, columns=colunas)
+
+    df_i155 = parse_registros(registros_i155, ['REG', 'DT_BAL', 'COD_CTA', 'NOME_CTA', 'VALOR'])
+    df_j100 = parse_registros(registros_j100, ['REG', 'DT_BAL', 'COD_AGL', 'NIVEL', 'COD_CTA', 'DESCRICAO_CONTA', 'VALOR'])
+    df_j150 = parse_registros(registros_j150, ['REG', 'DT_DEM', 'COD_AGL', 'NIVEL', 'COD_CTA', 'DESCRICAO_CONTA', 'VALOR'])
+    df_j210 = parse_registros(registros_j210, ['REG', 'DT_DEM', 'COD_AGL', 'NIVEL', 'COD_CTA', 'DESCRICAO_CONTA', 'VALOR'])
+
+    kpis = calcular_kpis(df_i155, df_j100, df_j150)
+
+    st.subheader("📈 Indicadores Financeiros")
+    for kpi, valor in kpis.items():
+        st.metric(label=kpi, value=f"{valor:,.2f}")
+
+    with st.expander("🔍 Visualizar dados brutos"):
+        st.write("Registros I155")
+        st.dataframe(df_i155)
+        st.write("Registros J100")
+        st.dataframe(df_j100)
+        st.write("Registros J150")
+        st.dataframe(df_j150)
+        st.write("Registros J210")
+        st.dataframe(df_j210)
+else:
+    st.info("Por favor, envie um arquivo ECD no formato .txt para iniciar a análise.")
