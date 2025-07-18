@@ -1,8 +1,6 @@
 import streamlit as st
 from streamlit.components.v1 import html
 from datetime import datetime, timedelta
-import pandas as pd
-import random
 
 # Configuração inicial da página
 st.set_page_config(
@@ -12,14 +10,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS Avançado com animações
-def local_css(file_name):
-    with open(file_name) as f:
-        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
-
-local_css("style.css")
-
-# HTML/CSS personalizado
+# CSS Avançado incorporado diretamente no código
 st.markdown("""
 <style>
 :root {
@@ -601,9 +592,21 @@ html("""
 document.addEventListener('DOMContentLoaded', function() {
     const progressBar = document.querySelector('.progress-bar');
     let width = 0;
-    const targetWidth = (new Date() - new Date('{start_date}')) / (new Date('{end_date}') - new Date('{start_date}')) * 100;
+    const startDate = new Date('{start_date_js}');
+    const endDate = new Date('{end_date_js}');
+    const today = new Date();
+    
+    // Calcular progresso
+    const totalDays = (endDate - startDate) / (1000 * 60 * 60 * 24);
+    const daysPassed = (today - startDate) / (1000 * 60 * 60 * 24);
+    let progress = (daysPassed / totalDays) * 100;
+    
+    // Limitar entre 0 e 100
+    progress = Math.max(0, Math.min(100, progress));
+    
+    // Animar
     const interval = setInterval(function() {
-        if (width >= targetWidth) {
+        if (width >= progress) {
             clearInterval(interval);
         } else {
             width++;
@@ -614,6 +617,6 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 """.format(
-    start_date=datetime.strptime(user_data["start_date"], "%d/%m/%Y").strftime("%Y-%m-%d"),
-    end_date=datetime.strptime(user_data["end_date"], "%d/%m/%Y").strftime("%Y-%m-%d")
+    start_date_js=datetime.strptime(user_data["start_date"], "%d/%m/%Y").strftime("%Y/%m/%d"),
+    end_date_js=datetime.strptime(user_data["end_date"], "%d/%m/%Y").strftime("%Y/%m/%d")
 ), height=0)
