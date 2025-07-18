@@ -140,6 +140,16 @@ def inject_css():
             margin-bottom: 2rem;
             border-left: 5px solid #2a5298;
         }
+        
+        /* Calendário */
+        .stDateInput>div>div>input {
+            font-size: 1rem;
+            padding: 0.5rem;
+        }
+        
+        .date-picker-container {
+            margin-bottom: 1.5rem;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -214,6 +224,7 @@ def generate_workout_plan(start_date):
             if day == 1:  # Segunda-feira
                 workout = {
                     "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
                     "Dia da Semana": current_date.strftime("%A"),
                     "Tipo de Treino": "Ciclismo - Endurance",
                     "Duração": "1h15min",
@@ -224,6 +235,7 @@ def generate_workout_plan(start_date):
             elif day == 2:  # Terça-feira
                 workout = {
                     "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
                     "Dia da Semana": current_date.strftime("%A"),
                     "Tipo de Treino": "Força - Membros Inferiores",
                     "Duração": "1h",
@@ -234,6 +246,7 @@ def generate_workout_plan(start_date):
             elif day == 3:  # Quarta-feira
                 workout = {
                     "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
                     "Dia da Semana": current_date.strftime("%A"),
                     "Tipo de Treino": "Ciclismo - Intervalado",
                     "Duração": "1h",
@@ -244,6 +257,7 @@ def generate_workout_plan(start_date):
             elif day == 4:  # Quinta-feira
                 workout = {
                     "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
                     "Dia da Semana": current_date.strftime("%A"),
                     "Tipo de Treino": "Ciclismo - Recuperação Ativa",
                     "Duração": "45min",
@@ -254,6 +268,7 @@ def generate_workout_plan(start_date):
             elif day == 5:  # Sexta-feira
                 workout = {
                     "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
                     "Dia da Semana": current_date.strftime("%A"),
                     "Tipo de Treino": "Força - Core e Superior",
                     "Duração": "1h",
@@ -264,6 +279,7 @@ def generate_workout_plan(start_date):
             elif day == 6:  # Sábado
                 workout = {
                     "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
                     "Dia da Semana": current_date.strftime("%A"),
                     "Tipo de Treino": "Ciclismo - Longão",
                     "Duração": "2h30min" if week < 3 else "3h" if week < 6 else "3h30min",
@@ -278,17 +294,6 @@ def generate_workout_plan(start_date):
         current_date += timedelta(days=1)  # Domingo é dia de descanso
     
     return pd.DataFrame(plan)
-
-# Função para extrair minutos da duração formatada
-def extract_minutes(duration_str):
-    try:
-        if "h" in duration_str:
-            hours_part = duration_str.split("h")[0]
-            minutes_part = duration_str.split("h")[1].replace("min", "")
-            return int(hours_part) * 60 + int(minutes_part)
-        return int(duration_str.replace("min", ""))
-    except:
-        return 60  # Valor padrão se houver erro
 
 # Interface do aplicativo
 st.title("🚴‍♂️ PerformanceFit - Controle de Treinos e Dieta")
@@ -340,7 +345,7 @@ with st.sidebar:
         href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="Plano_Treino_Dieta.xlsx">Baixar Plano Completo</a>'
         st.markdown(href, unsafe_allow_html=True)
 
-# Abas principais (apenas Plano de Treino e Plano Alimentar)
+# Abas principais
 tab1, tab2 = st.tabs(["📅 Plano de Treino", "🍽 Plano Alimentar"])
 
 with tab1:
@@ -348,19 +353,27 @@ with tab1:
     today = datetime.now().date()
     workout_plan = generate_workout_plan(today)
     
-    # Seletor de data para ver o treino do dia
-    st.subheader("Consultar Treino por Data")
+    # Seletor de data em formato de calendário
+    st.subheader("📆 Consultar Treino por Data")
     
-    # Criar lista de datas disponíveis no plano
-    date_options = workout_plan["Dia"].tolist()
+    # Definir range de datas para o calendário
+    min_date = workout_plan["Data"].min()
+    max_date = workout_plan["Data"].max()
     
-    # Converter strings de data para objetos datetime para ordenação
-    sorted_dates = sorted(date_options, key=lambda x: datetime.strptime(x, "%d/%m/%Y"))
+    # Widget de seleção de data
+    selected_date = st.date_input(
+        "Selecione a data para ver o treino:",
+        value=today,
+        min_value=min_date,
+        max_value=max_date,
+        format="DD/MM/YYYY"
+    )
     
-    selected_date = st.selectbox("Selecione a data para ver o treino:", sorted_dates)
+    # Converter a data selecionada para o mesmo formato usado no DataFrame
+    selected_date_str = selected_date.strftime("%d/%m/%Y")
     
     # Filtrar o treino da data selecionada
-    selected_workout = workout_plan[workout_plan["Dia"] == selected_date]
+    selected_workout = workout_plan[workout_plan["Dia"] == selected_date_str]
     
     if not selected_workout.empty:
         workout = selected_workout.iloc[0]
@@ -396,7 +409,7 @@ with tab1:
         filtered_plan = filtered_plan.iloc[start_idx:end_idx]
     
     # Mostrar tabela
-    st.dataframe(filtered_plan, hide_index=True, use_container_width=True)
+    st.dataframe(filtered_plan.drop(columns=["Data"]), hide_index=True, use_container_width=True)
     
     # Gráfico de distribuição de treinos
     st.subheader("Distribuição de Treinos")
