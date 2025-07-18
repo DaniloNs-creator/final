@@ -1,273 +1,303 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-from datetime import datetime
-import numpy as np
+import io
 
-# Configuração da página
-st.set_page_config(page_title="Análise Financeira Avançada", page_icon="📈", layout="wide")
-st.title("📈 Dashboard de Análise Financeira Avançada")
+# Moved adjust_final_balance to global scope so it's accessible by both functions and the main script
+def adjust_final_balance(row):
+    """
+    Adjusts the balance based on the normal balance of the account type.
+    For Assets, Expenses, Costs: Debit balance is positive.
+    For Liabilities, Equity, Revenue: Credit balance is positive (so Debit value means negative).
+    """
+    if row['Main_Group'] in ['Ativo', 'Despesa', 'Custos']:
+        return row['Total_Value']
+    elif row['Main_Group'] in ['Passivo e PL', 'Receita']:
+        return -row['Total_Value']
+    return row['Total_Value'] # Default for other groups
 
-# Funções de tratamento de dados
-def parse_br_number(number_str):
-    """Converte números no formato brasileiro para float"""
-    if not number_str or str(number_str).strip() in ('', 'D', 'C'):
-        return 0.0
-    try:
-        cleaned = str(number_str).replace('.', '').replace(',', '.').replace(' ', '')
-        return float(cleaned)
-    except ValueError:
-        return 0.0
+def parse_ecd_file(file_content):
+    """
+    Parses the content of an ECD (Escrituração Contábil Digital) file.
 
-def process_ecd_file(content):
-    """Processa o conteúdo do arquivo ECD"""
-    lines = content.split('\n')
-    
-    # Extrair informações da empresa
-    empresa_info = {}
+    Args:
+        file_content (str): The raw content of the ECD .txt file.
+
+    Returns:
+        tuple: A tuple containing two pandas DataFrames:
+               - chart_of_accounts: Contains account details from I050 records.
+               - movements: Contains financial movements from I355 records.
+    """
+    lines = file_content.splitlines()
+    chart_of_accounts = []
+    movements = []
+
     for line in lines:
-        if line.startswith('|0000|'):
-            parts = line.split('|')
-            empresa_info = {
-                'Nome': parts[4] if len(parts) > 4 else '',
-                'CNPJ': parts[5] if len(parts) > 5 else '',
-                'UF': parts[6] if len(parts) > 6 else '',
-                'Data Início': parts[3] if len(parts) > 3 else '',
-                'Data Fim': parts[4] if len(parts) > 4 else ''
-            }
-            break
-    
-    # Extrair contas e saldos
-    contas = []
-    saldos = []
-    for line in lines:
-        if line.startswith('|I050|'):
-            parts = line.split('|')
-            if len(parts) >= 9:
-                contas.append({
-                    'Código': parts[6],
-                    'Descrição': parts[8],
-                    'Nível': int(parts[5]) if parts[5].isdigit() else 0,
-                    'ContaPai': parts[7] if len(parts) > 7 else None
-                })
-        elif line.startswith('|I155|'):
-            parts = line.split('|')
-            if len(parts) >= 9:
-                saldos.append({
-                    'Conta': parts[2],
-                    'Saldo': parse_br_number(parts[7]),
-                    'Natureza': parts[8]
-                })
-    
-    return {
-        'empresa': empresa_info,
-        'contas': pd.DataFrame(contas),
-        'saldos': pd.DataFrame(saldos)
-    }
+        parts = line.split('|')
+        if len(parts) > 1:
+            record_type = parts[1]
 
-# Funções de cálculo de KPIs
-def calculate_kpis(contas_df, saldos_df):
-    """Calcula todos os KPIs financeiros"""
-    # Criar dicionário de saldos por conta
-    saldos_dict = {}
-    for _, row in saldos_df.iterrows():
-        valor = row['Saldo'] if row['Natureza'] == 'D' else -row['Saldo']
-        saldos_dict[row['Conta']] = valor
-    
-    # Função auxiliar para obter saldo
-    def get_saldo(codigo):
-        return saldos_dict.get(codigo, 0)
-    
-    # 1. Dados do Balanço Patrimonial
-    ativo_total = sum(v for k, v in saldos_dict.items() if k.startswith('1.'))
-    passivo_total = sum(v for k, v in saldos_dict.items() if k.startswith('2.'))
-    patrimonio_liquido = get_saldo('2.3')  # Conta do patrimônio líquido
-    
-    # Ativo Circulante e Não Circulante
-    ativo_circulante = sum(v for k, v in saldos_dict.items() if k.startswith('1.1.'))
-    ativo_nao_circulante = sum(v for k, v in saldos_dict.items() if k.startswith('1.2.'))
-    
-    # Passivo Circulante e Não Circulante
-    passivo_circulante = sum(v for k, v in saldos_dict.items() if k.startswith('2.1.'))
-    passivo_nao_circulante = sum(v for k, v in saldos_dict.items() if k.startswith('2.2.'))
-    
-    # 2. Dados da DRE
-    receita_bruta = get_saldo('3.1')
-    deducoes = abs(get_saldo('3.2'))
-    receita_liquida = receita_bruta - deducoes
-    custo_vendas = abs(get_saldo('5.1'))
-    lucro_bruto = receita_liquida - custo_vendas
-    
-    despesas_operacionais = abs(sum(
-        v for k, v in saldos_dict.items() 
-        if k.startswith('4.1.') or k.startswith('4.3.')
-    ))
-    
-    despesas_financeiras = abs(get_saldo('4.2'))
-    receitas_financeiras = get_saldo('3.3')
-    resultado_financeiro = receitas_financeiras - despesas_financeiras
-    
-    lucro_operacional = lucro_bruto - despesas_operacionais + resultado_financeiro
-    impostos = abs(get_saldo('4.4'))
-    lucro_liquido = lucro_operacional - impostos
-    
-    # 3. Cálculo dos KPIs
-    kpis = {
-        # Balanço Patrimonial
-        'Ativo Total': ativo_total,
-        'Passivo Total': passivo_total,
-        'Patrimônio Líquido': patrimonio_liquido,
-        'Ativo Circulante': ativo_circulante,
-        'Ativo Não Circulante': ativo_nao_circulante,
-        'Passivo Circulante': passivo_circulante,
-        'Passivo Não Circulante': passivo_nao_circulante,
-        
-        # Demonstração de Resultados
-        'Receita Bruta': receita_bruta,
-        'Deduções': deducoes,
-        'Receita Líquida': receita_liquida,
-        'Custo das Vendas': custo_vendas,
-        'Lucro Bruto': lucro_bruto,
-        'Margem Bruta': (lucro_bruto / receita_liquida) * 100 if receita_liquida != 0 else 0,
-        'Despesas Operacionais': despesas_operacionais,
-        'Resultado Financeiro': resultado_financeiro,
-        'Lucro Operacional': lucro_operacional,
-        'Impostos': impostos,
-        'Lucro Líquido': lucro_liquido,
-        'Margem Líquida': (lucro_liquido / receita_liquida) * 100 if receita_liquida != 0 else 0,
-        
-        # Indicadores de Rentabilidade
-        'ROE': (lucro_liquido / patrimonio_liquido) * 100 if patrimonio_liquido != 0 else 0,
-        'ROA': (lucro_liquido / ativo_total) * 100 if ativo_total != 0 else 0,
-        
-        # Indicadores de Liquidez
-        'Liquidez Corrente': ativo_circulante / passivo_circulante if passivo_circulante != 0 else 0,
-        'Liquidez Seca': (ativo_circulante - get_saldo('1.1.03')) / passivo_circulante if passivo_circulante != 0 else 0,
-        'Liquidez Geral': (ativo_circulante + ativo_nao_circulante) / (passivo_circulante + passivo_nao_circulante) 
-                          if (passivo_circulante + passivo_nao_circulante) != 0 else 0,
-        
-        # Indicadores de Endividamento
-        'Endividamento Geral': (passivo_total / ativo_total) * 100 if ativo_total != 0 else 0,
-        'Composição do Endividamento': (passivo_circulante / passivo_total) * 100 if passivo_total != 0 else 0,
-        'Garantia de Capital Próprio': patrimonio_liquido / passivo_total if passivo_total != 0 else 0,
-        
-        # Indicadores de Eficiência
-        'Giro do Ativo': receita_liquida / ativo_total if ativo_total != 0 else 0
-    }
-    
+            if record_type == 'I050':
+                try:
+                    # Based on example: |I050|01011900|01|S|1|100000000000000||Ativo|
+                    # parts[6] is the account code (e.g., '1', '1.1', '1.1.01')
+                    # parts[4] is Account Type ('S' or 'A')
+                    # parts[5] is Account Level
+                    # parts[8] is Account Name
+                    account_code = parts[6]
+                    account_type = parts[4]
+                    account_level = int(parts[5])
+                    account_name = parts[8]
+
+                    main_group = ''
+                    if account_code.startswith('1'):
+                        main_group = 'Ativo'
+                    elif account_code.startswith('2'):
+                        main_group = 'Passivo e PL'
+                    elif account_code.startswith('3'):
+                        main_group = 'Receita'
+                    elif account_code.startswith('4'):
+                        main_group = 'Despesa'
+                    elif account_code.startswith('5'):
+                        main_group = 'Custos' # Assuming 5 for costs if present in your COA
+
+                    chart_of_accounts.append({
+                        'Account_Code': account_code,
+                        'Account_Type': account_type,
+                        'Account_Level': account_level,
+                        'Account_Name': account_name,
+                        'Main_Group': main_group
+                    })
+                except (IndexError, ValueError) as e:
+                    st.warning(f"Skipping malformed I050 record: {line} - Error: {e}")
+
+            elif record_type == 'I355':
+                try:
+                    # Based on example: |I355|4.1.02.02.0001||474,94|D|
+                    # parts[2] is Account Code
+                    # parts[4] is Value (VL_SLD_INI)
+                    # parts[5] is Nature (IND_DC_INI)
+                    account_code = parts[2]
+                    value_str = parts[4].replace('.', '').replace(',', '.')
+                    value = float(value_str)
+                    nature = parts[5]
+                    movements.append({
+                        'Account_Code': account_code,
+                        'Value': value,
+                        'Nature': nature
+                    })
+                except (IndexError, ValueError) as e:
+                    st.warning(f"Skipping malformed I355 record: {line} - Error: {e}")
+
+    df_accounts = pd.DataFrame(chart_of_accounts)
+    df_movements = pd.DataFrame(movements)
+
+    return df_accounts, df_movements
+
+def calculate_kpis(df_accounts, df_movements):
+    """
+    Calculates key accounting and financial KPIs from parsed ECD data.
+
+    Args:
+        df_accounts (pd.DataFrame): DataFrame containing chart of accounts.
+        df_movements (pd.DataFrame): DataFrame containing financial movements.
+
+    Returns:
+        dict: A dictionary of calculated KPIs.
+    """
+    kpis = {}
+
+    if df_accounts.empty or df_movements.empty:
+        return {"Error": "No data in accounts or movements to calculate KPIs."}
+
+    df_merged = pd.merge(df_movements, df_accounts, on='Account_Code', how='left')
+
+    df_merged['Signed_Value'] = df_merged.apply(
+        lambda row: row['Value'] if row['Nature'] == 'D' else -row['Value'], axis=1
+    )
+
+    account_balances = df_merged.groupby('Account_Code').agg(
+        Total_Value=('Signed_Value', 'sum'),
+        Account_Name=('Account_Name', 'first'),
+        Main_Group=('Main_Group', 'first')
+    ).reset_index()
+
+    # The adjust_final_balance function is now in global scope
+    account_balances['Final_Balance'] = account_balances.apply(adjust_final_balance, axis=1)
+
+    # --- Basic Financial Statement Aggregates ---
+    total_assets = account_balances[account_balances['Main_Group'] == 'Ativo']['Final_Balance'].sum()
+
+    # Identify Equity accounts: common prefix '2.3' or specific names
+    equity_filter = df_accounts['Account_Code'].apply(lambda x: x.startswith('2.3')) | df_accounts['Account_Name'].str.contains('patrimônio líquido|capital social|reservas de lucros', case=False, na=False)
+    equity_codes = df_accounts[equity_filter]['Account_Code'].tolist()
+    total_equity = account_balances[account_balances['Account_Code'].isin(equity_codes)]['Final_Balance'].sum()
+
+    total_liabilities_and_pl = account_balances[account_balances['Main_Group'] == 'Passivo e PL']['Final_Balance'].sum()
+    total_liabilities = total_liabilities_and_pl - total_equity # Assuming PL is a subset of Passivo e PL
+
+    total_revenue = account_balances[account_balances['Main_Group'] == 'Receita']['Final_Balance'].sum()
+    total_costs = account_balances[account_balances['Main_Group'] == 'Custos']['Final_Balance'].sum()
+    total_expenses = account_balances[account_balances['Main_Group'] == 'Despesa']['Final_Balance'].sum()
+
+    # --- New KPIs Calculations ---
+
+    # 1. Lucro Bruto
+    gross_profit = total_revenue - total_costs
+    kpis['Gross Profit (Lucro Bruto)'] = gross_profit
+
+    # 2. Lucro Operacional
+    operating_income = gross_profit - total_expenses
+    kpis['Operating Income (Lucro Operacional)'] = operating_income
+
+    # 3. Lucro Líquido
+    net_income = total_revenue - total_costs - total_expenses
+    kpis['Net Income (Lucro Líquido)'] = net_income
+
+    # 4. Margem de Contribuição
+    # Simplified: assuming all costs are variable, ignoring variable expenses from other groups
+    variable_costs_and_expenses = total_costs
+    contribution_margin = total_revenue - variable_costs_and_expenses
+    kpis['Contribution Margin (Margem de Contribuição)'] = contribution_margin
+    kpis['Contribution Margin %'] = (contribution_margin / total_revenue) if total_revenue != 0 else 0
+
+    # 5. ROE (Return on Equity)
+    kpis['ROE (Return on Equity)'] = (net_income / total_equity) if total_equity != 0 else float('inf')
+
+    # 6. ROA (Return on Assets)
+    kpis['ROA (Return on Assets)'] = (net_income / total_assets) if total_assets != 0 else 0
+
+    # 7. Margem Bruta
+    kpis['Gross Profit Margin (Margem Bruta)'] = (gross_profit / total_revenue) if total_revenue != 0 else 0
+
+    # 8. Margem Líquida
+    kpis['Net Profit Margin (Margem Líquida)'] = (net_income / total_revenue) if total_revenue != 0 else 0
+
+    # 9. EBITDA (Earnings Before Interest, Taxes, Depreciation, and Amortization)
+    depreciation_amortization = account_balances[
+        account_balances['Account_Name'].str.contains('depreciação|amortização', case=False, na=False)
+    ]['Final_Balance'].sum()
+
+    ebitda = operating_income + depreciation_amortization
+    kpis['EBITDA'] = ebitda
+    kpis['EBITDA Margin'] = (ebitda / total_revenue) if total_revenue != 0 else 0
+
+    # --- Existing KPIs (ensure they are still included for consistency) ---
+    kpis['Total Assets'] = total_assets
+    kpis['Total Liabilities'] = total_liabilities
+    kpis['Total Equity'] = total_equity
+    kpis['Total Revenue'] = total_revenue
+    kpis['Total Expenses (Operational & Admin)'] = total_expenses
+    kpis['Total Costs (CPV/CMV)'] = total_costs
+
+    current_assets = account_balances[account_balances['Account_Code'].str.startswith('1.1')]['Final_Balance'].sum()
+    current_liabilities = account_balances[account_balances['Account_Code'].str.startswith('2.1')]['Final_Balance'].sum()
+
+    kpis['Current Ratio (Current Assets / Current Liabilities)'] = current_assets / current_liabilities if current_liabilities != 0 else float('inf')
+    kpis['Debt-to-Equity Ratio (Total Liabilities / Total Equity)'] = total_liabilities / total_equity if total_equity != 0 else float('inf')
+
     return kpis
 
-# Interface do usuário
-def main():
-    uploaded_file = st.file_uploader("Carregar arquivo ECD (TXT)", type="txt")
-    
-    if uploaded_file is not None:
-        try:
-            content = uploaded_file.read().decode('utf-8')
-            data = process_ecd_file(content)
-            kpis = calculate_kpis(data['contas'], data['saldos'])
-            
-            # Mostrar informações da empresa
-            st.subheader("Informações da Empresa")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Nome", data['empresa'].get('Nome', 'Não informado'))
-            col2.metric("CNPJ", data['empresa'].get('CNPJ', 'Não informado'))
-            col3.metric("UF", data['empresa'].get('UF', 'Não informado'))
-            
-            # Seção de Demonstração de Resultados
-            st.subheader("🔄 Demonstração de Resultados")
-            cols = st.columns(4)
-            cols[0].metric("Receita Bruta", f"R$ {kpis['Receita Bruta']:,.2f}")
-            cols[1].metric("Deduções", f"R$ {kpis['Deduções']:,.2f}", delta=f"-{kpis['Deduções']:,.2f}")
-            cols[2].metric("Receita Líquida", f"R$ {kpis['Receita Líquida']:,.2f}")
-            cols[3].metric("Custo das Vendas", f"R$ {kpis['Custo das Vendas']:,.2f}", delta_color="inverse")
-            
-            cols = st.columns(3)
-            cols[0].metric("Lucro Bruto", f"R$ {kpis['Lucro Bruto']:,.2f}", 
-                          delta=f"{kpis['Margem Bruta']:.2f}%")
-            cols[1].metric("Despesas Operacionais", f"R$ {kpis['Despesas Operacionais']:,.2f}", delta_color="inverse")
-            cols[2].metric("Resultado Financeiro", f"R$ {kpis['Resultado Financeiro']:,.2f}")
-            
-            cols = st.columns(3)
-            cols[0].metric("Lucro Operacional", f"R$ {kpis['Lucro Operacional']:,.2f}")
-            cols[1].metric("Impostos", f"R$ {kpis['Impostos']:,.2f}", delta_color="inverse")
-            cols[2].metric("Lucro Líquido", f"R$ {kpis['Lucro Líquido']:,.2f}", 
-                          delta=f"{kpis['Margem Líquida']:.2f}%")
-            
-            # Gráfico de margens
-            fig = px.bar(
-                x=['Margem Bruta', 'Margem Operacional', 'Margem Líquida'],
-                y=[
-                    kpis['Margem Bruta'], 
-                    (kpis['Lucro Operacional']/kpis['Receita Líquida'])*100 if kpis['Receita Líquida'] != 0 else 0, 
-                    kpis['Margem Líquida']
-                ],
-                title="Margens (%)",
-                labels={'x': 'Tipo de Margem', 'y': 'Percentual (%)'},
-                color=['Margem Bruta', 'Margem Operacional', 'Margem Líquida']
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Seção de Balanço Patrimonial
-            st.subheader("🏦 Balanço Patrimonial")
-            cols = st.columns(3)
-            cols[0].metric("Ativo Total", f"R$ {kpis['Ativo Total']:,.2f}")
-            cols[1].metric("Passivo Total", f"R$ {kpis['Passivo Total']:,.2f}")
-            cols[2].metric("Patrimônio Líquido", f"R$ {kpis['Patrimônio Líquido']:,.2f}")
-            
-            # Gráfico de composição do ativo e passivo
-            fig = px.pie(
-                names=['Ativo Circulante', 'Ativo Não Circulante'],
-                values=[kpis['Ativo Circulante'], kpis['Ativo Não Circulante']],
-                title='Composição do Ativo',
-                hole=0.4
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            
-            fig = px.pie(
-                names=['Passivo Circulante', 'Passivo Não Circulante', 'Patrimônio Líquido'],
-                values=[kpis['Passivo Circulante'], kpis['Passivo Não Circulante'], kpis['Patrimônio Líquido']],
-                title='Composição do Passivo',
-                hole=0.4
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Seção de Indicadores de Rentabilidade
-            st.subheader("📈 Indicadores de Rentabilidade")
-            cols = st.columns(3)
-            cols[0].metric("ROE (Return on Equity)", f"{kpis['ROE']:.2f}%")
-            cols[1].metric("ROA (Return on Assets)", f"{kpis['ROA']:.2f}%")
-            cols[2].metric("Giro do Ativo", f"{kpis['Giro do Ativo']:.2f}x")
-            
-            # Seção de Indicadores de Liquidez
-            st.subheader("💧 Indicadores de Liquidez")
-            cols = st.columns(3)
-            cols[0].metric("Liquidez Corrente", f"{kpis['Liquidez Corrente']:.2f}x",
-                          help="Ativo Circulante / Passivo Circulante")
-            cols[1].metric("Liquidez Seca", f"{kpis['Liquidez Seca']:.2f}x",
-                          help="(Ativo Circulante - Estoques) / Passivo Circulante")
-            cols[2].metric("Liquidez Geral", f"{kpis['Liquidez Geral']:.2f}x",
-                          help="(Ativo Circulante + Não Circulante) / (Passivo Circulante + Não Circulante)")
-            
-            # Seção de Indicadores de Endividamento
-            st.subheader("🏦 Indicadores de Endividamento")
-            cols = st.columns(3)
-            cols[0].metric("Endividamento Geral", f"{kpis['Endividamento Geral']:.2f}%",
-                          help="(Passivo Total / Ativo Total) x 100")
-            cols[1].metric("Composição do Endividamento", f"{kpis['Composição do Endividamento']:.2f}%",
-                          help="(Passivo Circulante / Passivo Total) x 100")
-            cols[2].metric("Garantia de Capital Próprio", f"{kpis['Garantia de Capital Próprio']:.2f}x",
-                          help="Patrimônio Líquido / Passivo Total")
-            
-            # Tabela resumo de todos os KPIs
-            st.subheader("📊 Resumo de Todos os KPIs")
-            kpi_df = pd.DataFrame.from_dict(kpis, orient='index', columns=['Valor'])
-            st.dataframe(kpi_df.style.format({'Valor': '{:,.2f}'}))
-            
-        except Exception as e:
-            st.error(f"Erro ao processar o arquivo: {str(e)}")
-    else:
-        st.info("Por favor, carregue um arquivo ECD no formato TXT para análise.")
+# Streamlit UI
+st.set_page_config(layout="wide")
+st.title("📊 Dashboard de KPIs Contábeis e Financeiros (ECD)")
 
-if __name__ == "__main__":
-    main()
+st.write("Faça o upload do seu arquivo TXT da ECD para analisar os principais indicadores.")
+
+uploaded_file = st.file_uploader("Escolha um arquivo TXT da ECD", type="txt")
+
+if uploaded_file is not None:
+    file_content = uploaded_file.read().decode("utf-8")
+
+    st.subheader("Conteúdo do Arquivo ECD (Amostra)")
+    st.code(file_content[:1000] + "...", language="text")
+
+    st.subheader("Processando Dados...")
+    df_accounts, df_movements = parse_ecd_file(file_content)
+
+    if not df_accounts.empty and not df_movements.empty:
+        st.success("Arquivo ECD processado com sucesso!")
+
+        st.subheader("Estrutura do Plano de Contas (I050)")
+        st.dataframe(df_accounts)
+
+        st.subheader("Lançamentos Contábeis (I355)")
+        st.dataframe(df_movements)
+
+        st.subheader("Calculando KPIs...")
+        kpis = calculate_kpis(df_accounts, df_movements)
+
+        st.header("Principais Indicadores Financeiros e Contábeis")
+
+        if "Error" in kpis:
+            st.error(kpis["Error"])
+        else:
+            st.markdown("### Indicadores de Rentabilidade")
+            rent_col1, rent_col2, rent_col3 = st.columns(3)
+            with rent_col1:
+                st.metric(label="Receita Total", value=f"R$ {kpis['Total Revenue']:.2f}")
+                st.metric(label="Lucro Bruto", value=f"R$ {kpis['Gross Profit (Lucro Bruto)']:.2f}")
+                st.metric(label="Margem Bruta", value=f"{kpis['Gross Profit Margin (Margem Bruta)']:.2%}")
+            with rent_col2:
+                st.metric(label="Lucro Operacional", value=f"R$ {kpis['Operating Income (Lucro Operacional)']:.2f}")
+                st.metric(label="Lucro Líquido", value=f"R$ {kpis['Net Income (Lucro Líquido)']:.2f}")
+                st.metric(label="Margem Líquida", value=f"{kpis['Net Profit Margin (Margem Líquida)']:.2%}")
+            with rent_col3:
+                st.metric(label="EBITDA (Aprox.)", value=f"R$ {kpis['EBITDA']:.2f}")
+                st.metric(label="Margem EBITDA (Aprox.)", value=f"{kpis['EBITDA Margin']:.2%}")
+                st.metric(label="Margem de Contribuição % (Aprox.)", value=f"{kpis['Contribution Margin %']:.2%}")
+
+            st.markdown("### Indicadores de Estrutura de Capital e Eficiência")
+            struct_col1, struct_col2, struct_col3 = st.columns(3)
+            with struct_col1:
+                st.metric(label="Ativo Total", value=f"R$ {kpis['Total Assets']:.2f}")
+                st.metric(label="Passivo Total", value=f"R$ {kpis['Total Liabilities']:.2f}")
+            with struct_col2:
+                st.metric(label="Capital Próprio (Patrimônio Líquido)", value=f"R$ {kpis['Total Equity']:.2f}")
+                st.metric(label="Índice Dívida/Capital Próprio", value=f"{kpis['Debt-to-Equity Ratio (Total Liabilities / Total Equity)']:.2f}")
+            with struct_col3:
+                st.metric(label="ROE (Retorno sobre PL)", value=f"{kpis['ROE (Return on Equity)']:.2%}")
+                st.metric(label="ROA (Retorno sobre Ativo)", value=f"{kpis['ROA (Return on Assets)']:.2%}")
+
+            st.markdown("### Indicadores de Liquidez")
+            liq_col1, liq_col2 = st.columns(2)
+            with liq_col1:
+                # Clarifying label for Current Assets. The total_assets is not current assets.
+                # Re-using the current_assets variable calculated in calculate_kpis.
+                st.metric(label="Ativo Circulante", value=f"R$ {kpis['Current Ratio (Current Assets / Current Liabilities)']:.2f}") # This is actually the ratio, not the value. Let's fix this display.
+                # Corrected: Display the value if available, not the ratio.
+                st.metric(label="Ativo Circulante (Valor)", value=f"R$ {kpis.get('Current Assets (Valor)', 0.0):.2f}") # Added a new KPI for current asset value
+            with liq_col2:
+                # Clarifying label for Current Liabilities.
+                st.metric(label="Passivo Circulante (Valor)", value=f"R$ {kpis.get('Current Liabilities (Valor)', 0.0):.2f}") # Added a new KPI for current liabilities value
+                st.metric(label="Índice de Liquidez Corrente", value=f"{kpis['Current Ratio (Current Assets / Current Liabilities)']:.2f}")
+
+            # Adding Current Assets and Current Liabilities values to kpis dict
+            kpis['Current Assets (Valor)'] = current_assets # from calculate_kpis function
+            kpis['Current Liabilities (Valor)'] = current_liabilities # from calculate_kpis function
+
+            st.markdown("---")
+            st.write("### Detalhes dos Balanços por Conta (Contas Analíticas)")
+            # No need to re-calculate df_detailed_balances and account_balances_for_display inside here
+            # as account_balances already has Final_Balance.
+            # We just need to filter and display from account_balances directly.
+            analytical_account_codes = df_accounts[df_accounts['Account_Type'] == 'A']['Account_Code'].tolist()
+            analytical_balances_display = account_balances[
+                account_balances['Account_Code'].isin(analytical_account_codes)
+            ].copy()
+
+            st.dataframe(analytical_balances_display[['Account_Code', 'Account_Name', 'Main_Group', 'Final_Balance']].sort_values(by='Account_Code'))
+
+    else:
+        st.warning("Não foi possível extrair dados válidos dos registros I050 ou I355 do arquivo. Por favor, verifique o formato e se há registros contábeis.")
+
+st.markdown("---")
+st.info(
+    "**Importante:** Este dashboard é uma ferramenta analítica e os resultados dependem da exatidão e completude dos dados "
+    "presentes no arquivo ECD. A interpretação dos KPIs deve ser feita por um profissional qualificado. "
+    "A classificação das contas (Ativo, Passivo, Receita, Despesa, Custos) é baseada na primeira parte do código da conta e/ou no nome da conta, "
+    "o que pode não ser totalmente preciso para todos os planos de contas. "
+    "**Margem de Contribuição** e **EBITDA** são calculados com base em inferências sobre a natureza das contas, "
+    "e podem não refletir o cálculo exato da empresa sem um detalhamento maior dos custos e despesas variáveis, depreciação e amortização. "
+    "Para rodar este dashboard, salve o código como um arquivo Python (ex: `ecd_dashboard.py`) e execute "
+    "`streamlit run ecd_dashboard.py` no seu terminal."
+    )
