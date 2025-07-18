@@ -1,391 +1,619 @@
 import streamlit as st
+from streamlit.components.v1 import html
+from datetime import datetime, timedelta
 import pandas as pd
-import io
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import random
 
-# --- CSS para Estilização e Animação ---
-# Importante: Este bloco de CSS deve estar impecável.
-# Verifique se não há aspas triplas dentro dele que não sejam de fechamento
-# e se não há barras invertidas (\) no final de linhas que não estejam escapadas (\\).
+# Configuração inicial da página
+st.set_page_config(
+    page_title="Performance Sport Agency",
+    page_icon="🚴‍♂️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# CSS Avançado com animações
+def local_css(file_name):
+    with open(file_name) as f:
+        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+
+local_css("style.css")
+
+# HTML/CSS personalizado
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
+:root {
+    --primary: #2c3e50;
+    --secondary: #3498db;
+    --accent: #e74c3c;
+    --light: #ecf0f1;
+    --dark: #2c3e50;
+}
 
-    body {
-        font-family: 'Roboto', sans-serif;
-        background-color: #f0f2f6;
-        color: #333;
-    }
-    .main {
-        background-color: #ffffff;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        animation: fadeIn 1s ease-in-out;
-    }
-    .stApp {
-        background-color: #f0f2f6;
-    }
-    .stButton>button {
-        background-color: #4CAF50;
-        color: white;
-        padding: 10px 20px;
-        border-radius: 5px;
-        border: none;
-        cursor: pointer;
-        transition: all 0.3s ease-in-out;
-        font-weight: bold;
-    }
-    .stButton>button:hover {
-        background-color: #45a049;
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    }
-    h1, h2, h3 {
-        color: #2c3e50;
-        font-weight: 700;
-        border-bottom: 2px solid #4CAF50;
-        padding-bottom: 5px;
-        margin-bottom: 20px;
-    }
-    .stMarkdown p {
-        font-size: 16px;
-        line-height: 1.6;
-    }
-    .metric-card {
-        background-color: #e8f5e9; /* Light green */
-        border-left: 5px solid #4CAF50;
-        padding: 15px;
-        border-radius: 8px;
-        margin-bottom: 15px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-        transition: transform 0.2s;
-    }
-    .metric-card:hover {
-        transform: translateY(-3px);
-    }
-    .metric-card h3 {
-        margin-top: 0;
-        color: #2e7d32; /* Darker green */
-        font-size: 1.1em;
-        border-bottom: none;
-    }
-    .metric-card p {
-        font-size: 1.8em;
-        font-weight: bold;
-        color: #333;
-        margin-bottom: 0;
-    }
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
 
-    /* Animações */
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(20px); }
-        to { opacity: 1; transform: translateY(0); }
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+.header {
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    color: white;
+    padding: 2rem;
+    border-radius: 10px;
+    margin-bottom: 2rem;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    animation: fadeIn 1s ease-out;
+}
+
+.header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.header p {
+    font-size: 1.2rem;
+    opacity: 0.9;
+}
+
+.card {
+    background: white;
+    border-radius: 10px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    animation: fadeIn 0.8s ease-out;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+}
+
+.section-title {
+    color: var(--primary);
+    border-bottom: 3px solid var(--secondary);
+    padding-bottom: 0.5rem;
+    margin-bottom: 1.5rem;
+    font-size: 1.8rem;
+}
+
+.btn {
+    background: var(--secondary);
+    color: white;
+    border: none;
+    padding: 0.8rem 1.5rem;
+    border-radius: 30px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 10px rgba(52, 152, 219, 0.3);
+    display: inline-block;
+    margin: 0.5rem 0;
+}
+
+.btn:hover {
+    background: var(--primary);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 15px rgba(52, 152, 219, 0.4);
+}
+
+.progress-container {
+    width: 100%;
+    background-color: #f1f1f1;
+    border-radius: 10px;
+    margin: 1rem 0;
+}
+
+.progress-bar {
+    height: 20px;
+    border-radius: 10px;
+    background: linear-gradient(90deg, var(--secondary), var(--accent));
+    text-align: center;
+    line-height: 20px;
+    color: white;
+    transition: width 1s ease-in-out;
+    animation: pulse 2s infinite;
+}
+
+.meal-card {
+    background: #f8f9fa;
+    border-left: 5px solid var(--secondary);
+    border-radius: 5px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.meal-title {
+    font-weight: bold;
+    color: var(--primary);
+    margin-bottom: 0.5rem;
+}
+
+.workout-day {
+    background: #e8f4fc;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border-left: 5px solid var(--accent);
+}
+
+.day-title {
+    font-weight: bold;
+    color: var(--accent);
+    margin-bottom: 0.5rem;
+}
+
+.exercise {
+    margin-left: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.timeline {
+    position: relative;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.timeline::after {
+    content: '';
+    position: absolute;
+    width: 6px;
+    background-color: var(--secondary);
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    margin-left: -3px;
+}
+
+.timeline-item {
+    padding: 10px 40px;
+    position: relative;
+    width: 50%;
+    box-sizing: border-box;
+}
+
+.timeline-item::after {
+    content: '';
+    position: absolute;
+    width: 25px;
+    height: 25px;
+    right: -12px;
+    background-color: white;
+    border: 4px solid var(--accent);
+    top: 15px;
+    border-radius: 50%;
+    z-index: 1;
+}
+
+.left {
+    left: 0;
+}
+
+.right {
+    left: 50%;
+}
+
+.left::before {
+    content: " ";
+    height: 0;
+    position: absolute;
+    top: 22px;
+    width: 0;
+    z-index: 1;
+    right: 30px;
+    border: medium solid var(--secondary);
+    border-width: 10px 0 10px 10px;
+    border-color: transparent transparent transparent var(--secondary);
+}
+
+.right::before {
+    content: " ";
+    height: 0;
+    position: absolute;
+    top: 22px;
+    width: 0;
+    z-index: 1;
+    left: 30px;
+    border: medium solid var(--secondary);
+    border-width: 10px 10px 10px 0;
+    border-color: transparent var(--secondary) transparent transparent;
+}
+
+.right::after {
+    left: -12px;
+}
+
+.timeline-content {
+    padding: 20px 30px;
+    background-color: white;
+    position: relative;
+    border-radius: 6px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+@media screen and (max-width: 768px) {
+    .timeline::after {
+        left: 31px;
     }
-    .stDataFrame {
-        animation: slideIn 0.5s ease-out;
+    
+    .timeline-item {
+        width: 100%;
+        padding-left: 70px;
+        padding-right: 25px;
     }
-    @keyframes slideIn {
-        from { opacity: 0; transform: translateX(-20px); }
-        to { opacity: 1; transform: translateX(0); }
+    
+    .timeline-item::before {
+        left: 60px;
+        border: medium solid var(--secondary);
+        border-width: 10px 10px 10px 0;
+        border-color: transparent var(--secondary) transparent transparent;
     }
+    
+    .left::after, .right::after {
+        left: 18px;
+    }
+    
+    .right {
+        left: 0%;
+    }
+}
 </style>
-""", unsafe_allow_html=True) # <<< Esta é a linha onde o """ deve fechar.
+""", unsafe_allow_html=True)
 
-# --- Funções de Parsing da ECD (Ajuste conforme seu arquivo REAL) ---
+# Cabeçalho com animação
+st.markdown("""
+<div class="header">
+    <h1>Performance Sport Agency</h1>
+    <p>Seu plano personalizado de 60 dias para emagrecimento e performance no ciclismo</p>
+</div>
+""", unsafe_allow_html=True)
 
-def parse_ecd_file(uploaded_file):
-    """
-    Parses an uploaded ECD file to extract J100 and J155 records.
-    Assumes pipe-separated values and a specific header structure.
-    Includes robust error handling for UnicodeDecodeError and parsing errors.
-    """
-    j100_data = []
-    j155_data = []
-    content = None
+# Dados do usuário
+user_data = {
+    "name": "Atleta",
+    "age": 28,
+    "height": 1.87,
+    "weight": 108,
+    "goal": "Emagrecimento e Performance no Ciclismo",
+    "start_date": datetime.now().strftime("%d/%m/%Y"),
+    "end_date": (datetime.now() + timedelta(days=60)).strftime("%d/%m/%Y")
+}
 
-    # Tenta decodificar o arquivo com diferentes codificações
-    for encoding in ["utf-8", "latin-1", "cp1252"]:
-        try:
-            # st.sidebar.info(f"Tentando decodificar com {encoding}...") # Debugging
-            content = uploaded_file.getvalue().decode(encoding)
-            st.sidebar.success(f"Arquivo decodificado com sucesso usando {encoding}!")
-            break # Se decodificar, sai do loop
-        except UnicodeDecodeError:
-            # st.sidebar.warning(f"Falha na decodificação com {encoding}. Tentando a próxima...") # Debugging
-            continue # Tenta a próxima codificação
-        except Exception as e:
-            st.sidebar.error(f"Ocorreu um erro inesperado ao tentar decodificar com {encoding}: {e}")
-            return pd.DataFrame(), pd.DataFrame() # Retorna vazios em caso de erro grave
+# Barra de progresso
+st.markdown("""
+<div class="card">
+    <h2 class="section-title">Seu Progresso</h2>
+    <p>Meta de 60 dias: {start_date} - {end_date}</p>
+    <div class="progress-container">
+        <div class="progress-bar" style="width: 0%">0%</div>
+    </div>
+</div>
+""".format(**user_data), unsafe_allow_html=True)
 
-    if content is None:
-        st.error("Não foi possível decodificar o arquivo com as codificações testadas (UTF-8, Latin-1, CP1252). Por favor, verifique a codificação do seu arquivo ECD.")
-        return pd.DataFrame(), pd.DataFrame() # Retorna DataFrames vazios se nenhuma codificação funcionar
+# Abas para navegação
+tab1, tab2, tab3 = st.tabs(["📊 Visão Geral", "🍽 Plano Alimentar", "💪 Rotina de Treinos"])
 
-    # Processar o conteúdo decodificado
-    for line in content.splitlines():
-        # Remove caracteres de quebra de linha e espaços extras, e garante que a linha não esteja vazia
-        line = line.strip() 
-        if not line:
-            continue # Pula linhas vazias
-
-        if line.startswith("|J100|"):
-            parts = line.split('|')
-            # Exemplo de formato: |J100|COD_CTA|DESCR_CTA|VL_CTA_FINL|IND_DC|
-            # Índice 0 é vazio antes do primeiro |, Índice 1 é "J100".
-            # Então, os dados úteis começam do Índice 2
-            if len(parts) >= 6: # Garante que há partes suficientes para evitar IndexError
-                try:
-                    j100_data.append({
-                        'COD_CTA': parts[2],
-                        'DESCR_CTA': parts[3],
-                        'VL_CTA_FINL': float(parts[4].replace(',', '.')), # Trata vírgula como separador decimal
-                        'IND_DC': parts[5]
-                    })
-                except ValueError:
-                    st.warning(f"Linha J100 com erro de valor numérico. Pulando linha: {line}")
-                    continue
-                except IndexError:
-                    st.warning(f"Linha J100 com formato inesperado (menos colunas que o esperado). Pulando linha: {line}")
-                    continue
-        elif line.startswith("|J155|"):
-            parts = line.split('|')
-            # Exemplo de formato: |J155|COD_CTA_RES|DESCR_CTA_RES|VL_CTA_RES|IND_VL|
-            if len(parts) >= 6: # Garante que há partes suficientes
-                try:
-                    j155_data.append({
-                        'COD_CTA_RES': parts[2],
-                        'DESCR_CTA_RES': parts[3],
-                        'VL_CTA_RES': float(parts[4].replace(',', '.')), # Trata vírgula como separador decimal
-                        'IND_VL': parts[5]
-                    })
-                except ValueError:
-                    st.warning(f"Linha J155 com erro de valor numérico. Pulando linha: {line}")
-                    continue
-                except IndexError:
-                    st.warning(f"Linha J155 com formato inesperado (menos colunas que o esperado). Pulando linha: {line}")
-                    continue
+with tab1:
+    st.markdown("""
+    <div class="card">
+        <h2 class="section-title">Seu Perfil</h2>
+        <p><strong>Nome:</strong> {name}</p>
+        <p><strong>Idade:</strong> {age} anos</p>
+        <p><strong>Altura:</strong> {height}m</p>
+        <p><strong>Peso atual:</strong> {weight}kg</p>
+        <p><strong>Objetivo:</strong> {goal}</p>
+    </div>
+    """.format(**user_data), unsafe_allow_html=True)
     
-    return pd.DataFrame(j100_data), pd.DataFrame(j155_data)
+    st.markdown("""
+    <div class="card">
+        <h2 class="section-title">Metas para 60 Dias</h2>
+        <div class="timeline">
+            <div class="timeline-item left">
+                <div class="timeline-content">
+                    <h3>Semana 1-2</h3>
+                    <p>Adaptação metabólica e estabelecimento de rotina</p>
+                    <p>Meta de peso: -2kg</p>
+                </div>
+            </div>
+            <div class="timeline-item right">
+                <div class="timeline-content">
+                    <h3>Semana 3-4</h3>
+                    <p>Intensificação dos treinos e ajuste nutricional</p>
+                    <p>Meta de peso: -3kg</p>
+                </div>
+            </div>
+            <div class="timeline-item left">
+                <div class="timeline-content">
+                    <h3>Semana 5-6</h3>
+                    <p>Foco em endurance e potência no ciclismo</p>
+                    <p>Meta de peso: -3kg</p>
+                </div>
+            </div>
+            <div class="timeline-item right">
+                <div class="timeline-content">
+                    <h3>Semana 7-8</h3>
+                    <p>Consolidação de performance e perda de gordura</p>
+                    <p>Meta de peso: -3kg</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-# --- Funções de Cálculo de KPIs ---
-
-def calculate_kpis(df_balanco, df_dre):
-    kpis = {}
-
-    # --- DRE Cálculos ---
-    # É fundamental que os códigos de conta abaixo correspondam EXATAMENTE aos do seu arquivo ECD.
-    # Ajuste os prefixos ('3.01.01', etc.) conforme necessário para o seu plano de contas.
-
-    # Receita Bruta de Vendas (Contas iniciadas com 3.01.01 e indicador 'C' - Crédito)
-    receita_bruta = df_dre[
-        df_dre['COD_CTA_RES'].str.startswith('3.01.01') & (df_dre['IND_VL'] == 'C')
-    ]['VL_CTA_RES'].sum()
-
-    # Deduções da Receita Bruta (Contas iniciadas com 3.01.02 e indicador 'D' - Débito)
-    deducoes_receita = df_dre[
-        df_dre['COD_CTA_RES'].str.startswith('3.01.02') & (df_dre['IND_VL'] == 'D')
-    ]['VL_CTA_RES'].sum()
-
-    # Custo dos Produtos/Serviços Vendidos (Contas iniciadas com 4.01.01 e indicador 'D')
-    custo_vendas = df_dre[
-        df_dre['COD_CTA_RES'].str.startswith('4.01.01') & (df_dre['IND_VL'] == 'D')
-    ]['VL_CTA_RES'].sum()
-
-    # Despesas Operacionais (ex: Despesas com Vendas, Administrativas, outras operacionais)
-    # Ajuste os prefixos de acordo com as suas contas reais para despesas operacionais.
-    despesas_operacionais = df_dre[
-        (df_dre['COD_CTA_RES'].str.startswith('5.01') | # Ex: Despesas com Vendas
-         df_dre['COD_CTA_RES'].str.startswith('5.02') | # Ex: Despesas Administrativas
-         df_dre['COD_CTA_RES'].str.startswith('5.03')) & # Outras Despesas Operacionais, se houver
-        (df_dre['IND_VL'] == 'D')
-    ]['VL_CTA_RES'].sum()
-
-    # Receitas Financeiras (Contas iniciadas com 6.01 e indicador 'C')
-    receitas_financeiras = df_dre[
-        df_dre['COD_CTA_RES'].str.startswith('6.01') & (df_dre['IND_VL'] == 'C')
-    ]['VL_CTA_RES'].sum()
-
-    # Despesas Financeiras (Contas iniciadas com 6.02 e indicador 'D')
-    despesas_financeiras = df_dre[
-        df_dre['COD_CTA_RES'].str.startswith('6.02') & (df_dre['IND_VL'] == 'D')
-    ]['VL_CTA_RES'].sum()
+with tab2:
+    st.markdown("""
+    <div class="card">
+        <h2 class="section-title">Plano Alimentar para Emagrecimento</h2>
+        <p>Dieta baseada em alimentos acessíveis e nutritivos para performance no ciclismo</p>
+        <p><strong>Meta calórica diária:</strong> ~2,200 kcal (déficit moderado)</p>
+        <p><strong>Distribuição macro:</strong> 40% Carboidratos | 35% Proteínas | 25% Gorduras</p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Impostos sobre o Lucro (IRPJ e CSLL - Contas iniciadas com 9.01 e indicador 'D')
-    impostos_lucro = df_dre[
-        df_dre['COD_CTA_RES'].str.startswith('9.01') & (df_dre['IND_VL'] == 'D')
-    ]['VL_CTA_RES'].sum()
-
-    # Receita Líquida
-    receita_liquida = receita_bruta - deducoes_receita
-    kpis['Receita Líquida'] = receita_liquida
-
-    # Lucro Bruto
-    lucro_bruto = receita_liquida - custo_vendas
-    kpis['Lucro Bruto'] = lucro_bruto
-
-    # Margem de Contribuição (Exemplo Simplificado - Adapte se tiver mais detalhes de custos variáveis)
-    # Aqui estamos assumindo Custo dos Produtos Vendidos como o principal Custo Variável.
-    # Em uma análise real, você precisaria identificar todas as despesas variáveis.
-    custos_variaveis = custo_vendas # + Outros custos variáveis se existirem (ex: comissões de vendas)
-    margem_contribuicao = receita_liquida - custos_variaveis
-    kpis['Margem de Contribuição'] = margem_contribuicao
-    kpis['% Margem de Contribuição'] = (margem_contribuicao / receita_liquida) * 100 if receita_liquida != 0 else 0
-
-
-    # Lucro Operacional (EBIT)
-    lucro_operacional = lucro_bruto - despesas_operacionais
-    kpis['Lucro Operacional (EBIT)'] = lucro_operacional
-
-    # Resultado Antes dos Tributos e Participações (LAIR)
-    lair = lucro_operacional + receitas_financeiras - despesas_financeiras
-    kpis['Lucro Antes do IR e CSLL'] = lair
-
-    # Lucro Líquido
-    lucro_liquido = lair - impostos_lucro
-    kpis['Lucro Líquido'] = lucro_liquido
-
-    # --- Balanço Patrimonial Cálculos ---
-    # Ativo Total (Contas iniciadas com 1 e indicador 'D')
-    ativo_total = df_balanco[
-        df_balanco['COD_CTA'].str.startswith('1') & (df_balanco['IND_DC'] == 'D')
-    ]['VL_CTA_FINL'].sum()
-
-    # Passivo Total (Contas iniciadas com 2 e indicador 'C')
-    passivo_total = df_balanco[
-        df_balanco['COD_CTA'].str.startswith('2') & (df_balanco['IND_DC'] == 'C')
-    ]['VL_CTA_FINL'].sum()
-
-    # Patrimônio Líquido (Contas iniciadas com 3 e indicador 'C')
-    patrimonio_liquido = df_balanco[
-        df_balanco['COD_CTA'].str.startswith('3') & (df_balanco['IND_DC'] == 'C')
-    ]['VL_CTA_FINL'].sum()
+    col1, col2 = st.columns(2)
     
-    # Ativo Circulante (Contas iniciadas com 1.01 e indicador 'D')
-    ativo_circulante = df_balanco[
-        df_balanco['COD_CTA'].str.startswith('1.01') & (df_balanco['IND_DC'] == 'D')
-    ]['VL_CTA_FINL'].sum()
-
-    # Passivo Circulante (Contas iniciadas com 2.01 e indicador 'C')
-    passivo_circulante = df_balanco[
-        df_balanco['COD_CTA'].str.startswith('2.01') & (df_balanco['IND_DC'] == 'C')
-    ]['VL_CTA_FINL'].sum()
-
-    # --- KPIs Finais ---
-    kpis['Margem Bruta'] = (lucro_bruto / receita_liquida) * 100 if receita_liquida != 0 else 0
-    kpis['Margem Líquida'] = (lucro_liquido / receita_liquida) * 100 if receita_liquida != 0 else 0
-    kpis['ROA (Retorno sobre Ativos)'] = (lucro_liquido / ativo_total) * 100 if ativo_total != 0 else 0
-    kpis['ROE (Retorno sobre Patrimônio Líquido)'] = (lucro_liquido / patrimonio_liquido) * 100 if patrimonio_liquido != 0 else 0
-    kpis['Giro do Ativo'] = (receita_liquida / ativo_total) if ativo_total != 0 else 0
+    with col1:
+        st.markdown("""
+        <div class="card">
+            <h3>Dia Tipo (Treino)</h3>
+            
+            <div class="meal-card">
+                <div class="meal-title">Café da Manhã</div>
+                <p>• 3 ovos mexidos com espinafre</p>
+                <p>• 2 fatias de pão integral</p>
+                <p>• 1 banana</p>
+                <p>• 1 colher de sopa de pasta de amendoim</p>
+            </div>
+            
+            <div class="meal-card">
+                <div class="meal-title">Lanche Pré-Treino</div>
+                <p>• 1 copo de aveia com 1 colher de whey</p>
+                <p>• 1 xícara de café preto</p>
+            </div>
+            
+            <div class="meal-card">
+                <div class="meal-title">Almoço</div>
+                <p>• 150g de frango grelhado</p>
+                <p>• 1 concha de arroz integral</p>
+                <p>• 1 concha de feijão</p>
+                <p>• Salada à vontade (brócolis, cenoura, beterraba)</p>
+                <p>• 1 fio de azeite</p>
+            </div>
+            
+            <div class="meal-card">
+                <div class="meal-title">Lanche da Tarde</div>
+                <p>• 1 iogurte natural</p>
+                <p>• 1 colher de linhaça</p>
+                <p>• 1 fruta (maçã ou pera)</p>
+            </div>
+            
+            <div class="meal-card">
+                <div class="meal-title">Jantar</div>
+                <p>• 150g de carne moída magra</p>
+                <p>• Purê de abóbora ou batata-doce</p>
+                <p>• Legumes refogados (berinjela, abobrinha)</p>
+            </div>
+            
+            <div class="meal-card">
+                <div class="meal-title">Ceia</div>
+                <p>• 1 fatia de queijo branco</p>
+                <p>• 1 punhado de castanhas</p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    # Liquidez Corrente = Ativo Circulante / Passivo Circulante
-    kpis['Liquidez Corrente'] = (ativo_circulante / passivo_circulante) if passivo_circulante != 0 else 0
-
-    return kpis
-
-# --- Dashboard Streamlit ---
-# Configurações da página (deve ser no início do script, antes de qualquer st.write/st.sidebar)
-st.set_page_config(layout="wide", page_title="Dashboard de KPIs Financeiros", page_icon="📊")
-
-st.title("📊 Dashboard de Análise de KPIs Financeiros")
-
-st.markdown("---")
-
-st.sidebar.header("Upload do Arquivo ECD")
-uploaded_file = st.sidebar.file_uploader("Arraste e solte ou clique para fazer upload do seu arquivo ECD (.txt)", type=["txt"])
-
-if uploaded_file is not None:
-    st.success("Arquivo carregado com sucesso!")
+    with col2:
+        st.markdown("""
+        <div class="card">
+            <h3>Dia Tipo (Descanso)</h3>
+            
+            <div class="meal-card">
+                <div class="meal-title">Café da Manhã</div>
+                <p>• 2 ovos cozidos</p>
+                <p>• 1 fatia de pão integral</p>
+                <p>• 1/2 abacate</p>
+                <p>• Chá verde</p>
+            </div>
+            
+            <div class="meal-card">
+                <div class="meal-title">Lanche da Manhã</div>
+                <p>• 1 iogurte natural com 1 colher de chia</p>
+                <p>• 5 morangos</p>
+            </div>
+            
+            <div class="meal-card">
+                <div class="meal-title">Almoço</div>
+                <p>• 1 posta de peixe (sardinha ou atum)</p>
+                <p>• 1/2 concha de arroz integral</p>
+                <p>• Lentilha cozida</p>
+                <p>• Salada verde à vontade</p>
+                <p>• 1 fio de azeite</p>
+            </div>
+            
+            <div class="meal-card">
+                <div class="meal-title">Lanche da Tarde</div>
+                <p>• Vitamina de abacate com leite desnatado</p>
+                <p>• 1 colher de sopa de aveia</p>
+            </div>
+            
+            <div class="meal-card">
+                <div class="meal-title">Jantar</div>
+                <p>• Omelete de 2 ovos com queijo branco</p>
+                <p>• Salada de folhas verdes</p>
+                <p>• 1 colher de sopa de quinoa</p>
+            </div>
+            
+            <div class="meal-card">
+                <div class="meal-title">Ceia</div>
+                <p>• 1 copo de leite desnatado</p>
+                <p>• Canela em pó</p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
-    # Processar o arquivo
-    df_j100, df_j155 = parse_ecd_file(uploaded_file)
+    st.markdown("""
+    <div class="card">
+        <h3>Orientações Nutricionais</h3>
+        <ul>
+            <li>Mantenha hidratação constante (3-4L de água/dia)</li>
+            <li>Priorize alimentos integrais e minimamente processados</li>
+            <li>Consuma proteína em todas as refeições</li>
+            <li>Inclua gorduras saudáveis (azeite, castanhas, abacate)</li>
+            <li>Nos dias de treino intenso, aumente os carboidratos</li>
+            <li>Nos dias de descanso, reduza ligeiramente os carboidratos</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
 
-    if not df_j100.empty and not df_j155.empty:
-        st.subheader("Dados Carregados")
+with tab3:
+    st.markdown("""
+    <div class="card">
+        <h2 class="section-title">Rotina de Treinos - 60 Dias</h2>
+        <p>Programa de 6 dias por semana com foco em emagrecimento e desenvolvimento para ciclismo</p>
+        <p><strong>Duração:</strong> Dias de semana até 1h30 | Finais de semana sem limite</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Semana tipo
+    st.markdown("""
+    <div class="card">
+        <h3>Estrutura Semanal</h3>
         
-        # Tabs para visualizar os DataFrames brutos
-        tab1, tab2 = st.tabs(["Balanço Patrimonial (J100)", "DRE (J155)"])
-        with tab1:
-            st.dataframe(df_j100, use_container_width=True)
-        with tab2:
-            st.dataframe(df_j155, use_container_width=True)
-
-        st.markdown("---")
-        st.subheader("Cálculo de KPIs Financeiros")
+        <div class="workout-day">
+            <div class="day-title">Segunda-feira: Treino de Força (Membros Inferiores + Core)</div>
+            <div class="exercise">• Agachamento livre: 4x8-10</div>
+            <div class="exercise">• Leg press: 3x10-12</div>
+            <div class="exercise">• Stiff: 3x10</div>
+            <div class="exercise">• Elevação pélvica: 3x12</div>
+            <div class="exercise">• Prancha abdominal: 3x40s</div>
+            <div class="exercise">• Bike ergométrica (leve): 15min</div>
+        </div>
         
-        # Calcular os KPIs
-        kpis = calculate_kpis(df_j100, df_j155)
+        <div class="workout-day">
+            <div class="day-title">Terça-feira: Ciclismo Intervalado</div>
+            <div class="exercise">• Aquecimento: 15min leve</div>
+            <div class="exercise">• Intervalos: 8x(2min forte / 2min leve)</div>
+            <div class="exercise">• Desaquecimento: 10min leve</div>
+            <div class="exercise">• Alongamento pós-treino</div>
+        </div>
         
-        # Função auxiliar para exibir os cards de métricas
-        def display_metric_card(col, title, value, is_percentage=False):
-            with col:
-                if is_percentage:
-                    st.markdown(f'<div class="metric-card"><h3>{title}</h3><p>{value:,.2f}%</p></div>', unsafe_allow_html=True)
-                else:
-                    st.markdown(f'<div class="metric-card"><h3>{title}</h3><p>R$ {value:,.2f}</p></div>', unsafe_allow_html=True)
-
-        # Exibir KPIs em cards
-        st.markdown('<div class="metric-container">', unsafe_allow_html=True)
+        <div class="workout-day">
+            <div class="day-title">Quarta-feira: Treino de Força (Superiores + Mobilidade)</div>
+            <div class="exercise">• Barra fixa assistida: 3x6-8</div>
+            <div class="exercise">• Remada curvada: 3x10</div>
+            <div class="exercise">• Desenvolvimento militar: 3x10</div>
+            <div class="exercise">• Mobilidade de quadril e tornozelo</div>
+            <div class="exercise">• Esteira inclinada: 15min</div>
+        </div>
         
-        # Linha 1 de KPIs
-        col1, col2, col3, col4 = st.columns(4)
-        display_metric_card(col1, "Lucro Bruto", kpis["Lucro Bruto"])
-        display_metric_card(col2, "Margem Bruta", kpis["Margem Bruta"], is_percentage=True)
-        display_metric_card(col3, "Lucro Líquido", kpis["Lucro Líquido"])
-        display_metric_card(col4, "Margem Líquida", kpis["Margem Líquida"], is_percentage=True)
+        <div class="workout-day">
+            <div class="day-title">Quinta-feira: Ciclismo Endurance</div>
+            <div class="exercise">• Pedalada contínua: 45-60min em ritmo moderado</div>
+            <div class="exercise">• Manter cadência entre 80-90rpm</div>
+            <div class="exercise">• Alongamento pós-treino</div>
+        </div>
         
-        # Linha 2 de KPIs
-        col5, col6, col7, col8 = st.columns(4)
-        display_metric_card(col5, "ROE", kpis["ROE (Retorno sobre Patrimônio Líquido)"], is_percentage=True)
-        display_metric_card(col6, "ROA", kpis["ROA (Retorno sobre Ativos)"], is_percentage=True)
-        display_metric_card(col7, "Margem Contribuição", kpis["% Margem de Contribuição"], is_percentage=True)
-        display_metric_card(col8, "Liquidez Corrente", kpis["Liquidez Corrente"])
-
-        st.markdown('</div>', unsafe_allow_html=True) # Fechamento do container de métricas
-
-        # Tabela completa de KPIs
-        st.subheader("Todos os KPIs Calculados")
-        kpis_df = pd.DataFrame(kpis.items(), columns=['KPI', 'Valor'])
+        <div class="workout-day">
+            <div class="day-title">Sexta-feira: Treino Funcional para Ciclismo</div>
+            <div class="exercise">• Saltos em caixa: 3x10</div>
+            <div class="exercise">• Afundo com salto: 3x8 cada perna</div>
+            <div class="exercise">• Burpees: 3x12</div>
+            <div class="exercise">• Bike sprints: 10x30s</div>
+            <div class="exercise">• Core: Russian twist 3x15 cada lado</div>
+        </div>
         
-        # Formatação dos valores na tabela
-        def format_kpi_value(row):
-            if "Margem" in row['KPI'] or "ROE" in row['KPI'] or "ROA" in row['KPI'] or "Percentual" in row['KPI']:
-                return f"{row['Valor']:,.2f}%"
-            elif "Lucro" in row['KPI'] or "Receita" in row['KPI'] or "Contribuição" in row['KPI']: # Incluindo Margem de Contribuição aqui
-                return f"R$ {row['Valor']:,.2f}"
-            else: # Para outros KPIs numéricos (Giro, Liquidez Corrente)
-                return f"{row['Valor']:,.2f}"
+        <div class="workout-day">
+            <div class="day-title">Sábado: Long Ride</div>
+            <div class="exercise">• Pedalada longa: 2-4 horas (progressivo)</div>
+            <div class="exercise">• Incluir subidas graduais</div>
+            <div class="exercise">• Hidratação e reposição energética durante</div>
+        </div>
+        
+        <div class="workout-day">
+            <div class="day-title">Domingo: Recuperação Ativa</div>
+            <div class="exercise">• Caminhada ou pedalada leve: 30-45min</div>
+            <div class="exercise">• Alongamento completo</div>
+            <div class="exercise">• Rolagem com foam roller</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Progressão ao longo das semanas
+    st.markdown("""
+    <div class="card">
+        <h3>Progressão do Treino</h3>
+        <table>
+            <tr>
+                <th>Fase</th>
+                <th>Semanas</th>
+                <th>Foco</th>
+                <th>Ajustes</th>
+            </tr>
+            <tr>
+                <td>Adaptação</td>
+                <td>1-2</td>
+                <td>Base aeróbica e técnica</td>
+                <td>Volume moderado, intensidade baixa</td>
+            </tr>
+            <tr>
+                <td>Construção</td>
+                <td>3-6</td>
+                <td>Força específica e endurance</td>
+                <td>Aumento gradual de volume e intensidade</td>
+            </tr>
+            <tr>
+                <td>Intensificação</td>
+                <td>7-9</td>
+                <td>Potência e limiar láctico</td>
+                <td>Intervalos mais intensos, redução de volume</td>
+            </tr>
+            <tr>
+                <td>Tapering</td>
+                <td>10</td>
+                <td>Recuperação e performance</td>
+                <td>Redução de volume, manutenção de intensidade</td>
+            </tr>
+        </table>
+    </div>
+    """, unsafe_allow_html=True)
 
-        kpis_df['Valor Formatado'] = kpis_df.apply(format_kpi_value, axis=1)
-        st.dataframe(kpis_df[['KPI', 'Valor Formatado']], use_container_width=True)
+# Rodapé
+st.markdown("""
+<div class="card" style="text-align: center; margin-top: 2rem;">
+    <p>Performance Sport Agency © 2023 - Plano personalizado para {name}</p>
+    <p>Início: {start_date} | Término: {end_date}</p>
+    <button class="btn" onclick="alert('Plano salvo com sucesso!')">Salvar Plano Completo</button>
+</div>
+""".format(**user_data), unsafe_allow_html=True)
 
-        st.markdown("---")
-        st.subheader("Visualização dos KPIs")
-
-        # Gráfico de Margens
-        fig_margens = go.Figure(data=[
-            go.Bar(name='Margem Bruta', x=['Margens'], y=[kpis['Margem Bruta']], marker_color='#4CAF50'),
-            go.Bar(name='Margem Líquida', x=['Margens'], y=[kpis['Margem Líquida']], marker_color='#2e7d32'),
-            go.Bar(name='Margem Contribuição', x=['Margens'], y=[kpis['% Margem de Contribuição']], marker_color='#8BC34A') # Nova barra
-        ])
-        fig_margens.update_layout(title='Margens de Lucro (%)', barmode='group', yaxis_title='Percentual (%)')
-        st.plotly_chart(fig_margens, use_container_width=True)
-
-        # Gráfico de Rentabilidade (ROE vs ROA)
-        fig_rentabilidade = go.Figure(data=[
-            go.Bar(name='ROE', x=['Rentabilidade'], y=[kpis['ROE (Retorno sobre Patrimônio Líquido)']], marker_color='#1E88E5'),
-            go.Bar(name='ROA', x=['Rentabilidade'], y=[kpis['ROA (Retorno sobre Ativos)']], marker_color='#1565C0')
-        ])
-        fig_rentabilidade.update_layout(title='Retorno (%)', barmode='group', yaxis_title='Percentual (%)')
-        st.plotly_chart(fig_rentabilidade, use_container_width=True)
-
-    elif uploaded_file is not None:
-        st.warning("Não foi possível extrair dados válidos dos blocos J100 e J155. Verifique o formato do arquivo e os códigos das contas. (Se o arquivo foi carregado mas não exibiu dados, pode ser um problema no formato das linhas dos blocos J100/J155).")
-
-else:
-    st.info("Aguardando o upload do arquivo ECD para iniciar a análise. Por favor, certifique-se de que o arquivo esteja no formato de texto (.txt) e siga o layout da ECD para os blocos J100 e J155.")
-
-st.markdown("---")
-st.markdown("Desenvolvido com ❤️ por Seu Nome/Empresa")
-
+# Script JavaScript para animar a barra de progresso
+html("""
+<script>
+// Animar barra de progresso
+document.addEventListener('DOMContentLoaded', function() {
+    const progressBar = document.querySelector('.progress-bar');
+    let width = 0;
+    const targetWidth = (new Date() - new Date('{start_date}')) / (new Date('{end_date}') - new Date('{start_date}')) * 100;
+    const interval = setInterval(function() {
+        if (width >= targetWidth) {
+            clearInterval(interval);
+        } else {
+            width++;
+            progressBar.style.width = width + '%';
+            progressBar.textContent = Math.round(width) + '%';
+        }
+    }, 20);
+});
+</script>
+""".format(
+    start_date=datetime.strptime(user_data["start_date"], "%d/%m/%Y").strftime("%Y-%m-%d"),
+    end_date=datetime.strptime(user_data["end_date"], "%d/%m/%Y").strftime("%Y-%m-%d")
+), height=0)
