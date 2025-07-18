@@ -6,7 +6,7 @@ import numpy as np
 
 # Configuração inicial da página
 st.set_page_config(
-    page_title="Controle de Atividades Fiscais",
+    page_title="Controle de Atividades Fiscais - HÄFELE BRASIL",
     page_icon="📊",
     layout="wide"
 )
