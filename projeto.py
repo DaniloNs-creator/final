@@ -518,4 +518,4 @@ def main():
             st.plotly_chart(fig_prazo, use_container_width=True)
     
     # Tabela de atividades
-    st.markdown('<div class="card animate-fadeIn"><h3>📋 Lista de Atividades</h3></div>', unsafe_allow
+    st.markdown('<div class="card animate-fadeIn"><h3>📋 Lista de Atividades</h3></div>', unsafe_allow_html=True)
