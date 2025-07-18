@@ -271,12 +271,15 @@ def generate_workout_plan(start_date):
 
 # Função para extrair minutos da duração formatada
 def extract_minutes(duration_str):
-    if "h" in duration_str:
-        hours_part = duration_str.split("h")[0]
-        minutes_part = duration_str.split("h")[1].replace("min", "")
-        return int(hours_part) * 60 + int(minutes_part)
-    else:
-        return int(duration_str.replace("min", ""))
+    try:
+        if "h" in duration_str:
+            hours_part = duration_str.split("h")[0]
+            minutes_part = duration_str.split("h")[1].replace("min", "")
+            return int(hours_part) * 60 + int(minutes_part)
+        else:
+            return int(duration_str.replace("min", ""))
+    except:
+        return 60  # Valor padrão se houver erro na conversão
 
 # Interface do aplicativo
 st.title("🚴‍♂️ PerformanceFit - Controle de Treinos e Dieta")
@@ -423,10 +426,13 @@ with tab3:
     
     # Processamento seguro da FC média
     def get_fc_avg(fc_str):
-        if "-" in fc_str and "bpm" in fc_str:
-            min_fc = int(fc_str.split("-")[0])
-            max_fc = int(fc_str.split("-")[1].split()[0])
-            return np.random.randint(min_fc, max_fc)
+        if isinstance(fc_str, str) and "-" in fc_str and "bpm" in fc_str:
+            try:
+                min_fc = int(fc_str.split("-")[0])
+                max_fc = int(fc_str.split("-")[1].split()[0])
+                return np.random.randint(min_fc, max_fc)
+            except:
+                return np.nan
         return np.nan
     
     completed_workouts["FC Média"] = completed_workouts["FC Alvo"].apply(get_fc_avg)
