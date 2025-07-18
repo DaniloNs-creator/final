@@ -269,6 +269,15 @@ def generate_workout_plan(start_date):
     
     return pd.DataFrame(plan)
 
+# Função para extrair minutos da duração formatada
+def extract_minutes(duration_str):
+    if "h" in duration_str:
+        hours_part = duration_str.split("h")[0]
+        minutes_part = duration_str.split("h")[1].replace("min", "")
+        return int(hours_part) * 60 + int(minutes_part)
+    else:
+        return int(duration_str.replace("min", ""))
+
 # Interface do aplicativo
 st.title("🚴‍♂️ PerformanceFit - Controle de Treinos e Dieta")
 st.markdown("---")
@@ -406,8 +415,21 @@ with tab3:
     st.subheader("Registro de Treinos Concluídos")
     # Simulação de treinos concluídos
     completed_workouts = workout_plan.sample(frac=0.3).copy()
-    completed_workouts["Duração Real"] = completed_workouts["Duração"].apply(lambda x: f"{int(x[:2])+np.random.randint(-5,5)}min")
-    completed_workouts["FC Média"] = completed_workouts["FC Alvo"].apply(lambda x: np.random.randint(int(x.split('-')[0]), int(x.split('-')[1].split()[0])))
+    
+    # Processamento seguro da duração
+    completed_workouts["Duração Real"] = completed_workouts["Duração"].apply(
+        lambda x: f"{max(1, extract_minutes(x) + np.random.randint(-5,5)}min"
+    )
+    
+    # Processamento seguro da FC média
+    def get_fc_avg(fc_str):
+        if "-" in fc_str and "bpm" in fc_str:
+            min_fc = int(fc_str.split("-")[0])
+            max_fc = int(fc_str.split("-")[1].split()[0])
+            return np.random.randint(min_fc, max_fc)
+        return np.nan
+    
+    completed_workouts["FC Média"] = completed_workouts["FC Alvo"].apply(get_fc_avg)
     completed_workouts["Satisfação"] = np.random.choice(["👍", "👍👍", "👍👍👍"], size=len(completed_workouts))
     
     st.dataframe(completed_workouts[["Dia", "Tipo de Treino", "Duração Real", "FC Média", "Satisfação"]], 
