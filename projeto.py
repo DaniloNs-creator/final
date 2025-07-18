@@ -441,7 +441,7 @@ def calculate_days_remaining(row):
 
 # Interface do usuário
 def main():
-    st.markdown('<div class="header animate-fadeIn"><h1>📊 Controle de Atividades Fiscais</h1></div>', unsafe_allow_html=True)
+    st.markdown('<div class="header animate-fadeIn"><h1>📊 Controle de Atividades Fiscais - HÄFELE BRASIL</h1></div>', unsafe_allow_html=True)
     
     # Filtros
     with st.expander("🔍 Filtros", expanded=True):
