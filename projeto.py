@@ -1,136 +1,175 @@
 import streamlit as st
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime
 
-# Funções auxiliares para cálculo dos KPIs
-def calcular_kpis(df_i155):
-    kpis = {}
+# Configuração inicial da página
+st.set_page_config(page_title="Dashboard ECD", page_icon="📊", layout="wide")
+
+# Título do dashboard
+st.title("📊 Análise de KPIs Contábeis e Financeiros - ECD")
+
+# Simulação de dados (substitua por seus dados reais da ECD)
+@st.cache_data
+def load_data():
+    # Dados do registro J100 (Plano de Contas)
+    j100_data = {
+        'COD_CONTA': ['1', '1.1', '1.1.1', '1.1.2', '2', '2.1', '2.1.1', '3', '3.1'],
+        'DESCR_CONTA': ['ATIVO', 'ATIVO CIRCULANTE', 'CAIXA', 'BANCOS', 'PASSIVO', 'PASSIVO CIRCULANTE', 
+                       'FORNECEDORES', 'PATRIMÔNIO LÍQUIDO', 'CAPITAL SOCIAL'],
+        'NIVEL': [1, 2, 3, 3, 1, 2, 3, 1, 2],
+        'TIPO_CONTA': ['S', 'S', 'A', 'A', 'S', 'S', 'A', 'S', 'A']
+    }
     
-    def parse_valor(valor):
-        if pd.isna(valor):
-            return 0.0
-        if isinstance(valor, str):
-            valor = valor.replace(',', '.')
-            if valor.replace('.', '').isdigit():
-                return float(valor)
-            return 0.0
-        return float(valor)
+    # Dados do registro J150 (Saldos Periódicos)
+    j150_data = {
+        'COD_CONTA': ['1.1.1', '1.1.2', '2.1.1', '3.1'] * 12,
+        'DATA': [datetime(2023, m, 1).strftime('%Y-%m-%d') for m in range(1, 13) for _ in range(4)],
+        'VALOR': [
+            50000, 150000, 80000, 300000,  # Jan
+            55000, 145000, 85000, 310000,  # Fev
+            60000, 140000, 90000, 320000,  # Mar
+            65000, 135000, 95000, 330000,  # Abr
+            70000, 130000, 100000, 340000,  # Mai
+            75000, 125000, 105000, 350000,  # Jun
+            80000, 120000, 110000, 360000,  # Jul
+            85000, 115000, 115000, 370000,  # Ago
+            90000, 110000, 120000, 380000,  # Set
+            95000, 105000, 125000, 390000,  # Out
+            100000, 100000, 130000, 400000, # Nov
+            105000, 95000, 135000, 410000   # Dez
+        ],
+        'TIPO_SALDO': ['D'] * 48
+    }
     
-    try:
-        # Encontrar contas relevantes nos registros I155
-        ativo_total = df_i155[df_i155['COD_CTA'].str.startswith('1', na=False)]['SALDO_FINAL'].apply(parse_valor).sum()
-        passivo_total = df_i155[df_i155['COD_CTA'].str.startswith('2', na=False)]['SALDO_FINAL'].apply(parse_valor).sum()
-        patrimonio_liquido = df_i155[df_i155['COD_CTA'].str.startswith('2.3', na=False)]['SALDO_FINAL'].apply(parse_valor).sum()
-        
-        receitas = df_i155[df_i155['COD_CTA'].str.startswith('3', na=False)]['SALDO_FINAL'].apply(parse_valor).sum()
-        despesas = df_i155[df_i155['COD_CTA'].str.startswith('4', na=False)]['SALDO_FINAL'].apply(parse_valor).sum()
-        custos = df_i155[df_i155['COD_CTA'].str.startswith('5', na=False)]['SALDO_FINAL'].apply(parse_valor).sum()
-        
-        # Ajustar saldos conforme a natureza (Débito ou Crédito)
-        def ajustar_saldo(row):
-            valor = parse_valor(row['SALDO_FINAL'])
-            if row['NATUREZA_FINAL'] == 'D':
-                return valor
-            return -valor
-        
-        # Recalcular totais considerando a natureza dos saldos
-        ativo_total = df_i155[df_i155['COD_CTA'].str.startswith('1', na=False)].apply(ajustar_saldo, axis=1).sum()
-        passivo_total = df_i155[df_i155['COD_CTA'].str.startswith('2', na=False)].apply(ajustar_saldo, axis=1).sum()
-        patrimonio_liquido = df_i155[df_i155['COD_CTA'].str.startswith('2.3', na=False)].apply(ajustar_saldo, axis=1).sum()
-        
-        receitas = df_i155[df_i155['COD_CTA'].str.startswith('3', na=False)].apply(ajustar_saldo, axis=1).sum()
-        despesas = abs(df_i155[df_i155['COD_CTA'].str.startswith('4', na=False)].apply(ajustar_saldo, axis=1).sum())
-        custos = abs(df_i155[df_i155['COD_CTA'].str.startswith('5', na=False)].apply(ajustar_saldo, axis=1).sum())
-        
-        lucro_liquido = receitas - despesas - custos
-        ebitda = lucro_liquido  # Simplificado
-        
-        ativo_circulante = df_i155[df_i155['COD_CTA'].str.startswith('1.1', na=False)].apply(ajustar_saldo, axis=1).sum()
-        passivo_circulante = abs(df_i155[df_i155['COD_CTA'].str.startswith('2.1', na=False)].apply(ajustar_saldo, axis=1).sum())
-        
-        kpis['Lucro Líquido'] = lucro_liquido
-        kpis['Margem de Lucro Líquido (%)'] = (lucro_liquido / receitas * 100) if receitas else 0
-        kpis['EBITDA'] = ebitda
-        kpis['Endividamento (%)'] = (passivo_total / ativo_total * 100) if ativo_total else 0
-        kpis['Liquidez Corrente'] = (ativo_circulante / passivo_circulante) if passivo_circulante else 0
-        kpis['ROE (%)'] = (lucro_liquido / patrimonio_liquido * 100) if patrimonio_liquido else 0
-        
-    except Exception as e:
-        st.error(f"Erro ao calcular KPIs: {str(e)}")
-        kpis = {
-            'Lucro Líquido': 0,
-            'Margem de Lucro Líquido (%)': 0,
-            'EBITDA': 0,
-            'Endividamento (%)': 0,
-            'Liquidez Corrente': 0,
-            'ROE (%)': 0
-        }
+    j100_df = pd.DataFrame(j100_data)
+    j150_df = pd.DataFrame(j150_data)
+    j150_df['DATA'] = pd.to_datetime(j150_df['DATA'])
     
-    return kpis
+    # Merge dos dados para ter as descrições das contas
+    merged_df = pd.merge(j150_df, j100_df, on='COD_CONTA', how='left')
+    
+    return j100_df, j150_df, merged_df
 
-# Interface Streamlit
-st.title("📊 Análise de KPIs com base na ECD")
+j100_df, j150_df, merged_df = load_data()
 
-uploaded_file = st.file_uploader("Faça upload do arquivo ECD (.txt)", type=["txt"])
+# Sidebar com filtros
+st.sidebar.header("Filtros")
+start_date = st.sidebar.date_input("Data inicial", value=merged_df['DATA'].min())
+end_date = st.sidebar.date_input("Data final", value=merged_df['DATA'].max())
 
-if uploaded_file:
-    try:
-        content = uploaded_file.read().decode('latin1')
-        linhas = content.splitlines()
+contas_selecionadas = st.sidebar.multiselect(
+    "Selecione as contas",
+    options=merged_df['DESCR_CONTA'].unique(),
+    default=merged_df['DESCR_CONTA'].unique()
+)
 
-        registros_i155 = [l for l in linhas if l.startswith('|I155|')]
-        
-        def parse_registros(registros, colunas):
-            dados = []
-            for r in registros:
-                campos = r.strip('|').split('|')[1:]
-                if len(campos) >= len(colunas):
-                    dados.append(campos[:len(colunas)])
-                else:
-                    dados.append(campos + [None]*(len(colunas)-len(campos)))
-            return pd.DataFrame(dados, columns=colunas)
-        
-        df_i155 = parse_registros(registros_i155, [
-            'REG', 'COD_CTA', 'VAZIO', 'VALOR_INICIAL', 'NATUREZA_INICIAL', 
-            'DEBITOS', 'CREDITOS', 'SALDO_FINAL', 'NATUREZA_FINAL'
-        ])
-        
-        # Converter apenas colunas numéricas
-        for col in ['VALOR_INICIAL', 'DEBITOS', 'CREDITOS', 'SALDO_FINAL']:
-            df_i155[col] = df_i155[col].apply(lambda x: float(x.replace(',', '.')) if isinstance(x, str) and x.replace(',', '').replace('.', '').isdigit() else 0.0)
-        
-        kpis = calcular_kpis(df_i155)
-        
-        st.subheader("📈 Indicadores Financeiros")
+# Aplicar filtros
+filtered_df = merged_df[
+    (merged_df['DATA'] >= pd.to_datetime(start_date)) & 
+    (merged_df['DATA'] <= pd.to_datetime(end_date)) &
+    (merged_df['DESCR_CONTA'].isin(contas_selecionadas))
+]
+
+# Layout principal
+tab1, tab2, tab3 = st.tabs(["Visão Geral", "Análise por Conta", "Indicadores Financeiros"])
+
+with tab1:
+    st.header("Visão Geral das Contas")
+    
+    # KPIs principais
+    col1, col2, col3 = st.columns(3)
+    
+    total_ativos = filtered_df[filtered_df['COD_CONTA'].str.startswith('1')]['VALOR'].sum()
+    total_passivos = filtered_df[filtered_df['COD_CONTA'].str.startswith('2')]['VALOR'].sum()
+    total_pl = filtered_df[filtered_df['COD_CONTA'].str.startswith('3')]['VALOR'].sum()
+    
+    col1.metric("Total Ativos", f"R$ {total_ativos:,.2f}")
+    col2.metric("Total Passivos", f"R$ {total_passivos:,.2f}")
+    col3.metric("Patrimônio Líquido", f"R$ {total_pl:,.2f}")
+    
+    # Gráfico de evolução dos saldos
+    st.subheader("Evolução dos Saldos")
+    
+    fig = px.line(
+        filtered_df,
+        x='DATA',
+        y='VALOR',
+        color='DESCR_CONTA',
+        title='Evolução dos Saldos por Conta',
+        labels={'VALOR': 'Valor (R$)', 'DATA': 'Data'}
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+with tab2:
+    st.header("Análise por Conta")
+    
+    # Selecionar conta para análise detalhada
+    conta_selecionada = st.selectbox(
+        "Selecione uma conta para análise detalhada",
+        options=filtered_df['DESCR_CONTA'].unique()
+    )
+    
+    conta_df = filtered_df[filtered_df['DESCR_CONTA'] == conta_selecionada]
+    
+    if not conta_df.empty:
         col1, col2 = st.columns(2)
         
+        # Gráfico de linha para a conta selecionada
         with col1:
-            st.metric("Lucro Líquido", f"R$ {kpis['Lucro Líquido']:,.2f}")
-            st.metric("EBITDA", f"R$ {kpis['EBITDA']:,.2f}")
-            st.metric("Liquidez Corrente", f"{kpis['Liquidez Corrente']:.2f}")
+            st.subheader(f"Evolução da conta {conta_selecionada}")
+            fig = px.line(
+                conta_df,
+                x='DATA',
+                y='VALOR',
+                title=f'Evolução de {conta_selecionada}',
+                labels={'VALOR': 'Valor (R$)', 'DATA': 'Data'}
+            )
+            st.plotly_chart(fig, use_container_width=True)
         
+        # Estatísticas da conta
         with col2:
-            st.metric("Margem Líquida", f"{kpis['Margem de Lucro Líquido (%)']:.2f}%")
-            st.metric("Endividamento", f"{kpis['Endividamento (%)']:.2f}%")
-            st.metric("ROE", f"{kpis['ROE (%)']:.2f}%")
-        
-        with st.expander("🔍 Visualizar dados brutos"):
-            st.write("Registros I155 (Contas Contábeis)")
-            st.dataframe(df_i155)
+            st.subheader("Estatísticas")
+            variacao = ((conta_df['VALOR'].iloc[-1] - conta_df['VALOR'].iloc[0]) / conta_df['VALOR'].iloc[0]) * 100
+            st.metric("Saldo Inicial", f"R$ {conta_df['VALOR'].iloc[0]:,.2f}")
+            st.metric("Saldo Final", f"R$ {conta_df['VALOR'].iloc[-1]:,.2f}")
+            st.metric("Variação (%)", f"{variacao:.2f}%")
             
-            st.write("Resumo por Tipo de Conta")
-            df_resumo = df_i155.copy()
-            df_resumo['Tipo'] = df_resumo['COD_CTA'].str.slice(0, 1).map({
-                '1': 'Ativo',
-                '2': 'Passivo',
-                '3': 'Receitas',
-                '4': 'Despesas',
-                '5': 'Custos',
-                '6': 'Contas de Compensação'
-            })
-            st.dataframe(df_resumo.groupby('Tipo')['SALDO_FINAL'].sum().reset_index())
-            
-    except Exception as e:
-        st.error(f"Erro ao processar o arquivo: {str(e)}")
-        st.error("Verifique se o arquivo está no formato correto da ECD.")
-else:
-    st.info("Por favor, envie um arquivo ECD no formato .txt para iniciar a análise.")
+            st.write("---")
+            st.write("**Resumo estatístico:**")
+            st.write(conta_df['VALOR'].describe().to_frame().T)
+    else:
+        st.warning("Nenhum dado disponível para a conta selecionada no período.")
+
+with tab3:
+    st.header("Indicadores Financeiros")
+    
+    # Calcular indicadores
+    ativo_circulante = filtered_df[filtered_df['COD_CONTA'].isin(['1.1.1', '1.1.2'])]['VALOR'].sum()
+    passivo_circulante = filtered_df[filtered_df['COD_CONTA'] == '2.1.1']['VALOR'].sum()
+    liquidez_geral = ativo_circulante / passivo_circulante if passivo_circulante != 0 else 0
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Liquidez Geral", f"{liquidez_geral:.2f}")
+    col2.metric("Endividamento", f"{(total_passivos / total_ativos * 100 if total_ativos != 0 else 0):.2f}%")
+    col3.metric("Rentabilidade PL", f"{(total_pl / total_ativos * 100 if total_ativos != 0 else 0):.2f}%")
+    
+    # Gráfico de composição do ativo e passivo
+    st.subheader("Composição do Balanço")
+    
+    composicao_df = filtered_df.groupby('COD_CONTA').agg({'VALOR': 'mean', 'DESCR_CONTA': 'first'}).reset_index()
+    composicao_df = composicao_df[composicao_df['COD_CONTA'].str.len() == 3]  # Contas de nível 3
+    
+    fig = px.pie(
+        composicao_df,
+        values='VALOR',
+        names='DESCR_CONTA',
+        title='Composição Média das Contas'
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+# Rodapé
+st.sidebar.markdown("---")
+st.sidebar.markdown("**Fonte:** Dados simulados baseados na ECD (Registros J100 e J150)")
+st.sidebar.markdown("**Desenvolvido por:** [Seu Nome]")
