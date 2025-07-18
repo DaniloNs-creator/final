@@ -1,626 +1,347 @@
 import streamlit as st
-from streamlit.components.v1 import html
+import pandas as pd
+import numpy as np
+import plotly.express as px
 from datetime import datetime, timedelta
+import base64
 
-# Configuração inicial da página
+# Configuração da página
 st.set_page_config(
-    page_title="Performance Sport Agency",
+    page_title="PerformanceFit - Controle de Treinos",
     page_icon="🚴‍♂️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# CSS Avançado incorporado diretamente no código
-st.markdown("""
-<style>
-:root {
-    --primary: #2c3e50;
-    --secondary: #3498db;
-    --accent: #e74c3c;
-    --light: #ecf0f1;
-    --dark: #2c3e50;
-}
+# CSS personalizado com animações
+def local_css(file_name):
+    with open(file_name) as f:
+        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
 
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1); }
-}
-
-.header {
-    background: linear-gradient(135deg, var(--primary), var(--secondary));
-    color: white;
-    padding: 2rem;
-    border-radius: 10px;
-    margin-bottom: 2rem;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-    animation: fadeIn 1s ease-out;
-}
-
-.header h1 {
-    font-size: 2.5rem;
-    margin-bottom: 0.5rem;
-}
-
-.header p {
-    font-size: 1.2rem;
-    opacity: 0.9;
-}
-
-.card {
-    background: white;
-    border-radius: 10px;
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
-    animation: fadeIn 0.8s ease-out;
-}
-
-.card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
-}
-
-.section-title {
-    color: var(--primary);
-    border-bottom: 3px solid var(--secondary);
-    padding-bottom: 0.5rem;
-    margin-bottom: 1.5rem;
-    font-size: 1.8rem;
-}
-
-.btn {
-    background: var(--secondary);
-    color: white;
-    border: none;
-    padding: 0.8rem 1.5rem;
-    border-radius: 30px;
-    font-weight: bold;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 10px rgba(52, 152, 219, 0.3);
-    display: inline-block;
-    margin: 0.5rem 0;
-}
-
-.btn:hover {
-    background: var(--primary);
-    transform: translateY(-2px);
-    box-shadow: 0 6px 15px rgba(52, 152, 219, 0.4);
-}
-
-.progress-container {
-    width: 100%;
-    background-color: #f1f1f1;
-    border-radius: 10px;
-    margin: 1rem 0;
-}
-
-.progress-bar {
-    height: 20px;
-    border-radius: 10px;
-    background: linear-gradient(90deg, var(--secondary), var(--accent));
-    text-align: center;
-    line-height: 20px;
-    color: white;
-    transition: width 1s ease-in-out;
-    animation: pulse 2s infinite;
-}
-
-.meal-card {
-    background: #f8f9fa;
-    border-left: 5px solid var(--secondary);
-    border-radius: 5px;
-    padding: 1rem;
-    margin-bottom: 1rem;
-}
-
-.meal-title {
-    font-weight: bold;
-    color: var(--primary);
-    margin-bottom: 0.5rem;
-}
-
-.workout-day {
-    background: #e8f4fc;
-    border-radius: 8px;
-    padding: 1rem;
-    margin-bottom: 1rem;
-    border-left: 5px solid var(--accent);
-}
-
-.day-title {
-    font-weight: bold;
-    color: var(--accent);
-    margin-bottom: 0.5rem;
-}
-
-.exercise {
-    margin-left: 1rem;
-    margin-bottom: 0.5rem;
-}
-
-.timeline {
-    position: relative;
-    max-width: 1200px;
-    margin: 0 auto;
-}
-
-.timeline::after {
-    content: '';
-    position: absolute;
-    width: 6px;
-    background-color: var(--secondary);
-    top: 0;
-    bottom: 0;
-    left: 50%;
-    margin-left: -3px;
-}
-
-.timeline-item {
-    padding: 10px 40px;
-    position: relative;
-    width: 50%;
-    box-sizing: border-box;
-}
-
-.timeline-item::after {
-    content: '';
-    position: absolute;
-    width: 25px;
-    height: 25px;
-    right: -12px;
-    background-color: white;
-    border: 4px solid var(--accent);
-    top: 15px;
-    border-radius: 50%;
-    z-index: 1;
-}
-
-.left {
-    left: 0;
-}
-
-.right {
-    left: 50%;
-}
-
-.left::before {
-    content: " ";
-    height: 0;
-    position: absolute;
-    top: 22px;
-    width: 0;
-    z-index: 1;
-    right: 30px;
-    border: medium solid var(--secondary);
-    border-width: 10px 0 10px 10px;
-    border-color: transparent transparent transparent var(--secondary);
-}
-
-.right::before {
-    content: " ";
-    height: 0;
-    position: absolute;
-    top: 22px;
-    width: 0;
-    z-index: 1;
-    left: 30px;
-    border: medium solid var(--secondary);
-    border-width: 10px 10px 10px 0;
-    border-color: transparent var(--secondary) transparent transparent;
-}
-
-.right::after {
-    left: -12px;
-}
-
-.timeline-content {
-    padding: 20px 30px;
-    background-color: white;
-    position: relative;
-    border-radius: 6px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-}
-
-@media screen and (max-width: 768px) {
-    .timeline::after {
-        left: 31px;
-    }
-    
-    .timeline-item {
-        width: 100%;
-        padding-left: 70px;
-        padding-right: 25px;
-    }
-    
-    .timeline-item::before {
-        left: 60px;
-        border: medium solid var(--secondary);
-        border-width: 10px 10px 10px 0;
-        border-color: transparent var(--secondary) transparent transparent;
-    }
-    
-    .left::after, .right::after {
-        left: 18px;
-    }
-    
-    .right {
-        left: 0%;
-    }
-}
-</style>
-""", unsafe_allow_html=True)
-
-# Cabeçalho com animação
-st.markdown("""
-<div class="header">
-    <h1>Performance Sport Agency</h1>
-    <p>Seu plano personalizado de 60 dias para emagrecimento e performance no ciclismo</p>
-</div>
-""", unsafe_allow_html=True)
+local_css("style.css")
 
 # Dados do usuário
 user_data = {
-    "name": "Atleta",
-    "age": 28,
-    "height": 1.87,
-    "weight": 108,
-    "goal": "Emagrecimento e Performance no Ciclismo",
-    "start_date": datetime.now().strftime("%d/%m/%Y"),
-    "end_date": (datetime.now() + timedelta(days=60)).strftime("%d/%m/%Y")
+    "nome": "Usuário",
+    "idade": 28,
+    "altura": 1.87,
+    "peso": 108,
+    "v02max": 173,
+    "objetivo": "Emagrecimento e Performance no Ciclismo",
+    "nivel": "Iniciante",
+    "disponibilidade": "6 dias/semana"
 }
 
-# Barra de progresso
-st.markdown(f"""
-<div class="card">
-    <h2 class="section-title">Seu Progresso</h2>
-    <p>Meta de 60 dias: {user_data['start_date']} - {user_data['end_date']}</p>
-    <div class="progress-container">
-        <div class="progress-bar" style="width: 0%">0%</div>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+# Zonas de frequência cardíaca baseadas no VO2max
+def calculate_zones(v02max):
+    return {
+        "Z1 (Recuperação)": (0.50 * v02max, 0.60 * v02max),
+        "Z2 (Aeróbico)": (0.60 * v02max, 0.70 * v02max),
+        "Z3 (Tempo)": (0.70 * v02max, 0.80 * v02max),
+        "Z4 (Limiar)": (0.80 * v02max, 0.90 * v02max),
+        "Z5 (VO2 Max)": (0.90 * v02max, 1.00 * v02max)
+    }
 
-# Abas para navegação
-tab1, tab2, tab3 = st.tabs(["📊 Visão Geral", "🍽 Plano Alimentar", "💪 Rotina de Treinos"])
+zones = calculate_zones(user_data["v02max"])
+
+# Dieta baseada em alimentos acessíveis
+diet_plan = {
+    "Café da Manhã": {
+        "Opção 1": "3 ovos + 2 fatias pão integral + 1 banana + 1 colher aveia",
+        "Opção 2": "Vitamina (200ml leite + 1 banana + 1 colher aveia + 1 colher chia)",
+        "Opção 3": "2 fatias pão integral + queijo cottage + 1 fruta"
+    },
+    "Lanche da Manhã": {
+        "Opção 1": "1 fruta + 10 castanhas",
+        "Opção 2": "1 iogurte natural + 1 colher linhaça",
+        "Opção 3": "1 fatia pão integral + 1 colher pasta amendoim"
+    },
+    "Almoço": {
+        "Opção 1": "1 concha arroz + 1 concha feijão + 150g frango + salada",
+        "Opção 2": "2 batatas médias + 150g carne moída + legumes refogados",
+        "Opção 3": "1 concha arroz integral + 150g peixe + brócolis cozido"
+    },
+    "Lanche da Tarde": {
+        "Opção 1": "1 ovo cozido + 1 torrada integral",
+        "Opção 2": "1 copo de vitamina (leite + fruta)",
+        "Opção 3": "1 iogurte + 1 colher granola caseira"
+    },
+    "Jantar": {
+        "Opção 1": "Omelete (3 ovos) + salada + 1 fatia pão integral",
+        "Opção 2": "150g carne + purê de abóbora + salada",
+        "Opção 3": "Sopa de legumes com frango desfiado"
+    },
+    "Ceia": {
+        "Opção 1": "1 copo leite morno",
+        "Opção 2": "1 iogurte natural",
+        "Opção 3": "1 fatia queijo branco"
+    }
+}
+
+# Plano de treino de 60 dias
+def generate_workout_plan(start_date):
+    plan = []
+    current_date = start_date
+    
+    for week in range(1, 9):  # 8 semanas = ~60 dias
+        for day in range(1, 7):  # 6 dias de treino por semana
+            if day == 1:  # Segunda-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Endurance",
+                    "Duração": "1h15min",
+                    "Zona FC": "Z2 (Aeróbico)",
+                    "FC Alvo": f"{int(zones['Z2 (Aeróbico)'][0])}-{int(zones['Z2 (Aeróbico)'][1])} bpm",
+                    "Descrição": "Pedal constante em terreno plano, mantendo FC na Z2"
+                }
+            elif day == 2:  # Terça-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Força - Membros Inferiores",
+                    "Duração": "1h",
+                    "Zona FC": "N/A",
+                    "FC Alvo": "N/A",
+                    "Descrição": "Agachamento 4x12, Leg Press 4x12, Cadeira Extensora 3x15, Panturrilha 4x20"
+                }
+            elif day == 3:  # Quarta-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Intervalado",
+                    "Duração": "1h",
+                    "Zona FC": "Z4-Z5 (Limiar-VO2)",
+                    "FC Alvo": f"{int(zones['Z4 (Limiar)'][0])}-{int(zones['Z5 (VO2 Max)'][1])} bpm",
+                    "Descrição": "8x (2min Z4 + 2min Z1 recuperação)"
+                }
+            elif day == 4:  # Quinta-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Recuperação Ativa",
+                    "Duração": "45min",
+                    "Zona FC": "Z1 (Recuperação)",
+                    "FC Alvo": f"{int(zones['Z1 (Recuperação)'][0])}-{int(zones['Z1 (Recuperação)'][1])} bpm",
+                    "Descrição": "Pedal leve em terreno plano"
+                }
+            elif day == 5:  # Sexta-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Força - Core e Superior",
+                    "Duração": "1h",
+                    "Zona FC": "N/A",
+                    "FC Alvo": "N/A",
+                    "Descrição": "Flexões 4x12, Remada Curvada 4x12, Prancha 3x1min, Abdominal Supra 3x20"
+                }
+            elif day == 6:  # Sábado
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Longão",
+                    "Duração": "2h30min" if week < 3 else "3h" if week < 6 else "3h30min",
+                    "Zona FC": "Z2-Z3 (Aeróbico-Tempo)",
+                    "FC Alvo": f"{int(zones['Z2 (Aeróbico)'][0])}-{int(zones['Z3 (Tempo)'][1])} bpm",
+                    "Descrição": "Pedal longo com variação de terreno, focando em manter FC"
+                }
+            
+            plan.append(workout)
+            current_date += timedelta(days=1)
+        
+        current_date += timedelta(days=1)  # Domingo é dia de descanso
+    
+    return pd.DataFrame(plan)
+
+# Interface do aplicativo
+st.title("🚴‍♂️ PerformanceFit - Controle de Treinos e Dieta")
+st.markdown("---")
+
+# Sidebar com informações do usuário
+with st.sidebar:
+    st.markdown("""
+    <div class="user-profile">
+        <h2>Perfil do Atleta</h2>
+        <div class="profile-card">
+            <p><strong>Nome:</strong> {nome}</p>
+            <p><strong>Idade:</strong> {idade} anos</p>
+            <p><strong>Altura:</strong> {altura}m</p>
+            <p><strong>Peso:</strong> {peso}kg</p>
+            <p><strong>VO2 Máx:</strong> {v02max} bpm</p>
+            <p><strong>Objetivo:</strong> {objetivo}</p>
+            <p><strong>Nível:</strong> {nivel}</p>
+            <p><strong>Disponibilidade:</strong> {disponibilidade}</p>
+        </div>
+    </div>
+    """.format(**user_data), unsafe_allow_html=True)
+    
+    st.markdown("---")
+    st.markdown("### Zonas de Frequência Cardíaca")
+    for zone, (min_fc, max_fc) in zones.items():
+        st.markdown(f"**{zone}:** {int(min_fc)}-{int(max_fc)} bpm")
+    
+    st.markdown("---")
+    st.markdown("### Download do Plano")
+    if st.button("Exportar para Excel"):
+        today = datetime.now().date()
+        workout_plan = generate_workout_plan(today)
+        
+        # Criar um arquivo Excel em memória
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            workout_plan.to_excel(writer, sheet_name='Plano de Treino', index=False)
+            
+            # Adicionar a dieta
+            diet_sheet = pd.DataFrame.from_dict({(i,j): diet_plan[i][j] 
+                                               for i in diet_plan.keys() 
+                                               for j in diet_plan[i].keys()},
+                                               orient='index')
+            diet_sheet.to_excel(writer, sheet_name='Plano Alimentar')
+        
+        output.seek(0)
+        b64 = base64.b64encode(output.read()).decode()
+        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="Plano_Treino_Dieta.xlsx">Baixar Plano Completo</a>'
+        st.markdown(href, unsafe_allow_html=True)
+
+# Abas principais
+tab1, tab2, tab3, tab4 = st.tabs(["📅 Plano de Treino", "🍽 Plano Alimentar", "📊 Progresso", "💓 Monitoramento FC"])
 
 with tab1:
-    st.markdown(f"""
-    <div class="card">
-        <h2 class="section-title">Seu Perfil</h2>
-        <p><strong>Nome:</strong> {user_data['name']}</p>
-        <p><strong>Idade:</strong> {user_data['age']} anos</p>
-        <p><strong>Altura:</strong> {user_data['height']}m</p>
-        <p><strong>Peso atual:</strong> {user_data['weight']}kg</p>
-        <p><strong>Objetivo:</strong> {user_data['goal']}</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.header("Plano de Treino - 60 Dias")
+    today = datetime.now().date()
+    workout_plan = generate_workout_plan(today)
     
-    st.markdown("""
-    <div class="card">
-        <h2 class="section-title">Metas para 60 Dias</h2>
-        <div class="timeline">
-            <div class="timeline-item left">
-                <div class="timeline-content">
-                    <h3>Semana 1-2</h3>
-                    <p>Adaptação metabólica e estabelecimento de rotina</p>
-                    <p>Meta de peso: -2kg</p>
-                </div>
-            </div>
-            <div class="timeline-item right">
-                <div class="timeline-content">
-                    <h3>Semana 3-4</h3>
-                    <p>Intensificação dos treinos e ajuste nutricional</p>
-                    <p>Meta de peso: -3kg</p>
-                </div>
-            </div>
-            <div class="timeline-item left">
-                <div class="timeline-content">
-                    <h3>Semana 5-6</h3>
-                    <p>Foco em endurance e potência no ciclismo</p>
-                    <p>Meta de peso: -3kg</p>
-                </div>
-            </div>
-            <div class="timeline-item right">
-                <div class="timeline-content">
-                    <h3>Semana 7-8</h3>
-                    <p>Consolidação de performance e perda de gordura</p>
-                    <p>Meta de peso: -3kg</p>
-                </div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # Filtros
+    col1, col2 = st.columns(2)
+    with col1:
+        filter_type = st.selectbox("Filtrar por Tipo de Treino", ["Todos"] + list(workout_plan["Tipo de Treino"].unique()))
+    with col2:
+        filter_week = st.selectbox("Filtrar por Semana", ["Todas"] + list(range(1, 9)))
+    
+    # Aplicar filtros
+    filtered_plan = workout_plan.copy()
+    if filter_type != "Todos":
+        filtered_plan = filtered_plan[filtered_plan["Tipo de Treino"] == filter_type]
+    if filter_week != "Todas":
+        start_idx = (filter_week - 1) * 6
+        end_idx = start_idx + 6
+        filtered_plan = filtered_plan.iloc[start_idx:end_idx]
+    
+    # Mostrar tabela
+    st.dataframe(filtered_plan, hide_index=True, use_container_width=True)
+    
+    # Gráfico de distribuição de treinos
+    st.subheader("Distribuição de Treinos")
+    workout_dist = workout_plan["Tipo de Treino"].value_counts().reset_index()
+    workout_dist.columns = ["Tipo de Treino", "Quantidade"]
+    
+    fig = px.pie(workout_dist, values="Quantidade", names="Tipo de Treino", 
+                 color_discrete_sequence=px.colors.sequential.RdBu,
+                 hole=0.4)
+    st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
+    st.header("Plano Alimentar - Opções Variadas")
+    
+    for meal, options in diet_plan.items():
+        with st.expander(f"🔸 {meal}"):
+            for opt, desc in options.items():
+                st.markdown(f"""
+                <div class="meal-option">
+                    <h4>{opt}</h4>
+                    <p>{desc}</p>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    st.subheader("Recomendações Nutricionais")
     st.markdown("""
-    <div class="card">
-        <h2 class="section-title">Plano Alimentar para Emagrecimento</h2>
-        <p>Dieta baseada em alimentos acessíveis e nutritivos para performance no ciclismo</p>
-        <p><strong>Meta calórica diária:</strong> ~2,200 kcal (déficit moderado)</p>
-        <p><strong>Distribuição macro:</strong> 40% Carboidratos | 35% Proteínas | 25% Gorduras</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("""
-        <div class="card">
-            <h3>Dia Tipo (Treino)</h3>
-            
-            <div class="meal-card">
-                <div class="meal-title">Café da Manhã</div>
-                <p>• 3 ovos mexidos com espinafre</p>
-                <p>• 2 fatias de pão integral</p>
-                <p>• 1 banana</p>
-                <p>• 1 colher de sopa de pasta de amendoim</p>
-            </div>
-            
-            <div class="meal-card">
-                <div class="meal-title">Lanche Pré-Treino</div>
-                <p>• 1 copo de aveia com 1 colher de whey</p>
-                <p>• 1 xícara de café preto</p>
-            </div>
-            
-            <div class="meal-card">
-                <div class="meal-title">Almoço</div>
-                <p>• 150g de frango grelhado</p>
-                <p>• 1 concha de arroz integral</p>
-                <p>• 1 concha de feijão</p>
-                <p>• Salada à vontade (brócolis, cenoura, beterraba)</p>
-                <p>• 1 fio de azeite</p>
-            </div>
-            
-            <div class="meal-card">
-                <div class="meal-title">Lanche da Tarde</div>
-                <p>• 1 iogurte natural</p>
-                <p>• 1 colher de linhaça</p>
-                <p>• 1 fruta (maçã ou pera)</p>
-            </div>
-            
-            <div class="meal-card">
-                <div class="meal-title">Jantar</div>
-                <p>• 150g de carne moída magra</p>
-                <p>• Purê de abóbora ou batata-doce</p>
-                <p>• Legumes refogados (berinjela, abobrinha)</p>
-            </div>
-            
-            <div class="meal-card">
-                <div class="meal-title">Ceia</div>
-                <p>• 1 fatia de queijo branco</p>
-                <p>• 1 punhado de castanhas</p>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("""
-        <div class="card">
-            <h3>Dia Tipo (Descanso)</h3>
-            
-            <div class="meal-card">
-                <div class="meal-title">Café da Manhã</div>
-                <p>• 2 ovos cozidos</p>
-                <p>• 1 fatia de pão integral</p>
-                <p>• 1/2 abacate</p>
-                <p>• Chá verde</p>
-            </div>
-            
-            <div class="meal-card">
-                <div class="meal-title">Lanche da Manhã</div>
-                <p>• 1 iogurte natural com 1 colher de chia</p>
-                <p>• 5 morangos</p>
-            </div>
-            
-            <div class="meal-card">
-                <div class="meal-title">Almoço</div>
-                <p>• 1 posta de peixe (sardinha ou atum)</p>
-                <p>• 1/2 concha de arroz integral</p>
-                <p>• Lentilha cozida</p>
-                <p>• Salada verde à vontade</p>
-                <p>• 1 fio de azeite</p>
-            </div>
-            
-            <div class="meal-card">
-                <div class="meal-title">Lanche da Tarde</div>
-                <p>• Vitamina de abacate com leite desnatado</p>
-                <p>• 1 colher de sopa de aveia</p>
-            </div>
-            
-            <div class="meal-card">
-                <div class="meal-title">Jantar</div>
-                <p>• Omelete de 2 ovos com queijo branco</p>
-                <p>• Salada de folhas verdes</p>
-                <p>• 1 colher de sopa de quinoa</p>
-            </div>
-            
-            <div class="meal-card">
-                <div class="meal-title">Ceia</div>
-                <p>• 1 copo de leite desnatado</p>
-                <p>• Canela em pó</p>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("""
-    <div class="card">
-        <h3>Orientações Nutricionais</h3>
-        <ul>
-            <li>Mantenha hidratação constante (3-4L de água/dia)</li>
-            <li>Priorize alimentos integrais e minimamente processados</li>
-            <li>Consuma proteína em todas as refeições</li>
-            <li>Inclua gorduras saudáveis (azeite, castanhas, abacate)</li>
-            <li>Nos dias de treino intenso, aumente os carboidratos</li>
-            <li>Nos dias de descanso, reduza ligeiramente os carboidratos</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
+    - Consuma proteína em todas as refeições (ovos, frango, carne, peixe)
+    - Hidrate-se bem (3-4L de água por dia)
+    - Prefira carboidratos complexos (arroz integral, batata, aveia)
+    - Gorduras saudáveis (castanhas, azeite, abacate)
+    - Coma legumes e verduras à vontade
+    """)
 
 with tab3:
-    st.markdown("""
-    <div class="card">
-        <h2 class="section-title">Rotina de Treinos - 60 Dias</h2>
-        <p>Programa de 6 dias por semana com foco em emagrecimento e desenvolvimento para ciclismo</p>
-        <p><strong>Duração:</strong> Dias de semana até 1h30 | Finais de semana sem limite</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.header("Acompanhamento de Progresso")
     
-    # Semana tipo
-    st.markdown("""
-    <div class="card">
-        <h3>Estrutura Semanal</h3>
-        
-        <div class="workout-day">
-            <div class="day-title">Segunda-feira: Treino de Força (Membros Inferiores + Core)</div>
-            <div class="exercise">• Agachamento livre: 4x8-10</div>
-            <div class="exercise">• Leg press: 3x10-12</div>
-            <div class="exercise">• Stiff: 3x10</div>
-            <div class="exercise">• Elevação pélvica: 3x12</div>
-            <div class="exercise">• Prancha abdominal: 3x40s</div>
-            <div class="exercise">• Bike ergométrica (leve): 15min</div>
-        </div>
-        
-        <div class="workout-day">
-            <div class="day-title">Terça-feira: Ciclismo Intervalado</div>
-            <div class="exercise">• Aquecimento: 15min leve</div>
-            <div class="exercise">• Intervalos: 8x(2min forte / 2min leve)</div>
-            <div class="exercise">• Desaquecimento: 10min leve</div>
-            <div class="exercise">• Alongamento pós-treino</div>
-        </div>
-        
-        <div class="workout-day">
-            <div class="day-title">Quarta-feira: Treino de Força (Superiores + Mobilidade)</div>
-            <div class="exercise">• Barra fixa assistida: 3x6-8</div>
-            <div class="exercise">• Remada curvada: 3x10</div>
-            <div class="exercise">• Desenvolvimento militar: 3x10</div>
-            <div class="exercise">• Mobilidade de quadril e tornozelo</div>
-            <div class="exercise">• Esteira inclinada: 15min</div>
-        </div>
-        
-        <div class="workout-day">
-            <div class="day-title">Quinta-feira: Ciclismo Endurance</div>
-            <div class="exercise">• Pedalada contínua: 45-60min em ritmo moderado</div>
-            <div class="exercise">• Manter cadência entre 80-90rpm</div>
-            <div class="exercise">• Alongamento pós-treino</div>
-        </div>
-        
-        <div class="workout-day">
-            <div class="day-title">Sexta-feira: Treino Funcional para Ciclismo</div>
-            <div class="exercise">• Saltos em caixa: 3x10</div>
-            <div class="exercise">• Afundo com salto: 3x8 cada perna</div>
-            <div class="exercise">• Burpees: 3x12</div>
-            <div class="exercise">• Bike sprints: 10x30s</div>
-            <div class="exercise">• Core: Russian twist 3x15 cada lado</div>
-        </div>
-        
-        <div class="workout-day">
-            <div class="day-title">Sábado: Long Ride</div>
-            <div class="exercise">• Pedalada longa: 2-4 horas (progressivo)</div>
-            <div class="exercise">• Incluir subidas graduais</div>
-            <div class="exercise">• Hidratação e reposição energética durante</div>
-        </div>
-        
-        <div class="workout-day">
-            <div class="day-title">Domingo: Recuperação Ativa</div>
-            <div class="exercise">• Caminhada ou pedalada leve: 30-45min</div>
-            <div class="exercise">• Alongamento completo</div>
-            <div class="exercise">• Rolagem com foam roller</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    # Simulação de dados de progresso (em uma aplicação real, viria de um banco de dados)
+    dates = pd.date_range(start=today, periods=60, freq='D')
+    weight_progress = [user_data["peso"] * (0.995 ** i) for i in range(60)]
+    fc_resting = [np.random.normal(60, 2) for _ in range(60)]
     
-    # Progressão ao longo das semanas
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Evolução do Peso")
+        fig = px.line(x=dates, y=weight_progress, 
+                     labels={"x": "Data", "y": "Peso (kg)"},
+                     title="Projeção de Perda de Peso (1kg/semana)")
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        st.subheader("Frequência Cardíaca de Repouso")
+        fig = px.line(x=dates, y=fc_resting, 
+                     labels={"x": "Data", "y": "FC Repouso (bpm)"},
+                     title="Melhora na FC de Repouso")
+        st.plotly_chart(fig, use_container_width=True)
+    
+    st.subheader("Registro de Treinos Concluídos")
+    # Simulação de treinos concluídos
+    completed_workouts = workout_plan.sample(frac=0.3).copy()
+    completed_workouts["Duração Real"] = completed_workouts["Duração"].apply(lambda x: f"{int(x[:2])+np.random.randint(-5,5)}min")
+    completed_workouts["FC Média"] = completed_workouts["FC Alvo"].apply(lambda x: np.random.randint(int(x.split('-')[0]), int(x.split('-')[1].split()[0])))
+    completed_workouts["Satisfação"] = np.random.choice(["👍", "👍👍", "👍👍👍"], size=len(completed_workouts))
+    
+    st.dataframe(completed_workouts[["Dia", "Tipo de Treino", "Duração Real", "FC Média", "Satisfação"]], 
+                 hide_index=True, use_container_width=True)
+
+with tab4:
+    st.header("Monitoramento de Frequência Cardíaca")
+    
+    # Simulação de dados de FC durante um treino
+    time_points = np.arange(0, 60, 0.1)  # 60 minutos com pontos a cada 0.1 minuto
+    fc_values = []
+    
+    # Criar um perfil de treino simulado
+    for t in time_points:
+        if t < 10:  # Aquecimento
+            fc = zones['Z1 (Recuperação)'][0] + (zones['Z2 (Aeróbico)'][0] - zones['Z1 (Recuperação)'][0]) * (t / 10)
+        elif 10 <= t < 40:  # Parte principal
+            if 10 <= t < 20 or 30 <= t < 40:  # Z3
+                fc = zones['Z3 (Tempo)'][0] + np.random.rand() * (zones['Z3 (Tempo)'][1] - zones['Z3 (Tempo)'][0])
+            else:  # Z2
+                fc = zones['Z2 (Aeróbico)'][0] + np.random.rand() * (zones['Z2 (Aeróbico)'][1] - zones['Z2 (Aeróbico)'][0])
+        else:  # Desaquecimento
+            fc = zones['Z1 (Recuperação)'][0] + (fc_values[-1] - zones['Z1 (Recuperação)'][0]) * ((60 - t) / 20)
+        
+        fc_values.append(fc + np.random.normal(0, 2))
+    
+    fig = px.line(x=time_points, y=fc_values, 
+                 labels={"x": "Tempo (min)", "y": "Frequência Cardíaca (bpm)"},
+                 title="Perfil de Frequência Cardíaca em Treino Simulado")
+    
+    # Adicionar zonas ao gráfico
+    for zone, (min_fc, max_fc) in zones.items():
+        fig.add_hline(y=min_fc, line_dash="dot", annotation_text=zone, line_color="red")
+        fig.add_hline(y=max_fc, line_dash="dot", line_color="red")
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
     st.markdown("""
-    <div class="card">
-        <h3>Progressão do Treino</h3>
-        <table>
-            <tr>
-                <th>Fase</th>
-                <th>Semanas</th>
-                <th>Foco</th>
-                <th>Ajustes</th>
-            </tr>
-            <tr>
-                <td>Adaptação</td>
-                <td>1-2</td>
-                <td>Base aeróbica e técnica</td>
-                <td>Volume moderado, intensidade baixa</td>
-            </tr>
-            <tr>
-                <td>Construção</td>
-                <td>3-6</td>
-                <td>Força específica e endurance</td>
-                <td>Aumento gradual de volume e intensidade</td>
-            </tr>
-            <tr>
-                <td>Intensificação</td>
-                <td>7-9</td>
-                <td>Potência e limiar láctico</td>
-                <td>Intervalos mais intensos, redução de volume</td>
-            </tr>
-            <tr>
-                <td>Tapering</td>
-                <td>10</td>
-                <td>Recuperação e performance</td>
-                <td>Redução de volume, manutenção de intensidade</td>
-            </tr>
-        </table>
-    </div>
-    """, unsafe_allow_html=True)
+    ### Interpretação das Zonas de FC:
+    - **Z1 (Recuperação):** Atividade muito leve, ideal para recuperação
+    - **Z2 (Aeróbico):** Intensidade moderada, melhora eficiência energética
+    - **Z3 (Tempo):** Intensidade desafiadora mas sustentável, melhora resistência
+    - **Z4 (Limiar):** Intensidade alta, melhora limiar de lactato
+    - **Z5 (VO2 Max):** Esforço máximo, melhora capacidade aeróbica
+    """)
 
 # Rodapé
-st.markdown(f"""
-<div class="card" style="text-align: center; margin-top: 2rem;">
-    <p>Performance Sport Agency © 2023 - Plano personalizado para {user_data['name']}</p>
-    <p>Início: {user_data['start_date']} | Término: {user_data['end_date']}</p>
-    <button class="btn" onclick="alert('Plano salvo com sucesso!')">Salvar Plano Completo</button>
+st.markdown("---")
+st.markdown("""
+<div class="footer">
+    <p>PerformanceFit © 2023 - Plano personalizado para {nome}</p>
+    <p>Atualizado em: {date}</p>
 </div>
-""", unsafe_allow_html=True)
-
-# Script JavaScript para animar a barra de progresso
-html_script = f"""
-<script>
-// Animar barra de progresso
-document.addEventListener('DOMContentLoaded', function() {{
-    const progressBar = document.querySelector('.progress-bar');
-    let width = 0;
-    
-    // Converter datas para o formato JavaScript (MM/DD/YYYY)
-    const startDateParts = "{user_data['start_date']}".split('/');
-    const endDateParts = "{user_data['end_date']}".split('/');
-    
-    const startDate = new Date(startDateParts[1] + '/' + startDateParts[0] + '/' + startDateParts[2]);
-    const endDate = new Date(endDateParts[1] + '/' + endDateParts[0] + '/' + endDateParts[2]);
-    const today = new Date();
-    
-    // Calcular progresso
-    const totalDays = (endDate - startDate) / (1000 * 60 * 60 * 24);
-    const daysPassed = (today - startDate) / (1000 * 60 * 60 * 24);
-    let progress = (daysPassed / totalDays) * 100;
-    
-    // Limitar entre 0 e 100
-    progress = Math.max(0, Math.min(100, progress));
-    
-    // Animar
-    const interval = setInterval(function() {{
-        if (width >= progress) {{
-            clearInterval(interval);
-        }} else {{
-            width++;
-            progressBar.style.width = width + '%';
-            progressBar.textContent = Math.round(width) + '%';
-        }}
-    }}, 20);
-}});
-</script>
-"""
-
-html(html_script, height=0)
+""".format(nome=user_data["nome"], date=datetime.now().strftime("%d/%m/%Y")), unsafe_allow_html=True)
