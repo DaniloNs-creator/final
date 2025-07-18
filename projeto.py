@@ -215,8 +215,8 @@ def carregar_dados():
             "Status": "Pendente",
             "Grau de Dificuldade": "Média",
             "Responsável": "Equipe Fiscal",
-            "Data de Início": datetime.now().date() - timedelta(days=5),
-            "Prazo Final": datetime.now().date() + timedelta(days=3),
+            "Data de Início": (datetime.now() - timedelta(days=5)).date(),
+            "Prazo Final": (datetime.now() + timedelta(days=3)).date(),
             "Progresso": 30
         },
         {
@@ -228,8 +228,8 @@ def carregar_dados():
             "Status": "Em Andamento",
             "Grau de Dificuldade": "Alta",
             "Responsável": "João Silva",
-            "Data de Início": datetime.now().date() - timedelta(days=2),
-            "Prazo Final": datetime.now().date() + timedelta(days=5),
+            "Data de Início": (datetime.now() - timedelta(days=2)).date(),
+            "Prazo Final": (datetime.now() + timedelta(days=5)).date(),
             "Progresso": 65
         },
         {
@@ -241,8 +241,8 @@ def carregar_dados():
             "Status": "Finalizado",
             "Grau de Dificuldade": "Baixa",
             "Responsável": "Maria Oliveira",
-            "Data de Início": datetime.now().date() - timedelta(days=10),
-            "Prazo Final": datetime.now().date() - timedelta(days=2),
+            "Data de Início": (datetime.now() - timedelta(days=10)).date(),
+            "Prazo Final": (datetime.now() - timedelta(days=2)).date(),
             "Progresso": 100
         },
         {
@@ -267,8 +267,8 @@ def carregar_dados():
             "Status": "Pendente",
             "Grau de Dificuldade": "Média",
             "Responsável": "Carlos Santos",
-            "Data de Início": datetime.now().date() - timedelta(days=1),
-            "Prazo Final": datetime.now().date() + timedelta(days=7),
+            "Data de Início": (datetime.now() - timedelta(days=1)).date(),
+            "Prazo Final": (datetime.now() + timedelta(days=7)).date(),
             "Progresso": 15
         },
         {
@@ -280,8 +280,8 @@ def carregar_dados():
             "Status": "Em Andamento",
             "Grau de Dificuldade": "Alta",
             "Responsável": "Ana Paula",
-            "Data de Início": datetime.now().date() - timedelta(days=3),
-            "Prazo Final": datetime.now().date() + timedelta(days=12),
+            "Data de Início": (datetime.now() - timedelta(days=3)).date(),
+            "Prazo Final": (datetime.now() + timedelta(days=12)).date(),
             "Progresso": 45
         },
         {
@@ -294,7 +294,7 @@ def carregar_dados():
             "Grau de Dificuldade": "Média",
             "Responsável": "Equipe Fiscal",
             "Data de Início": None,
-            "Prazo Final": datetime.now().date() + timedelta(days=20),
+            "Prazo Final": (datetime.now() + timedelta(days=20)).date(),
             "Progresso": 0
         },
         {
@@ -306,8 +306,8 @@ def carregar_dados():
             "Status": "Finalizado",
             "Grau de Dificuldade": "Baixa",
             "Responsável": "Pedro Almeida",
-            "Data de Início": datetime.now().date() - timedelta(days=8),
-            "Prazo Final": datetime.now().date() - timedelta(days=1),
+            "Data de Início": (datetime.now() - timedelta(days=8)).date(),
+            "Prazo Final": (datetime.now() - timedelta(days=1)).date(),
             "Progresso": 100
         }
     ]
@@ -320,39 +320,45 @@ if 'df_atividades' not in st.session_state:
 # Funções auxiliares
 def aplicar_estilo_status(val):
     if val == "Pendente":
-        return "status-pendente"
+        return "background-color: #fff3cd; color: #856404;"
     elif val == "Em Andamento":
-        return "status-andamento"
+        return "background-color: #cce5ff; color: #004085;"
     elif val == "Finalizado":
-        return "status-finalizado"
+        return "background-color: #d4edda; color: #155724;"
     return ""
 
 def aplicar_estilo_dificuldade(val):
     if val == "Baixa":
-        return "dificuldade-baixa"
+        return "background-color: #d4edda; color: #155724;"
     elif val == "Média":
-        return "dificuldade-media"
+        return "background-color: #fff3cd; color: #856404;"
     elif val == "Alta":
-        return "dificuldade-alta"
+        return "background-color: #f8d7da; color: #721c24;"
     return ""
 
-def calcular_dias_restantes(prazo):
-    if prazo is None or pd.isna(prazo):
+def calcular_dias_restantes(row):
+    if pd.isna(row['Prazo Final']):
         return "Sem prazo"
+    prazo = row['Prazo Final']
+    if isinstance(prazo, str):
+        try:
+            prazo = datetime.strptime(prazo, "%Y-%m-%d").date()
+        except:
+            return "Sem prazo"
     dias = (prazo - datetime.now().date()).days
     return dias
 
-def aplicar_estilo_prazo(dias):
-    if isinstance(dias, str):
+def aplicar_estilo_prazo(val):
+    if isinstance(val, str):
         return ""
-    if dias < 0:
-        return "prazo-urgente"
-    elif dias <= 3:
-        return "prazo-urgente"
-    elif dias <= 7:
-        return "prazo-proximo"
+    if val < 0:
+        return "color: #f44336; font-weight: 600;"
+    elif val <= 3:
+        return "color: #f44336; font-weight: 600;"
+    elif val <= 7:
+        return "color: #ff9800; font-weight: 600;"
     else:
-        return "prazo-normal"
+        return "color: #4caf50; font-weight: 600;"
 
 # Interface do usuário
 st.markdown('<div class="header"><h1>📊 Controle de Atividades Fiscais</h1></div>', unsafe_allow_html=True)
@@ -422,7 +428,7 @@ with st.container():
     
     # Adicionar coluna de dias restantes
     df_exibicao = df_filtrado.copy()
-    df_exibicao["Dias Restantes"] = df_exibicao["Prazo Final"].apply(calcular_dias_restantes)
+    df_exibicao["Dias Restantes"] = df_exibicao.apply(calcular_dias_restantes, axis=1)
     
     # Selecionar colunas para exibição
     colunas_exibicao = [
@@ -431,15 +437,16 @@ with st.container():
         "Grau de Dificuldade", "Responsável", "Dias Restantes", "Progresso"
     ]
     
-    # Aplicar estilos
-    styled_df = df_exibicao[colunas_exibicao].style.applymap(
-        aplicar_estilo_status, subset=["Status"]
-    ).applymap(
-        aplicar_estilo_dificuldade, subset=["Grau de Dificuldade"]
-    ).applymap(
-        aplicar_estilo_prazo, subset=["Dias Restantes"]
+    # Aplicar estilos diretamente no DataFrame
+    styled_df = df_exibicao[colunas_exibicao].style.apply(
+        lambda x: [aplicar_estilo_status(v) for v in x], subset=["Status"]
+    ).apply(
+        lambda x: [aplicar_estilo_dificuldade(v) for v in x], subset=["Grau de Dificuldade"]
+    ).apply(
+        lambda x: [aplicar_estilo_prazo(v) if isinstance(v, (int, float)) else "" for v in x], subset=["Dias Restantes"]
     )
     
+    # Exibir o DataFrame estilizado
     st.dataframe(
         styled_df,
         use_container_width=True,
