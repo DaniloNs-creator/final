@@ -278,30 +278,30 @@ user_data = {
 }
 
 # Barra de progresso
-st.markdown("""
+st.markdown(f"""
 <div class="card">
     <h2 class="section-title">Seu Progresso</h2>
-    <p>Meta de 60 dias: {start_date} - {end_date}</p>
+    <p>Meta de 60 dias: {user_data['start_date']} - {user_data['end_date']}</p>
     <div class="progress-container">
         <div class="progress-bar" style="width: 0%">0%</div>
     </div>
 </div>
-""".format(**user_data), unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 # Abas para navegação
 tab1, tab2, tab3 = st.tabs(["📊 Visão Geral", "🍽 Plano Alimentar", "💪 Rotina de Treinos"])
 
 with tab1:
-    st.markdown("""
+    st.markdown(f"""
     <div class="card">
         <h2 class="section-title">Seu Perfil</h2>
-        <p><strong>Nome:</strong> {name}</p>
-        <p><strong>Idade:</strong> {age} anos</p>
-        <p><strong>Altura:</strong> {height}m</p>
-        <p><strong>Peso atual:</strong> {weight}kg</p>
-        <p><strong>Objetivo:</strong> {goal}</p>
+        <p><strong>Nome:</strong> {user_data['name']}</p>
+        <p><strong>Idade:</strong> {user_data['age']} anos</p>
+        <p><strong>Altura:</strong> {user_data['height']}m</p>
+        <p><strong>Peso atual:</strong> {user_data['weight']}kg</p>
+        <p><strong>Objetivo:</strong> {user_data['goal']}</p>
     </div>
-    """.format(**user_data), unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
     
     st.markdown("""
     <div class="card">
@@ -577,23 +577,28 @@ with tab3:
     """, unsafe_allow_html=True)
 
 # Rodapé
-st.markdown("""
+st.markdown(f"""
 <div class="card" style="text-align: center; margin-top: 2rem;">
-    <p>Performance Sport Agency © 2023 - Plano personalizado para {name}</p>
-    <p>Início: {start_date} | Término: {end_date}</p>
+    <p>Performance Sport Agency © 2023 - Plano personalizado para {user_data['name']}</p>
+    <p>Início: {user_data['start_date']} | Término: {user_data['end_date']}</p>
     <button class="btn" onclick="alert('Plano salvo com sucesso!')">Salvar Plano Completo</button>
 </div>
-""".format(**user_data), unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 # Script JavaScript para animar a barra de progresso
-html("""
+html_script = f"""
 <script>
 // Animar barra de progresso
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function() {{
     const progressBar = document.querySelector('.progress-bar');
     let width = 0;
-    const startDate = new Date('{start_date_js}');
-    const endDate = new Date('{end_date_js}');
+    
+    // Converter datas para o formato JavaScript (MM/DD/YYYY)
+    const startDateParts = "{user_data['start_date']}".split('/');
+    const endDateParts = "{user_data['end_date']}".split('/');
+    
+    const startDate = new Date(startDateParts[1] + '/' + startDateParts[0] + '/' + startDateParts[2]);
+    const endDate = new Date(endDateParts[1] + '/' + endDateParts[0] + '/' + endDateParts[2]);
     const today = new Date();
     
     // Calcular progresso
@@ -605,18 +610,17 @@ document.addEventListener('DOMContentLoaded', function() {
     progress = Math.max(0, Math.min(100, progress));
     
     // Animar
-    const interval = setInterval(function() {
-        if (width >= progress) {
+    const interval = setInterval(function() {{
+        if (width >= progress) {{
             clearInterval(interval);
-        } else {
+        }} else {{
             width++;
             progressBar.style.width = width + '%';
             progressBar.textContent = Math.round(width) + '%';
-        }
-    }, 20);
-});
+        }}
+    }}, 20);
+}});
 </script>
-""".format(
-    start_date_js=datetime.strptime(user_data["start_date"], "%d/%m/%Y").strftime("%Y/%m/%d"),
-    end_date_js=datetime.strptime(user_data["end_date"], "%d/%m/%Y").strftime("%Y/%m/%d")
-), height=0)
+"""
+
+html(html_script, height=0)
