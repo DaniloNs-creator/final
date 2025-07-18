@@ -1,360 +1,249 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import plotly.express as px
-from datetime import datetime
 import io
 
-# Configuração da página
-st.set_page_config(
-    page_title="Análise de ECD - Registro J155",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+def parse_ecd_file(file_content):
+    """
+    Parses the content of an ECD (Escrituração Contábil Digital) file.
 
-# Título do dashboard
-st.title("📊 Análise de KPIs Contábeis - ECD (Registro J155)")
-st.markdown("Carregue o arquivo TXT da Escrituração Contábil Digital para análise do registro J155")
+    Args:
+        file_content (str): The raw content of the ECD .txt file.
 
-# Function to parse the ECD with focus on J155
-def parse_ecd_j155(file_content):
-    """Processa o arquivo ECD e extrai os registros J155"""
-    lines = file_content.split('\n')
-    registros_j155 = []
+    Returns:
+        tuple: A tuple containing two pandas DataFrames:
+               - chart_of_accounts: Contains account details from I050 records.
+               - movements: Contains financial movements from I355 records.
+    """
+    lines = file_content.splitlines()
+    chart_of_accounts = []
+    movements = []
 
     for line in lines:
-        if not line.strip():
-            continue
+        parts = line.split('|')
+        if len(parts) > 1:
+            record_type = parts[1]
 
-        # Verifica se é registro J155 (posições 1-4)
-        if line.startswith('|I355|'): # Changed from J155 to I355 based on your provided file snippet
-            # Remove os pipes e separa os campos
-            campos = [campo.strip() for campo in line.split('|')[1:-1]]
+            if record_type == 'I050':
+                # I050: Account Code, Account Type (S/A), Account Level, Account Name
+                # Example: |I050|01011900|01|S|1|100000000000000||Ativo|
+                try:
+                    account_code = parts[6]
+                    account_type = parts[4] # 'S' for Synthetical, 'A' for Analytical
+                    account_level = int(parts[5])
+                    account_name = parts[8]
+                    # Determine main account group based on the first digit of the code
+                    main_group = ''
+                    if account_code.startswith('1'):
+                        main_group = 'Ativo'
+                    elif account_code.startswith('2'):
+                        main_group = 'Passivo e PL'
+                    elif account_code.startswith('3'):
+                        main_group = 'Receita'
+                    elif account_code.startswith('4'):
+                        main_group = 'Despesa'
+                    elif account_code.startswith('5'):
+                        main_group = 'Custos' # Assuming 5 is for costs if present
 
-            # Adjusted indexing for I355 based on your provided snippet
-            # The snippet looks like: |I355|COD_CTA_REF||VALOR|IND_VALOR|
-            # So, COD_CTA_REF is campos[1], VALOR is campos[3], IND_VALOR is campos[4]
-            if len(campos) >= 5:  # Check for minimum required fields for I355
-                registro = {
-                    'TIPO_REG': campos[0],
-                    'COD_CTA_REF': campos[1],
-                    # DT_INI, DT_FIN, COD_VER, COD_FIN, NOME, CNPJ, UF, IE, COD_MUN, IM, IND_SIT_ESP are not directly in I355 line based on your snippet
-                    # Setting them to None or empty for now, as they are not present in the I355 lines you provided.
-                    # If these are derived from other records (like 0000, I030), you would need to parse those records first.
-                    'DT_INI': None,
-                    'DT_FIN': None,
-                    'COD_VER': None,
-                    'COD_FIN': None,
-                    'NOME': None,
-                    'CNPJ': None,
-                    'UF': None,
-                    'IE': None,
-                    'COD_MUN': None,
-                    'IM': None,
-                    'IND_SIT_ESP': None,
-                    'DESCRICAO': '', # Description is not directly in I355, would need I050 for this
-                    'VALOR': float(campos[3].replace(',', '.')) if campos[3] else 0.0,
-                    'IND_VALOR': campos[4]
-                }
-                registros_j155.append(registro)
-    return pd.DataFrame(registros_j155)
+                    chart_of_accounts.append({
+                        'Account_Code': account_code,
+                        'Account_Type': account_type,
+                        'Account_Level': account_level,
+                        'Account_Name': account_name,
+                        'Main_Group': main_group
+                    })
+                except (IndexError, ValueError) as e:
+                    st.warning(f"Skipping malformed I050 record: {line} - Error: {e}")
 
+            elif record_type == 'I355':
+                # I355: Account Code, Value, Nature (D/C)
+                # Example: |I355|4.1.02.02.0001||474,94|D|
+                try:
+                    account_code = parts[2] # Account code in I355 is in the 3rd field
+                    value_str = parts[4].replace('.', '').replace(',', '.') # Handle Brazilian decimal format
+                    value = float(value_str)
+                    nature = parts[5] # 'D' for Debit, 'C' for Credit
+                    movements.append({
+                        'Account_Code': account_code,
+                        'Value': value,
+                        'Nature': nature
+                    })
+                except (IndexError, ValueError) as e:
+                    st.warning(f"Skipping malformed I355 record: {line} - Error: {e}")
 
-def processar_kpis_j155(df_j155):
-    """Processa os registros J155 (or I355 in this case) para calcular os KPIs"""
-    # Group values by reference account code, considering 'D' as positive and 'C' as negative for DRE
-    df_j155['VALOR_AJUSTADO'] = df_j155.apply(
-        lambda row: row['VALOR'] if row['IND_VALOR'] == 'D' else -row['VALOR'],
-        axis=1
+    df_accounts = pd.DataFrame(chart_of_accounts)
+    df_movements = pd.DataFrame(movements)
+
+    return df_accounts, df_movements
+
+def calculate_kpis(df_accounts, df_movements):
+    """
+    Calculates key accounting and financial KPIs from parsed ECD data.
+
+    Args:
+        df_accounts (pd.DataFrame): DataFrame containing chart of accounts.
+        df_movements (pd.DataFrame): DataFrame containing financial movements.
+
+    Returns:
+        dict: A dictionary of calculated KPIs.
+    """
+    kpis = {}
+
+    if df_accounts.empty or df_movements.empty:
+        return {"Error": "No data in accounts or movements to calculate KPIs."}
+
+    # Merge movements with account names
+    df_merged = pd.merge(df_movements, df_accounts, on='Account_Code', how='left')
+
+    # Calculate net balance for each account
+    df_merged['Signed_Value'] = df_merged.apply(
+        lambda row: row['Value'] if row['Nature'] == 'D' else -row['Value'], axis=1
     )
-    df_agrupado = df_j155.groupby('COD_CTA_REF')['VALOR_AJUSTADO'].sum().reset_index()
 
-    # Mapping of codes to DRE accounts (adjust as per your chart of accounts)
-    # Based on your snippet, I see codes like 4.1.02.02.0001, 4.1.02.05.0001, etc.
-    # It seems '4' might represent a major group, possibly 'CUSTOS' based on the original code.
-    # Let's refine the mapping based on typical DRE structure and your example codes.
-    dre_mapping = {
-        '3': 'RECEITA_BRUTA', # Assuming codes starting with '3' are revenues
-        '4': 'CUSTOS',        # Assuming codes starting with '4' are costs
-        '5': 'DESPESAS_OPERACIONAIS', # Assuming codes starting with '5' are operating expenses
-        '6': 'IMPOSTOS',      # Assuming codes starting with '6' are taxes
-        # Example for Patrimonio Liquido - if it were in the J155/I355 with a specific code, like 2.01.04
-        '2.01.04': 'PATRIMONIO_LIQUIDO'
-    }
+    account_balances = df_merged.groupby('Account_Code').agg(
+        Total_Value=('Signed_Value', 'sum'),
+        Account_Name=('Account_Name', 'first'),
+        Main_Group=('Main_Group', 'first')
+    ).reset_index()
 
-    kpis = {
-        'PERIODO': "N/A", # Will be set if DT_INI/DT_FIN are parsed
-        'RECEITA_BRUTA': 0.0,
-        'DEDUCOES': 0.0,
-        'CUSTOS': 0.0,
-        'DESPESAS_OPERACIONAIS': 0.0,
-        'IMPOSTOS': 0.0,
-        'PATRIMONIO_LIQUIDO': 0.0
-    }
+    # Apply normal balance conventions for final balance
+    # Assets, Expenses: Debit is positive
+    # Liabilities, Equity, Revenue: Credit is positive (Debit is negative)
+    def adjust_balance(row):
+        if row['Main_Group'] in ['Ativo', 'Despesa']:
+            return row['Total_Value']
+        elif row['Main_Group'] in ['Passivo e PL', 'Receita', 'Custos']: # Assuming costs are credit in source, then flip
+            return -row['Total_Value']
+        return row['Total_Value'] # Default if group is not classified
 
-    # Populate KPIs based on the mapping
-    for _, row in df_agrupado.iterrows():
-        found = False
-        for codigo_prefixo, conta_kpi in dre_mapping.items():
-            if row['COD_CTA_REF'].startswith(codigo_prefixo):
-                kpis[conta_kpi] += row['VALOR_AJUSTADO']
-                found = True
-                break # Match found, move to next row
+    account_balances['Final_Balance'] = account_balances.apply(adjust_balance, axis=1)
 
-    # Calculate derived KPIs
-    kpis['RECEITA_LIQUIDA'] = kpis['RECEITA_BRUTA'] - kpis['DEDUCOES'] # Deducoes would need to be identified from specific account codes
-    kpis['LUCRO_BRUTO'] = kpis['RECEITA_LIQUIDA'] - kpis['CUSTOS']
-    kpis['LUCRO_OPERACIONAL'] = kpis['LUCRO_BRUTO'] - kpis['DESPESAS_OPERACIONAIS']
-    kpis['LUCRO_ANTES_IR'] = kpis['LUCRO_OPERACIONAL']  # Simplified
-    kpis['LUCRO_LIQUIDO'] = kpis['LUCRO_ANTES_IR'] - kpis['IMPOSTOS']
+    # Calculate main financial statements aggregates
+    total_assets = account_balances[account_balances['Main_Group'] == 'Ativo']['Final_Balance'].sum()
+    total_liabilities_equity = account_balances[account_balances['Main_Group'] == 'Passivo e PL']['Final_Balance'].sum()
+    total_revenue = account_balances[account_balances['Main_Group'] == 'Receita']['Final_Balance'].sum()
+    total_expenses = account_balances[account_balances['Main_Group'] == 'Despesa']['Final_Balance'].sum()
+    total_costs = account_balances[account_balances['Main_Group'] == 'Custos']['Final_Balance'].sum()
 
-    kpis['MARGEM_BRUTA'] = kpis['LUCRO_BRUTO'] / kpis['RECEITA_LIQUIDA'] if kpis['RECEITA_LIQUIDA'] != 0 else 0
-    kpis['MARGEM_OPERACIONAL'] = kpis['LUCRO_OPERACIONAL'] / kpis['RECEITA_LIQUIDA'] if kpis['RECEITA_LIQUIDA'] != 0 else 0
-    kpis['MARGEM_LIQUIDA'] = kpis['LUCRO_LIQUIDO'] / kpis['RECEITA_LIQUIDA'] if kpis['RECEITA_LIQUIDA'] != 0 else 0
-    kpis['ROE'] = kpis['LUCRO_LIQUIDO'] / kpis['PATRIMONIO_LIQUIDO'] if kpis['PATRIMONIO_LIQUIDO'] != 0 else 0
+    # Special handling for Equity: If 'Patrimônio Líquido' is a parent account in I050 and the I355 movements for its children are included in 'Passivo e PL' group
+    # We need to ensure we isolate Equity from Liabilities for ratios.
+    # From the file: Patrimônio Líquido is under main group '2' (Passivo).
+    # Assuming '2.3' is Patrimônio Líquido's top-level code.
+    equity_accounts = df_accounts[df_accounts['Account_Code'].str.startswith('2.3') & (df_accounts['Account_Type'] == 'S')]
+    if not equity_accounts.empty:
+        equity_parent_codes = equity_accounts['Account_Code'].tolist()
+        # Find all analytical accounts that fall under these equity parent codes
+        analytical_equity_accounts = df_accounts[
+            (df_accounts['Account_Type'] == 'A') &
+            df_accounts['Account_Code'].apply(lambda x: any(x.startswith(code) for code in equity_parent_codes))
+        ]['Account_Code'].tolist()
+
+        total_equity = account_balances[account_balances['Account_Code'].isin(analytical_equity_accounts)]['Final_Balance'].sum()
+        total_liabilities = total_liabilities_equity - total_equity
+    else:
+        # Fallback if specific equity breakdown isn't clear, approximate total liabilities and equity together.
+        total_equity = account_balances[account_balances['Account_Name'].str.contains('Patrimônio Líquido', case=False, na=False)]['Final_Balance'].sum()
+        # Assuming other accounts under 'Passivo e PL' are Liabilities
+        total_liabilities = total_liabilities_equity - total_equity if total_liabilities_equity > total_equity else 0
+
+
+    # Net Income: Revenue - Costs - Expenses
+    net_income = total_revenue - total_costs - total_expenses
+
+    kpis['Total Assets'] = total_assets
+    kpis['Total Liabilities'] = total_liabilities
+    kpis['Total Equity'] = total_equity
+    kpis['Total Revenue'] = total_revenue
+    kpis['Total Expenses'] = total_expenses # Including costs here for simplicity, refine if needed
+    kpis['Net Income (Profit/Loss)'] = net_income
+
+    # Common Financial Ratios
+    # Current Assets (assuming all 'Ativo Circulante' - 1.1)
+    current_assets = account_balances[account_balances['Account_Code'].str.startswith('1.1')]['Final_Balance'].sum()
+    # Current Liabilities (assuming all 'Passivo Circulante' - 2.1)
+    current_liabilities = account_balances[account_balances['Account_Code'].str.startswith('2.1')]['Final_Balance'].sum()
+
+    kpis['Current Ratio (Current Assets / Current Liabilities)'] = current_assets / current_liabilities if current_liabilities != 0 else float('inf')
+    kpis['Debt-to-Equity Ratio (Total Liabilities / Total Equity)'] = total_liabilities / total_equity if total_equity != 0 else float('inf')
+    kpis['Net Profit Margin (Net Income / Total Revenue)'] = (net_income / total_revenue) if total_revenue != 0 else 0
 
     return kpis
 
-# Sample content from your provided file snippet for demonstration
-# In a real Streamlit app, this would come from `uploaded_file.getvalue().decode("latin-1")`
-sample_file_content = """|0000|LECD|01012025|31012025|GL BRANDS IMPORTACAO, EXPORTACAO E COMERCIO LTDA|18019528000178|SC|257018760|4209102|||0|0|0||0|0||N|N|0|0||
-|0001|0|
-|0007|SC||
-|0990|4|
-|I001|0|
-|I010|G|9.00|
-|I030|TERMO DE ABERTURA|7|LIVRO DIARIO|2901|GL BRANDS IMPORTACAO, EXPORTACAO E COMERCIO LTDA||18019528000178|31122024||São Paulo|31122024|
-|I050|01011900|01|S|1|100000000000000||Ativo|
-|I050|01011900|01|S|2|1.1|100000000000000|ATIVO CIRCULANTE|
-|I050|01011900|01|S|3|1.1.01|1.1|DISPONÍVEL|
-|I355|4.1.02.02.0001||474,94|D|
-|I355|4.1.02.02.0005||118,90|D|
-|I355|4.1.02.03.0009||166,70|D|
-|I355|4.1.02.03.0011||26571,81|D|
-|I355|4.1.02.04.0004||13198,61|D|
-|I355|4.1.02.05.0001||8974,36|D|
-|I355|4.1.02.05.0003||3422,39|D|
-|I355|4.1.02.05.0004||6684,82|D|
-|I355|4.1.02.05.0007||5000,00|D|
-|I355|4.1.02.05.0008||249,90|D|
-|I355|4.1.02.06.0003||625,10|D|
-|I355|4.1.02.07.0002||164"""
+# Streamlit UI
+st.set_page_config(layout="wide")
+st.title("📊 Dashboard de KPIs Contábeis e Financeiros (ECD)")
 
-# This part simulates the file upload for demonstration
-file_content = sample_file_content
+st.write("Faça o upload do seu arquivo TXT da ECD para analisar os principais indicadores.")
 
-try:
-    # Process the ECD file - focus on I355 (as it appears in your snippet)
-    df_i355 = parse_ecd_j155(file_content)
+uploaded_file = st.file_uploader("Escolha um arquivo TXT da ECD", type="txt")
 
-    if len(df_i355) == 0:
-        st.error("Nenhum registro I355 encontrado no arquivo! (Esperava J155, mas seu snippet mostra I355)")
+if uploaded_file is not None:
+    # Read the file content
+    file_content = uploaded_file.read().decode("utf-8")
+
+    st.subheader("Conteúdo do Arquivo ECD (Amostra)")
+    st.code(file_content[:1000] + "...", language="text") # Show first 1000 characters
+
+    st.subheader("Processando Dados...")
+    df_accounts, df_movements = parse_ecd_file(file_content)
+
+    if not df_accounts.empty and not df_movements.empty:
+        st.success("Arquivo ECD processado com sucesso!")
+
+        st.subheader("Estrutura do Plano de Contas (I050)")
+        st.dataframe(df_accounts)
+
+        st.subheader("Lançamentos Contábeis (I355)")
+        st.dataframe(df_movements)
+
+        st.subheader("Calculando KPIs...")
+        kpis = calculate_kpis(df_accounts, df_movements)
+
+        st.subheader("Principais KPIs Contábeis e Financeiros")
+        if "Error" in kpis:
+            st.error(kpis["Error"])
+        else:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(label="Ativo Total", value=f"R$ {kpis['Total Assets']:.2f}")
+                st.metric(label="Receita Total", value=f"R$ {kpis['Total Revenue']:.2f}")
+                st.metric(label="Margem de Lucro Líquida", value=f"{kpis['Net Profit Margin (Net Income / Total Revenue)']:.2%}")
+            with col2:
+                st.metric(label="Passivo Total", value=f"R$ {kpis['Total Liabilities']:.2f}")
+                st.metric(label="Despesa Total", value=f"R$ {kpis['Total Expenses']:.2f}")
+                st.metric(label="Capital Próprio (Patrimônio Líquido)", value=f"R$ {kpis['Total Equity']:.2f}")
+            with col3:
+                st.metric(label="Lucro/Prejuízo Líquido", value=f"R$ {kpis['Net Income (Profit/Loss)']:.2f}")
+                st.metric(label="Índice de Liquidez Corrente", value=f"{kpis['Current Ratio (Current Assets / Current Liabilities)']:.2f}")
+                st.metric(label="Índice Dívida/Capital Próprio", value=f"{kpis['Debt-to-Equity Ratio (Total Liabilities / Total Equity)']:.2f}")
+
+            st.markdown("---")
+            st.write("### Detalhes dos Balanços por Conta")
+            # Re-calculate account balances to display them in a table
+            df_merged['Signed_Value'] = df_merged.apply(
+                lambda row: row['Value'] if row['Nature'] == 'D' else -row['Value'], axis=1
+            )
+
+            account_balances_detail = df_merged.groupby('Account_Code').agg(
+                Account_Name=('Account_Name', 'first'),
+                Main_Group=('Main_Group', 'first'),
+                Balance=('Signed_Value', 'sum')
+            ).reset_index()
+
+            account_balances_detail['Final_Balance_Adjusted'] = account_balances_detail.apply(adjust_balance, axis=1)
+
+            # Display only analytical accounts for detailed view
+            analytical_balances = account_balances_detail[
+                (account_balances_detail['Account_Code'].isin(df_accounts[df_accounts['Account_Type'] == 'A']['Account_Code']))
+            ].copy()
+            st.dataframe(analytical_balances[['Account_Code', 'Account_Name', 'Main_Group', 'Final_Balance_Adjusted']].sort_values(by='Account_Code'))
+
     else:
-        # Process KPIs
-        kpis = processar_kpis_j155(df_i355)
+        st.warning("Não foi possível extrair dados válidos dos registros I050 ou I355 do arquivo. Por favor, verifique o formato.")
 
-        # Extract company info from 0000 record if present
-        company_name = "Não Encontrado"
-        cnpj = "Não Encontrado"
-        period_start = "N/A"
-        period_end = "N/A"
-
-        for line in file_content.split('\n'):
-            if line.startswith('|0000|'):
-                parts = line.split('|')
-                if len(parts) > 7:
-                    company_name = parts[5]
-                    cnpj = parts[6]
-                    period_start_str = parts[2]
-                    period_end_str = parts[3]
-                    try:
-                        period_start = datetime.strptime(period_start_str, '%d%m%Y').strftime('%d/%m/%Y')
-                        period_end = datetime.strptime(period_end_str, '%d%m%Y').strftime('%d/%m/%Y')
-                    except ValueError:
-                        pass # Keep as N/A if parsing fails
-                break
-
-        kpis['PERIODO'] = f"{period_start} a {period_end}"
-
-        # Display company info
-        st.subheader("Informações da Empresa")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Nome", company_name)
-        col2.metric("CNPJ", cnpj)
-        col3.metric("Período", kpis['PERIODO'])
-
-        # Main metrics
-        st.subheader("Principais KPIs - Demonstração do Resultado")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Receita Líquida", f"R$ {kpis['RECEITA_LIQUIDA']:,.2f}")
-        col2.metric("Lucro Líquido", f"R$ {kpis['LUCRO_LIQUIDO']:,.2f}")
-        col3.metric("Margem Líquida", f"{kpis['MARGEM_LIQUIDA']*100:.2f}%")
-        col4.metric("ROE", f"{kpis['ROE']*100:.2f}%")
-
-        # Tabs for detailed analysis
-        tab1, tab2, tab3 = st.tabs(["📊 DRE Completa", "📈 Análise de Rentabilidade", "🧮 Registros I355"])
-
-        with tab1:
-            st.header("Demonstração do Resultado do Exercício")
-
-            # Create DataFrame for DRE
-            dre_data = [
-                {"Descrição": "Receita Bruta", "Valor": kpis['RECEITA_BRUTA'], "Tipo": "Receita"},
-                {"Descrição": "(-) Deduções", "Valor": -kpis['DEDUCOES'], "Tipo": "Dedução"},
-                {"Descrição": "(=) Receita Líquida", "Valor": kpis['RECEITA_LIQUIDA'], "Tipo": "Receita"},
-                {"Descrição": "(-) Custos", "Valor": -kpis['CUSTOS'], "Tipo": "Custo"},
-                {"Descrição": "(=) Lucro Bruto", "Valor": kpis['LUCRO_BRUTO'], "Tipo": "Resultado"},
-                {"Descrição": "(-) Despesas Operacionais", "Valor": -kpis['DESPESAS_OPERACIONAIS'], "Tipo": "Despesa"},
-                {"Descrição": "(=) Lucro Operacional", "Valor": kpis['LUCRO_OPERACIONAL'], "Tipo": "Resultado"},
-                {"Descrição": "(-) Impostos", "Valor": -kpis['IMPOSTOS'], "Tipo": "Imposto"},
-                {"Descrição": "(=) Lucro Líquido", "Valor": kpis['LUCRO_LIQUIDO'], "Tipo": "Resultado"}
-            ]
-            df_dre = pd.DataFrame(dre_data)
-
-            # Bar chart of DRE
-            fig = px.bar(
-                df_dre,
-                x='Descrição',
-                y='Valor',
-                color='Tipo',
-                text=[f"R$ {x:,.2f}" for x in df_dre['Valor']],
-                title="Demonstração do Resultado do Exercício",
-                labels={'Valor': 'Valor (R$)', 'Descrição': 'Conta'}
-            )
-            fig.update_traces(textposition='outside')
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Table with values
-            st.dataframe(
-                df_dre[['Descrição', 'Valor']].style.format({
-                    'Valor': 'R$ {:.2f}'
-                }),
-                use_container_width=True
-            )
-
-        with tab2:
-            st.header("Análise de Rentabilidade")
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                # Margins chart
-                margens_data = {
-                    'Margem': ['Margem Bruta', 'Margem Operacional', 'Margem Líquida'],
-                    'Percentual': [
-                        kpis['MARGEM_BRUTA'] * 100,
-                        kpis['MARGEM_OPERACIONAL'] * 100,
-                        kpis['MARGEM_LIQUIDA'] * 100
-                    ]
-                }
-                df_margens = pd.DataFrame(margens_data)
-
-                fig = px.bar(
-                    df_margens,
-                    x='Margem',
-                    y='Percentual',
-                    text=[f"{x:.1f}%" for x in df_margens['Percentual']],
-                    title="Análise de Margens",
-                    labels={'Percentual': 'Percentual (%)', 'Margem': 'Tipo de Margem'}
-                )
-                fig.update_traces(textposition='outside')
-                st.plotly_chart(fig, use_container_width=True)
-
-            with col2:
-                # ROE indicator
-                fig = px.bar(
-                    x=['ROE'],
-                    y=[kpis['ROE'] * 100],
-                    text=[f"{kpis['ROE'] * 100:.1f}%"],
-                    title="Retorno sobre o Patrimônio Líquido (ROE)",
-                    labels={'x': '', 'y': 'Percentual (%)'}
-                )
-                fig.update_traces(marker_color='green')
-                fig.update_traces(textposition='outside')
-                st.plotly_chart(fig, use_container_width=True)
-
-            # Composition analysis
-            st.subheader("Composição do Resultado")
-            composicao = pd.DataFrame({
-                'Item': ['Receita Líquida', 'Custos', 'Despesas Operacionais', 'Impostos'],
-                'Valor': [
-                    kpis['RECEITA_LIQUIDA'],
-                    -kpis['CUSTOS'],
-                    -kpis['DESPESAS_OPERACIONAIS'],
-                    -kpis['IMPOSTOS']
-                ]
-            })
-
-            fig = px.pie(
-                composicao,
-                names='Item',
-                values='Valor',
-                title='Composição do Resultado',
-                hole=0.4
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-        with tab3:
-            st.header("Registros I355 da ECD") # Changed from J155 to I355
-
-            # Filters for records
-            st.subheader("Filtros de Consulta")
-            col1, col2 = st.columns(2)
-
-            with col1:
-                codigo_conta = st.text_input("Filtrar por código de conta (início):")
-
-            with col2:
-                descricao_conta = st.text_input("Filtrar por descrição:")
-
-            # Apply filters
-            df_filtrado = df_i355.copy()
-            if codigo_conta:
-                df_filtrado = df_filtrado[df_filtrado['COD_CTA_REF'].str.startswith(codigo_conta)]
-            if descricao_conta:
-                # Note: 'DESCRICAO' is empty in parse_ecd_j155 for I355 records.
-                # If you want to filter by description, you'd need to parse I050 records first to get account descriptions.
-                st.warning("Filtrar por descrição não funcionará, pois a descrição não é extraída diretamente do registro I355. Considere o registro I050 para descrições de contas.")
-                df_filtrado = df_filtrado[df_filtrado['DESCRICAO'].str.contains(descricao_conta, case=False)]
-
-            # Show filtered records
-            st.dataframe(
-                df_filtrado[['COD_CTA_REF', 'DESCRICAO', 'VALOR', 'IND_VALOR']].style.format({
-                    'VALOR': 'R$ {:.2f}'
-                }),
-                use_container_width=True,
-                height=400
-            )
-
-            # Show official layout of I355 record (adapted from J155)
-            st.subheader("Layout Oficial do Registro I355 (Adaptado)")
-            st.markdown("""
-            O registro I355 é um registro de saldo de contas analíticas ou agregadas,
-            muitas vezes relacionado a um plano de contas referencial ou interno.
-            O layout exato pode variar ligeiramente com as versões da ECD, mas tipicamente contém:
-
-            | Ordem | Campo | Tipo | Descrição |
-            |-------|-------|------|-----------|
-            | 1 | REG | C | Tipo do registro (I355) |
-            | 2 | COD_CTA_REF | C | Código da conta de referência |
-            | 3 | CCE | C | Código da conta contábil |
-            | 4 | VL_CTA | N | Valor da conta |
-            | 5 | IND_VL | C | Indicador da natureza do valor (D - Débito / C - Crédito) |
-            """)
-            st.markdown("""
-            **Observação:** O layout original fornecido para J155 é mais complexo e inclui
-            informações como período, CNPJ, etc. Para o I355, como visto em seu snippet,
-            as informações são mais concisas e focadas no código da conta e valor.
-            Para um dashboard completo de DRE, normalmente se combinam informações de I355 (ou J155)
-            com o plano de contas referencial (I050) e dados da empresa (0000).
-            """)
-
-except Exception as e:
-    st.error(f"Erro ao processar o arquivo: {str(e)}")
-
-# Footer
 st.markdown("---")
-st.markdown("**Dashboard para análise de ECD (Registro I355) - v1.0**") # Changed from J155 to I355
-st.markdown(f"Última atualização: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
-
+st.info(
+    "Este dashboard é uma ferramenta analítica e os resultados dependem da exatidão e completude dos dados "
+    "presentes no arquivo ECD. A interpretação dos KPIs deve ser feita por um profissional qualificado. "
+    "A estrutura da ECD pode variar e este parser foi desenvolvido com base no arquivo de exemplo fornecido. "
+    [span_0](start_span)"[Fonte da estrutura ECD: ECD_18019528000178_01012025_31012025_162824.txt[span_0](end_span)]"
+        )
