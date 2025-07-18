@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 from datetime import datetime, timedelta
 import base64
+from io import BytesIO
 
 # Configuração da página
 st.set_page_config(
@@ -13,12 +14,127 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS personalizado com animações
-def local_css(file_name):
-    with open(file_name) as f:
-        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+# CSS embutido diretamente no código
+def inject_css():
+    st.markdown("""
+    <style>
+        /* Estilos gerais */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #333;
+            background-color: #f5f7fa;
+        }
 
-local_css("style.css")
+        /* Cabeçalho */
+        .stApp header {
+            background: linear-gradient(90deg, #1e3c72, #2a5298);
+            color: white;
+            padding: 1rem;
+            border-radius: 0 0 10px 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Sidebar */
+        .stSidebar {
+            background: linear-gradient(180deg, #ffffff, #f8f9fa);
+            padding: 1rem;
+            border-right: 1px solid #e1e5eb;
+        }
+
+        .user-profile {
+            animation: fadeIn 1s ease-in-out;
+        }
+
+        .profile-card {
+            background: white;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            margin-bottom: 1rem;
+            transition: transform 0.3s ease;
+        }
+
+        .profile-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Cards de refeição */
+        .meal-option {
+            background: white;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+            border-left: 4px solid #2a5298;
+        }
+
+        .meal-option:hover {
+            background: #f8f9fa;
+            transform: translateX(5px);
+        }
+
+        /* Abas */
+        .stTabs [aria-selected="true"] {
+            font-weight: bold;
+            color: #1e3c72 !important;
+        }
+
+        .stTabs [aria-selected="true"]:after {
+            content: '';
+            display: block;
+            width: 100%;
+            height: 3px;
+            background: #1e3c72;
+            margin-top: 5px;
+            animation: expand 0.3s ease-out;
+        }
+
+        /* Rodapé */
+        .footer {
+            text-align: center;
+            padding: 1rem;
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        /* Animações */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes expand {
+            from { width: 0; }
+            to { width: 100%; }
+        }
+
+        /* Botões */
+        .stButton>button {
+            background: linear-gradient(90deg, #1e3c72, #2a5298);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 0.5rem 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .stButton>button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Tabelas */
+        .stDataFrame {
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+# Injetar CSS
+inject_css()
 
 # Dados do usuário
 user_data = {
@@ -216,14 +332,15 @@ with tab1:
     with col1:
         filter_type = st.selectbox("Filtrar por Tipo de Treino", ["Todos"] + list(workout_plan["Tipo de Treino"].unique()))
     with col2:
-        filter_week = st.selectbox("Filtrar por Semana", ["Todas"] + list(range(1, 9)))
+        filter_week = st.selectbox("Filtrar por Semana", ["Todas"] + [f"Semana {i}" for i in range(1, 9)])
     
     # Aplicar filtros
     filtered_plan = workout_plan.copy()
     if filter_type != "Todos":
         filtered_plan = filtered_plan[filtered_plan["Tipo de Treino"] == filter_type]
     if filter_week != "Todas":
-        start_idx = (filter_week - 1) * 6
+        week_num = int(filter_week.split()[1])
+        start_idx = (week_num - 1) * 6
         end_idx = start_idx + 6
         filtered_plan = filtered_plan.iloc[start_idx:end_idx]
     
@@ -266,7 +383,7 @@ with tab2:
 with tab3:
     st.header("Acompanhamento de Progresso")
     
-    # Simulação de dados de progresso (em uma aplicação real, viria de um banco de dados)
+    # Simulação de dados de progresso
     dates = pd.date_range(start=today, periods=60, freq='D')
     weight_progress = [user_data["peso"] * (0.995 ** i) for i in range(60)]
     fc_resting = [np.random.normal(60, 2) for _ in range(60)]
