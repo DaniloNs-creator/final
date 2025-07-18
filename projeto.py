@@ -1,514 +1,454 @@
 import streamlit as st
-from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
+import plotly.express as px
+from datetime import datetime, timedelta
+import base64
+from io import BytesIO
 
-# Configuração inicial da página
+# Configuração da página
 st.set_page_config(
-    page_title="Controle de Atividades Fiscais",
-    page_icon="📊",
-    layout="wide"
+    page_title="PerformanceFit - Controle de Treinos",
+    page_icon="🚴‍♂️",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# CSS personalizado
-st.markdown("""
-<style>
-:root {
-    --primary: #4a6fa5;
-    --secondary: #166088;
-    --success: #4caf50;
-    --warning: #ff9800;
-    --danger: #f44336;
-    --light: #f8f9fa;
-    --dark: #212529;
-}
-
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: #f5f7fa;
-}
-
-.stApp {
-    background-color: #f5f7fa;
-}
-
-.header {
-    color: var(--secondary);
-    padding: 1rem;
-    border-bottom: 1px solid #e1e4e8;
-    margin-bottom: 2rem;
-    background-color: white;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.card {
-    background-color: white;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
-}
-
-.card-title {
-    color: var(--secondary);
-    font-size: 1.25rem;
-    margin-bottom: 1rem;
-    border-bottom: 1px solid #e1e4e8;
-    padding-bottom: 0.5rem;
-}
-
-.status-pendente {
-    background-color: #fff3cd;
-    color: #856404;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    font-weight: 500;
-}
-
-.status-andamento {
-    background-color: #cce5ff;
-    color: #004085;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    font-weight: 500;
-}
-
-.status-finalizado {
-    background-color: #d4edda;
-    color: #155724;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    font-weight: 500;
-}
-
-.dificuldade-baixa {
-    background-color: #d4edda;
-    color: #155724;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    font-weight: 500;
-}
-
-.dificuldade-media {
-    background-color: #fff3cd;
-    color: #856404;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    font-weight: 500;
-}
-
-.dificuldade-alta {
-    background-color: #f8d7da;
-    color: #721c24;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    font-weight: 500;
-}
-
-.prazo-proximo {
-    color: #ff9800;
-    font-weight: 600;
-}
-
-.prazo-urgente {
-    color: #f44336;
-    font-weight: 600;
-}
-
-.prazo-normal {
-    color: #4caf50;
-    font-weight: 600;
-}
-
-.stDataFrame {
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.stButton>button {
-    background-color: var(--primary);
-    color: white;
-    border: none;
-    padding: 0.5rem 1rem;
-    border-radius: 4px;
-    transition: all 0.3s;
-}
-
-.stButton>button:hover {
-    background-color: var(--secondary);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-}
-
-.stSelectbox, .stDateInput, .stTextInput, .stTextArea {
-    margin-bottom: 1rem;
-}
-
-.filter-container {
-    display: flex;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-    flex-wrap: wrap;
-}
-
-.filter-item {
-    flex: 1;
-    min-width: 200px;
-}
-
-.stats-container {
-    display: flex;
-    gap: 1rem;
-    margin-bottom: 1.5rem;
-    flex-wrap: wrap;
-}
-
-.stat-card {
-    flex: 1;
-    min-width: 150px;
-    background-color: white;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    padding: 1rem;
-    text-align: center;
-}
-
-.stat-value {
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin: 0.5rem 0;
-}
-
-.stat-label {
-    color: #6c757d;
-    font-size: 0.9rem;
-}
-
-@media (max-width: 768px) {
-    .filter-container, .stats-container {
-        flex-direction: column;
-    }
-    
-    .filter-item, .stat-card {
-        width: 100%;
-    }
-}
-</style>
-""", unsafe_allow_html=True)
-
-# Dados iniciais
-def carregar_dados():
-    atividades = [
-        {
-            "Obrigação": "Sped Fiscal",
-            "Descrição Técnica da Atividade": "Entrega do arquivo digital da EFD ICMS/IPI com registros fiscais de entradas, saídas, apuração de ICMS e IPI.",
-            "Periodicidade": "Mensal",
-            "Órgão Responsável": "SEFAZ-PR",
-            "Data Limite de Entrega": "Até o dia 10 do mês subsequente",
-            "Status": "Pendente",
-            "Grau de Dificuldade": "Média",
-            "Responsável": "Equipe Fiscal",
-            "Data de Início": (datetime.now() - timedelta(days=5)).date(),
-            "Prazo Final": (datetime.now() + timedelta(days=3)).date(),
-            "Progresso": 30
-        },
-        {
-            "Obrigação": "Apuração do ICMS",
-            "Descrição Técnica da Atividade": "Cálculo do ICMS devido no período com base nas operações de entrada e saída.",
-            "Periodicidade": "Mensal",
-            "Órgão Responsável": "SEFAZ-PR",
-            "Data Limite de Entrega": "Até o dia 10 do mês subsequente",
-            "Status": "Em Andamento",
-            "Grau de Dificuldade": "Alta",
-            "Responsável": "João Silva",
-            "Data de Início": (datetime.now() - timedelta(days=2)).date(),
-            "Prazo Final": (datetime.now() + timedelta(days=5)).date(),
-            "Progresso": 65
-        },
-        {
-            "Obrigação": "Diferencial de Alíquota",
-            "Descrição Técnica da Atividade": "Cálculo e recolhimento do DIFAL nas aquisições interestaduais destinadas ao consumo ou ativo imobilizado.",
-            "Periodicidade": "Mensal",
-            "Órgão Responsável": "SEFAZ-PR",
-            "Data Limite de Entrega": "Até o dia 10 do mês subsequente",
-            "Status": "Finalizado",
-            "Grau de Dificuldade": "Baixa",
-            "Responsável": "Maria Oliveira",
-            "Data de Início": (datetime.now() - timedelta(days=10)).date(),
-            "Prazo Final": (datetime.now() - timedelta(days=2)).date(),
-            "Progresso": 100
-        },
-        {
-            "Obrigação": "Parametrização do sistema",
-            "Descrição Técnica da Atividade": "Atualização do sistema ERP com as novas margens de valor agregado (MVA) do ICMS ST.",
-            "Periodicidade": "Eventual",
-            "Órgão Responsável": "SEFAZ-PR",
-            "Data Limite de Entrega": "Conforme publicação de nova legislação",
-            "Status": "Pendente",
-            "Grau de Dificuldade": "Alta",
-            "Responsável": "Equipe TI",
-            "Data de Início": None,
-            "Prazo Final": None,
-            "Progresso": 0
-        },
-        {
-            "Obrigação": "GIA-Normal",
-            "Descrição Técnica da Atividade": "Declaração mensal com informações do ICMS apurado e recolhido.",
-            "Periodicidade": "Mensal",
-            "Órgão Responsável": "SEFAZ-PR",
-            "Data Limite de Entrega": "Até o dia 10 do mês subsequente",
-            "Status": "Pendente",
-            "Grau de Dificuldade": "Média",
-            "Responsável": "Carlos Santos",
-            "Data de Início": (datetime.now() - timedelta(days=1)).date(),
-            "Prazo Final": (datetime.now() + timedelta(days=7)).date(),
-            "Progresso": 15
-        },
-        {
-            "Obrigação": "Sped Contribuições",
-            "Descrição Técnica da Atividade": "Entrega da EFD Contribuições com dados de PIS e COFINS.",
-            "Periodicidade": "Mensal",
-            "Órgão Responsável": "Receita Federal",
-            "Data Limite de Entrega": "Até o 10º dia útil do segundo mês subsequente",
-            "Status": "Em Andamento",
-            "Grau de Dificuldade": "Alta",
-            "Responsável": "Ana Paula",
-            "Data de Início": (datetime.now() - timedelta(days=3)).date(),
-            "Prazo Final": (datetime.now() + timedelta(days=12)).date(),
-            "Progresso": 45
-        },
-        {
-            "Obrigação": "Cálculo PIS COFINS",
-            "Descrição Técnica da Atividade": "Apuração dos valores de PIS e COFINS com base na receita bruta.",
-            "Periodicidade": "Mensal",
-            "Órgão Responsável": "Receita Federal",
-            "Data Limite de Entrega": "Até o 25º dia do mês subsequente",
-            "Status": "Pendente",
-            "Grau de Dificuldade": "Média",
-            "Responsável": "Equipe Fiscal",
-            "Data de Início": None,
-            "Prazo Final": (datetime.now() + timedelta(days=20)).date(),
-            "Progresso": 0
-        },
-        {
-            "Obrigação": "Preenchimento DARFs",
-            "Descrição Técnica da Atividade": "Geração dos DARFs para pagamento de tributos federais (PIS, COFINS, IPI, IRPJ, CSLL).",
-            "Periodicidade": "Mensal",
-            "Órgão Responsável": "Receita Federal",
-            "Data Limite de Entrega": "Até o último dia útil do mês subsequente",
-            "Status": "Finalizado",
-            "Grau de Dificuldade": "Baixa",
-            "Responsável": "Pedro Almeida",
-            "Data de Início": (datetime.now() - timedelta(days=8)).date(),
-            "Prazo Final": (datetime.now() - timedelta(days=1)).date(),
-            "Progresso": 100
+# CSS embutido diretamente no código
+def inject_css():
+    st.markdown("""
+    <style>
+        /* Estilos gerais */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #333;
+            background-color: #f5f7fa;
         }
-    ]
-    return pd.DataFrame(atividades)
 
-# Inicialização do DataFrame
-if 'df_atividades' not in st.session_state:
-    st.session_state.df_atividades = carregar_dados()
+        /* Cabeçalho */
+        .stApp header {
+            background: linear-gradient(90deg, #1e3c72, #2a5298);
+            color: white;
+            padding: 1rem;
+            border-radius: 0 0 10px 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
 
-# Funções auxiliares
-def aplicar_estilo_status(val):
-    if val == "Pendente":
-        return "background-color: #fff3cd; color: #856404;"
-    elif val == "Em Andamento":
-        return "background-color: #cce5ff; color: #004085;"
-    elif val == "Finalizado":
-        return "background-color: #d4edda; color: #155724;"
-    return ""
+        /* Sidebar */
+        .stSidebar {
+            background: linear-gradient(180deg, #ffffff, #f8f9fa);
+            padding: 1rem;
+            border-right: 1px solid #e1e5eb;
+        }
 
-def aplicar_estilo_dificuldade(val):
-    if val == "Baixa":
-        return "background-color: #d4edda; color: #155724;"
-    elif val == "Média":
-        return "background-color: #fff3cd; color: #856404;"
-    elif val == "Alta":
-        return "background-color: #f8d7da; color: #721c24;"
-    return ""
+        .user-profile {
+            animation: fadeIn 1s ease-in-out;
+        }
 
-def calcular_dias_restantes(row):
-    if pd.isna(row['Prazo Final']):
-        return "Sem prazo"
-    prazo = row['Prazo Final']
-    if isinstance(prazo, str):
-        try:
-            prazo = datetime.strptime(prazo, "%Y-%m-%d").date()
-        except:
-            return "Sem prazo"
-    dias = (prazo - datetime.now().date()).days
-    return dias
+        .profile-card {
+            background: white;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            margin-bottom: 1rem;
+            transition: transform 0.3s ease;
+        }
 
-def aplicar_estilo_prazo(val):
-    if isinstance(val, str):
-        return ""
-    if val < 0:
-        return "color: #f44336; font-weight: 600;"
-    elif val <= 3:
-        return "color: #f44336; font-weight: 600;"
-    elif val <= 7:
-        return "color: #ff9800; font-weight: 600;"
-    else:
-        return "color: #4caf50; font-weight: 600;"
+        .profile-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+        }
 
-# Interface do usuário
-st.markdown('<div class="header"><h1>📊 Controle de Atividades Fiscais</h1></div>', unsafe_allow_html=True)
+        /* Cards de refeição */
+        .meal-option {
+            background: white;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+            border-left: 4px solid #2a5298;
+        }
 
-# Filtros
-with st.container():
-    st.markdown('<div class="card"><div class="card-title">Filtros</div>', unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        filtro_status = st.selectbox("Status", ["Todos", "Pendente", "Em Andamento", "Finalizado"])
-    
-    with col2:
-        filtro_dificuldade = st.selectbox("Grau de Dificuldade", ["Todos", "Baixa", "Média", "Alta"])
-    
-    with col3:
-        filtro_responsavel = st.selectbox("Responsável", ["Todos"] + list(st.session_state.df_atividades["Responsável"].unique()))
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+        .meal-option:hover {
+            background: #f8f9fa;
+            transform: translateX(5px);
+        }
 
-# Aplicar filtros
-df_filtrado = st.session_state.df_atividades.copy()
+        /* Abas */
+        .stTabs [aria-selected="true"] {
+            font-weight: bold;
+            color: #1e3c72 !important;
+        }
 
-if filtro_status != "Todos":
-    df_filtrado = df_filtrado[df_filtrado["Status"] == filtro_status]
+        .stTabs [aria-selected="true"]:after {
+            content: '';
+            display: block;
+            width: 100%;
+            height: 3px;
+            background: #1e3c72;
+            margin-top: 5px;
+            animation: expand 0.3s ease-out;
+        }
 
-if filtro_dificuldade != "Todos":
-    df_filtrado = df_filtrado[df_filtrado["Grau de Dificuldade"] == filtro_dificuldade]
+        /* Rodapé */
+        .footer {
+            text-align: center;
+            padding: 1rem;
+            font-size: 0.8rem;
+            color: #666;
+        }
 
-if filtro_responsavel != "Todos":
-    df_filtrado = df_filtrado[df_filtrado["Responsável"] == filtro_responsavel]
+        /* Animações */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
 
-# Estatísticas
-with st.container():
-    st.markdown('<div class="stats-container">', unsafe_allow_html=True)
-    
-    total_atividades = len(st.session_state.df_atividades)
-    pendentes = len(st.session_state.df_atividades[st.session_state.df_atividades["Status"] == "Pendente"])
-    andamento = len(st.session_state.df_atividades[st.session_state.df_atividades["Status"] == "Em Andamento"])
-    finalizadas = len(st.session_state.df_atividades[st.session_state.df_atividades["Status"] == "Finalizado"])
-    
-    st.markdown(f"""
-    <div class="stat-card">
-        <div class="stat-label">Total de Atividades</div>
-        <div class="stat-value">{total_atividades}</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-label">Pendentes</div>
-        <div class="stat-value">{pendentes}</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-label">Em Andamento</div>
-        <div class="stat-value">{andamento}</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-label">Finalizadas</div>
-        <div class="stat-value">{finalizadas}</div>
-    </div>
+        @keyframes expand {
+            from { width: 0; }
+            to { width: 100%; }
+        }
+
+        /* Botões */
+        .stButton>button {
+            background: linear-gradient(90deg, #1e3c72, #2a5298);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 0.5rem 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .stButton>button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Tabelas */
+        .stDataFrame {
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Card de treino do dia */
+        .workout-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8eb 100%);
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+            border-left: 5px solid #2a5298;
+        }
+        
+        /* Calendário */
+        .stDateInput>div>div>input {
+            font-size: 1rem;
+            padding: 0.5rem;
+        }
+        
+        .date-picker-container {
+            margin-bottom: 1.5rem;
+        }
+    </style>
     """, unsafe_allow_html=True)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
 
-# Tabela de atividades
-with st.container():
-    st.markdown('<div class="card"><div class="card-title">Lista de Atividades</div>', unsafe_allow_html=True)
-    
-    # Adicionar coluna de dias restantes
-    df_exibicao = df_filtrado.copy()
-    df_exibicao["Dias Restantes"] = df_exibicao.apply(calcular_dias_restantes, axis=1)
-    
-    # Selecionar colunas para exibição
-    colunas_exibicao = [
-        "Obrigação", "Descrição Técnica da Atividade", "Periodicidade", 
-        "Órgão Responsável", "Data Limite de Entrega", "Status", 
-        "Grau de Dificuldade", "Responsável", "Dias Restantes", "Progresso"
-    ]
-    
-    # Aplicar estilos diretamente no DataFrame
-    styled_df = df_exibicao[colunas_exibicao].style.apply(
-        lambda x: [aplicar_estilo_status(v) for v in x], subset=["Status"]
-    ).apply(
-        lambda x: [aplicar_estilo_dificuldade(v) for v in x], subset=["Grau de Dificuldade"]
-    ).apply(
-        lambda x: [aplicar_estilo_prazo(v) if isinstance(v, (int, float)) else "" for v in x], subset=["Dias Restantes"]
-    )
-    
-    # Exibir o DataFrame estilizado
-    st.dataframe(
-        styled_df,
-        use_container_width=True,
-        height=600,
-        column_config={
-            "Progresso": st.column_config.ProgressColumn(
-                "Progresso",
-                help="Progresso da atividade",
-                format="%d%%",
-                min_value=0,
-                max_value=100
-            ),
-            "Dias Restantes": st.column_config.TextColumn(
-                "Dias Restantes",
-                help="Dias restantes para o prazo final"
-            )
-        }
-    )
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+# Injetar CSS
+inject_css()
 
-# Formulário para adicionar nova atividade
-with st.container():
-    st.markdown('<div class="card"><div class="card-title">Adicionar Nova Atividade</div>', unsafe_allow_html=True)
+# Dados do usuário
+user_data = {
+    "nome": "Usuário",
+    "idade": 28,
+    "altura": 1.87,
+    "peso": 108,
+    "v02max": 173,
+    "objetivo": "Emagrecimento e Performance no Ciclismo",
+    "nivel": "Iniciante",
+    "disponibilidade": "6 dias/semana"
+}
+
+# Zonas de frequência cardíaca baseadas no VO2max
+def calculate_zones(v02max):
+    return {
+        "Z1 (Recuperação)": (0.50 * v02max, 0.60 * v02max),
+        "Z2 (Aeróbico)": (0.60 * v02max, 0.70 * v02max),
+        "Z3 (Tempo)": (0.70 * v02max, 0.80 * v02max),
+        "Z4 (Limiar)": (0.80 * v02max, 0.90 * v02max),
+        "Z5 (VO2 Max)": (0.90 * v02max, 1.00 * v02max)
+    }
+
+zones = calculate_zones(user_data["v02max"])
+
+# Dieta baseada em alimentos acessíveis
+diet_plan = {
+    "Café da Manhã": {
+        "Opção 1": "3 ovos + 2 fatias pão integral + 1 banana + 1 colher aveia",
+        "Opção 2": "Vitamina (200ml leite + 1 banana + 1 colher aveia + 1 colher chia)",
+        "Opção 3": "2 fatias pão integral + queijo cottage + 1 fruta"
+    },
+    "Lanche da Manhã": {
+        "Opção 1": "1 fruta + 10 castanhas",
+        "Opção 2": "1 iogurte natural + 1 colher linhaça",
+        "Opção 3": "1 fatia pão integral + 1 colher pasta amendoim"
+    },
+    "Almoço": {
+        "Opção 1": "1 concha arroz + 1 concha feijão + 150g frango + salada",
+        "Opção 2": "2 batatas médias + 150g carne moída + legumes refogados",
+        "Opção 3": "1 concha arroz integral + 150g peixe + brócolis cozido"
+    },
+    "Lanche da Tarde": {
+        "Opção 1": "1 ovo cozido + 1 torrada integral",
+        "Opção 2": "1 copo de vitamina (leite + fruta)",
+        "Opção 3": "1 iogurte + 1 colher granola caseira"
+    },
+    "Jantar": {
+        "Opção 1": "Omelete (3 ovos) + salada + 1 fatia pão integral",
+        "Opção 2": "150g carne + purê de abóbora + salada",
+        "Opção 3": "Sopa de legumes com frango desfiado"
+    },
+    "Ceia": {
+        "Opção 1": "1 copo leite morno",
+        "Opção 2": "1 iogurte natural",
+        "Opção 3": "1 fatia queijo branco"
+    }
+}
+
+# Plano de treino de 60 dias
+def generate_workout_plan(start_date):
+    plan = []
+    current_date = start_date
     
-    with st.form(key="form_nova_atividade"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            obrigacao = st.text_input("Obrigação")
-            descricao = st.text_area("Descrição Técnica da Atividade")
-            periodicidade = st.selectbox("Periodicidade", ["Mensal", "Trimestral", "Anual", "Eventual", "Extinta"])
-            orgao_responsavel = st.text_input("Órgão Responsável")
-        
-        with col2:
-            data_limite = st.text_input("Data Limite de Entrega")
-            status = st.selectbox("Status", ["Pendente", "Em Andamento", "Finalizado"])
-            dificuldade = st.selectbox("Grau de Dificuldade", ["Baixa", "Média", "Alta"])
-            responsavel = st.text_input("Responsável")
-            prazo_final = st.date_input("Prazo Final", min_value=datetime.now().date())
-            progresso = st.slider("Progresso (%)", 0, 100, 0)
-        
-        submitted = st.form_submit_button("Adicionar Atividade")
-        
-        if submitted:
-            nova_atividade = {
-                "Obrigação": obrigacao,
-                "Descrição Técnica da Atividade": descricao,
-                "Periodicidade": periodicidade,
-                "Órgão Responsável": orgao_responsavel,
-                "Data Limite de Entrega": data_limite,
-                "Status": status,
-                "Grau de Dificuldade": dificuldade,
-                "Responsável": responsavel,
-                "Data de Início": datetime.now().date(),
-                "Prazo Final": prazo_final,
-                "Progresso": progresso
-            }
+    for week in range(1, 9):  # 8 semanas = ~60 dias
+        for day in range(1, 7):  # 6 dias de treino por semana
+            if day == 1:  # Segunda-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Endurance",
+                    "Duração": "1h15min",
+                    "Zona FC": "Z2 (Aeróbico)",
+                    "FC Alvo": f"{int(zones['Z2 (Aeróbico)'][0])}-{int(zones['Z2 (Aeróbico)'][1])} bpm",
+                    "Descrição": "Pedal constante em terreno plano, mantendo FC na Z2"
+                }
+            elif day == 2:  # Terça-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Força - Membros Inferiores",
+                    "Duração": "1h",
+                    "Zona FC": "N/A",
+                    "FC Alvo": "N/A",
+                    "Descrição": "Agachamento 4x12, Leg Press 4x12, Cadeira Extensora 3x15, Panturrilha 4x20"
+                }
+            elif day == 3:  # Quarta-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Intervalado",
+                    "Duração": "1h",
+                    "Zona FC": "Z4-Z5 (Limiar-VO2)",
+                    "FC Alvo": f"{int(zones['Z4 (Limiar)'][0])}-{int(zones['Z5 (VO2 Max)'][1])} bpm",
+                    "Descrição": "8x (2min Z4 + 2min Z1 recuperação)"
+                }
+            elif day == 4:  # Quinta-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Recuperação Ativa",
+                    "Duração": "45min",
+                    "Zona FC": "Z1 (Recuperação)",
+                    "FC Alvo": f"{int(zones['Z1 (Recuperação)'][0])}-{int(zones['Z1 (Recuperação)'][1])} bpm",
+                    "Descrição": "Pedal leve em terreno plano"
+                }
+            elif day == 5:  # Sexta-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Força - Core e Superior",
+                    "Duração": "1h",
+                    "Zona FC": "N/A",
+                    "FC Alvo": "N/A",
+                    "Descrição": "Flexões 4x12, Remada Curvada 4x12, Prancha 3x1min, Abdominal Supra 3x20"
+                }
+            elif day == 6:  # Sábado
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Longão",
+                    "Duração": "2h30min" if week < 3 else "3h" if week < 6 else "3h30min",
+                    "Zona FC": "Z2-Z3 (Aeróbico-Tempo)",
+                    "FC Alvo": f"{int(zones['Z2 (Aeróbico)'][0])}-{int(zones['Z3 (Tempo)'][1])} bpm",
+                    "Descrição": "Pedal longo com variação de terreno, focando em manter FC"
+                }
             
-            novo_df = pd.concat([st.session_state.df_atividades, pd.DataFrame([nova_atividade])], ignore_index=True)
-            st.session_state.df_atividades = novo_df
-            st.success("Atividade adicionada com sucesso!")
-            st.rerun()
+            plan.append(workout)
+            current_date += timedelta(days=1)
+        
+        current_date += timedelta(days=1)  # Domingo é dia de descanso
     
-    st.markdown('</div>', unsafe_allow_html=True)
+    return pd.DataFrame(plan)
+
+# Interface do aplicativo
+st.title("🚴‍♂️ PerformanceFit - Controle de Treinos e Dieta")
+st.markdown("---")
+
+# Sidebar com informações do usuário
+with st.sidebar:
+    st.markdown("""
+    <div class="user-profile">
+        <h2>Perfil do Atleta</h2>
+        <div class="profile-card">
+            <p><strong>Nome:</strong> {nome}</p>
+            <p><strong>Idade:</strong> {idade} anos</p>
+            <p><strong>Altura:</strong> {altura}m</p>
+            <p><strong>Peso:</strong> {peso}kg</p>
+            <p><strong>VO2 Máx:</strong> {v02max} bpm</p>
+            <p><strong>Objetivo:</strong> {objetivo}</p>
+            <p><strong>Nível:</strong> {nivel}</p>
+            <p><strong>Disponibilidade:</strong> {disponibilidade}</p>
+        </div>
+    </div>
+    """.format(**user_data), unsafe_allow_html=True)
+    
+    st.markdown("---")
+    st.markdown("### Zonas de Frequência Cardíaca")
+    for zone, (min_fc, max_fc) in zones.items():
+        st.markdown(f"**{zone}:** {int(min_fc)}-{int(max_fc)} bpm")
+    
+    st.markdown("---")
+    st.markdown("### Download do Plano")
+    if st.button("Exportar para Excel"):
+        today = datetime.now().date()
+        workout_plan = generate_workout_plan(today)
+        
+        # Criar um arquivo Excel em memória
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            workout_plan.to_excel(writer, sheet_name='Plano de Treino', index=False)
+            
+            # Adicionar a dieta
+            diet_sheet = pd.DataFrame.from_dict({(i,j): diet_plan[i][j] 
+                                               for i in diet_plan.keys() 
+                                               for j in diet_plan[i].keys()},
+                                               orient='index')
+            diet_sheet.to_excel(writer, sheet_name='Plano Alimentar')
+        
+        output.seek(0)
+        b64 = base64.b64encode(output.read()).decode()
+        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="Plano_Treino_Dieta.xlsx">Baixar Plano Completo</a>'
+        st.markdown(href, unsafe_allow_html=True)
+
+# Abas principais
+tab1, tab2 = st.tabs(["📅 Plano de Treino", "🍽 Plano Alimentar"])
+
+with tab1:
+    st.header("Plano de Treino - 60 Dias")
+    today = datetime.now().date()
+    workout_plan = generate_workout_plan(today)
+    
+    # Seletor de data em formato de calendário
+    st.subheader("📆 Consultar Treino por Data")
+    
+    # Definir range de datas para o calendário
+    min_date = workout_plan["Data"].min()
+    max_date = workout_plan["Data"].max()
+    
+    # Widget de seleção de data
+    selected_date = st.date_input(
+        "Selecione a data para ver o treino:",
+        value=today,
+        min_value=min_date,
+        max_value=max_date,
+        format="DD/MM/YYYY"
+    )
+    
+    # Converter a data selecionada para o mesmo formato usado no DataFrame
+    selected_date_str = selected_date.strftime("%d/%m/%Y")
+    
+    # Filtrar o treino da data selecionada
+    selected_workout = workout_plan[workout_plan["Dia"] == selected_date_str]
+    
+    if not selected_workout.empty:
+        workout = selected_workout.iloc[0]
+        st.markdown(f"""
+        <div class="workout-card">
+            <h3>Treino do dia {workout['Dia']} ({workout['Dia da Semana']})</h3>
+            <p><strong>🔹 Tipo de Treino:</strong> {workout['Tipo de Treino']}</p>
+            <p><strong>⏱ Duração:</strong> {workout['Duração']}</p>
+            <p><strong>❤️ Zona FC:</strong> {workout['Zona FC']}</p>
+            <p><strong>🎯 FC Alvo:</strong> {workout['FC Alvo']}</p>
+            <p><strong>📝 Descrição:</strong> {workout['Descrição']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.warning("Nenhum treino encontrado para a data selecionada.")
+    
+    # Filtros
+    st.subheader("Filtrar Treinos")
+    col1, col2 = st.columns(2)
+    with col1:
+        filter_type = st.selectbox("Filtrar por Tipo de Treino", ["Todos"] + list(workout_plan["Tipo de Treino"].unique()))
+    with col2:
+        filter_week = st.selectbox("Filtrar por Semana", ["Todas"] + [f"Semana {i}" for i in range(1, 9)])
+    
+    # Aplicar filtros
+    filtered_plan = workout_plan.copy()
+    if filter_type != "Todos":
+        filtered_plan = filtered_plan[filtered_plan["Tipo de Treino"] == filter_type]
+    if filter_week != "Todas":
+        week_num = int(filter_week.split()[1])
+        start_idx = (week_num - 1) * 6
+        end_idx = start_idx + 6
+        filtered_plan = filtered_plan.iloc[start_idx:end_idx]
+    
+    # Mostrar tabela
+    st.dataframe(filtered_plan.drop(columns=["Data"]), hide_index=True, use_container_width=True)
+    
+    # Gráfico de distribuição de treinos
+    st.subheader("Distribuição de Treinos")
+    workout_dist = workout_plan["Tipo de Treino"].value_counts().reset_index()
+    workout_dist.columns = ["Tipo de Treino", "Quantidade"]
+    
+    fig = px.pie(workout_dist, values="Quantidade", names="Tipo de Treino", 
+                 color_discrete_sequence=px.colors.sequential.RdBu,
+                 hole=0.4)
+    st.plotly_chart(fig, use_container_width=True)
+
+with tab2:
+    st.header("Plano Alimentar - Opções Variadas")
+    
+    for meal, options in diet_plan.items():
+        with st.expander(f"🔸 {meal}"):
+            for opt, desc in options.items():
+                st.markdown(f"""
+                <div class="meal-option">
+                    <h4>{opt}</h4>
+                    <p>{desc}</p>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    st.subheader("Recomendações Nutricionais")
+    st.markdown("""
+    - Consuma proteína em todas as refeições (ovos, frango, carne, peixe)
+    - Hidrate-se bem (3-4L de água por dia)
+    - Prefira carboidratos complexos (arroz integral, batata, aveia)
+    - Gorduras saudáveis (castanhas, azeite, abacate)
+    - Coma legumes e verduras à vontade
+    """)
+
+# Rodapé
+st.markdown("---")
+st.markdown("""
+<div class="footer">
+    <p>PerformanceFit © 2023 - Plano personalizado para {nome}</p>
+    <p>Atualizado em: {date}</p>
+</div>
+""".format(nome=user_data["nome"], date=datetime.now().strftime("%d/%m/%Y")), unsafe_allow_html=True)
