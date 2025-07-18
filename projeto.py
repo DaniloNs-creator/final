@@ -330,8 +330,8 @@ with st.sidebar:
         href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="Plano_Treino_Dieta.xlsx">Baixar Plano Completo</a>'
         st.markdown(href, unsafe_allow_html=True)
 
-# Abas principais
-tab1, tab2, tab3, tab4 = st.tabs(["📅 Plano de Treino", "🍽 Plano Alimentar", "📊 Progresso", "💓 Monitoramento FC"])
+# Abas principais (apenas Plano de Treino e Plano Alimentar)
+tab1, tab2 = st.tabs(["📅 Plano de Treino", "🍽 Plano Alimentar"])
 
 with tab1:
     st.header("Plano de Treino - 60 Dias")
@@ -389,96 +389,6 @@ with tab2:
     - Prefira carboidratos complexos (arroz integral, batata, aveia)
     - Gorduras saudáveis (castanhas, azeite, abacate)
     - Coma legumes e verduras à vontade
-    """)
-
-with tab3:
-    st.header("Acompanhamento de Progresso")
-    
-    # Simulação de dados de progresso
-    dates = pd.date_range(start=today, periods=60, freq='D')
-    weight_progress = [user_data["peso"] * (0.995 ** i) for i in range(60)]
-    fc_resting = [np.random.normal(60, 2) for _ in range(60)]
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Evolução do Peso")
-        fig = px.line(x=dates, y=weight_progress, 
-                     labels={"x": "Data", "y": "Peso (kg)"},
-                     title="Projeção de Perda de Peso (1kg/semana)")
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        st.subheader("Frequência Cardíaca de Repouso")
-        fig = px.line(x=dates, y=fc_resting, 
-                     labels={"x": "Data", "y": "FC Repouso (bpm)"},
-                     title="Melhora na FC de Repouso")
-        st.plotly_chart(fig, use_container_width=True)
-    
-    st.subheader("Registro de Treinos Concluídos")
-    # Simulação de treinos concluídos
-    completed_workouts = workout_plan.sample(frac=0.3).copy()
-    
-    # Processamento seguro da duração - CORREÇÃO APLICADA AQUI
-    completed_workouts["Duração Real"] = completed_workouts["Duração"].apply(
-        lambda x: f"{max(1, extract_minutes(x) + np.random.randint(-5,5))}min"
-    )
-    
-    # Processamento seguro da FC média
-    def get_fc_avg(fc_str):
-        if isinstance(fc_str, str) and "-" in fc_str and "bpm" in fc_str:
-            try:
-                min_fc = int(fc_str.split("-")[0])
-                max_fc = int(fc_str.split("-")[1].split()[0])
-                return np.random.randint(min_fc, max_fc)
-            except:
-                return np.nan
-        return np.nan
-    
-    completed_workouts["FC Média"] = completed_workouts["FC Alvo"].apply(get_fc_avg)
-    completed_workouts["Satisfação"] = np.random.choice(["👍", "👍👍", "👍👍👍"], size=len(completed_workouts))
-    
-    st.dataframe(completed_workouts[["Dia", "Tipo de Treino", "Duração Real", "FC Média", "Satisfação"]], 
-                 hide_index=True, use_container_width=True)
-
-with tab4:
-    st.header("Monitoramento de Frequência Cardíaca")
-    
-    # Simulação de dados de FC durante um treino
-    time_points = np.arange(0, 60, 0.1)  # 60 minutos com pontos a cada 0.1 minuto
-    fc_values = []
-    
-    # Criar um perfil de treino simulado
-    for t in time_points:
-        if t < 10:  # Aquecimento
-            fc = zones['Z1 (Recuperação)'][0] + (zones['Z2 (Aeróbico)'][0] - zones['Z1 (Recuperação)'][0]) * (t / 10)
-        elif 10 <= t < 40:  # Parte principal
-            if 10 <= t < 20 or 30 <= t < 40:  # Z3
-                fc = zones['Z3 (Tempo)'][0] + np.random.rand() * (zones['Z3 (Tempo)'][1] - zones['Z3 (Tempo)'][0])
-            else:  # Z2
-                fc = zones['Z2 (Aeróbico)'][0] + np.random.rand() * (zones['Z2 (Aeróbico)'][1] - zones['Z2 (Aeróbico)'][0])
-        else:  # Desaquecimento
-            fc = zones['Z1 (Recuperação)'][0] + (fc_values[-1] - zones['Z1 (Recuperação)'][0]) * ((60 - t) / 20)
-        
-        fc_values.append(fc + np.random.normal(0, 2))
-    
-    fig = px.line(x=time_points, y=fc_values, 
-                 labels={"x": "Tempo (min)", "y": "Frequência Cardíaca (bpm)"},
-                 title="Perfil de Frequência Cardíaca em Treino Simulado")
-    
-    # Adicionar zonas ao gráfico
-    for zone, (min_fc, max_fc) in zones.items():
-        fig.add_hline(y=min_fc, line_dash="dot", annotation_text=zone, line_color="red")
-        fig.add_hline(y=max_fc, line_dash="dot", line_color="red")
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    st.markdown("""
-    ### Interpretação das Zonas de FC:
-    - **Z1 (Recuperação):** Atividade muito leve, ideal para recuperação
-    - **Z2 (Aeróbico):** Intensidade moderada, melhora eficiência energética
-    - **Z3 (Tempo):** Intensidade desafiadora mas sustentável, melhora resistência
-    - **Z4 (Limiar):** Intensidade alta, melhora limiar de lactato
-    - **Z5 (VO2 Max):** Esforço máximo, melhora capacidade aeróbica
     """)
 
 # Rodapé
