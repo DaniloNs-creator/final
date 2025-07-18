@@ -276,10 +276,9 @@ def extract_minutes(duration_str):
             hours_part = duration_str.split("h")[0]
             minutes_part = duration_str.split("h")[1].replace("min", "")
             return int(hours_part) * 60 + int(minutes_part)
-        else:
-            return int(duration_str.replace("min", ""))
+        return int(duration_str.replace("min", ""))
     except:
-        return 60  # Valor padrão se houver erro na conversão
+        return 60  # Valor padrão se houver erro
 
 # Interface do aplicativo
 st.title("🚴‍♂️ PerformanceFit - Controle de Treinos e Dieta")
@@ -419,9 +418,9 @@ with tab3:
     # Simulação de treinos concluídos
     completed_workouts = workout_plan.sample(frac=0.3).copy()
     
-    # Processamento seguro da duração
+    # Processamento seguro da duração - CORREÇÃO APLICADA AQUI
     completed_workouts["Duração Real"] = completed_workouts["Duração"].apply(
-        lambda x: f"{max(1, extract_minutes(x) + np.random.randint(-5,5)}min"
+        lambda x: f"{max(1, extract_minutes(x) + np.random.randint(-5,5))}min"
     )
     
     # Processamento seguro da FC média
