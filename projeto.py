@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
-import pytz
+import numpy as np
 
 # Configuração inicial da página
 st.set_page_config(
@@ -504,6 +504,9 @@ def main():
             prazo_df = prazo_df.sort_values('Prazo')
             prazo_df['Prazo Formatado'] = prazo_df['Prazo'].dt.strftime('%d/%m/%Y')
             
+            # Criar datas mínimas para o gráfico de timeline
+            prazo_df['Data Início'] = prazo_df['Data Início'].fillna(prazo_df['Prazo'] - timedelta(days=1))
+            
             fig_prazo = px.timeline(prazo_df, x_start="Data Início", x_end="Prazo", y="Obrigação", 
                                    color="Status",
                                    title='Linha do Tempo das Atividades',
@@ -511,12 +514,8 @@ def main():
                                    hover_name="Obrigação",
                                    hover_data=["Status", "Dificuldade", "Prazo Formatado"])
             fig_prazo.update_yaxes(autorange="reversed")
+            fig_prazo.update_layout(showlegend=True)
             st.plotly_chart(fig_prazo, use_container_width=True)
     
     # Tabela de atividades
-    st.markdown('<div class="card animate-fadeIn"><h3>📋 Lista de Atividades</h3></div>', unsafe_allow_html=True)
-    
-    # Formatar DataFrame para exibição
-    display_df = filtered_df.copy()
-    display_df['Status'] = display_df['Status'].apply(apply_status_style)
-    display_df['Dificuldade'] = display_df['Dificuldade'].apply(apply_diffic
+    st.markdown('<div class="card animate-fadeIn"><h3>📋 Lista de Atividades</h3></div>', unsafe_allow
