@@ -518,4 +518,89 @@ def main():
             st.plotly_chart(fig_prazo, use_container_width=True)
     
     # Tabela de atividades
-    st.markdown('<div class="card animate-fadeIn"><h3>📋 Lista de Atividades</h3></div>', unsafe_allow
+    st.markdown('<div class="card animate-fadeIn"><h3>📋 Lista de Atividades</h3></div>', unsafe_allow_html=True)
+    
+    # Formatar DataFrame para exibição
+    display_df = filtered_df.copy()
+    display_df['Status'] = display_df['Status'].apply(apply_status_style)
+    display_df['Dificuldade'] = display_df['Dificuldade'].apply(apply_difficulty_style)
+    display_df['Prazo'] = display_df['Prazo'].dt.strftime('%d/%m/%Y')
+    display_df['Data Início'] = display_df['Data Início'].apply(
+        lambda x: x.strftime('%d/%m/%Y') if not pd.isna(x) else ''
+    )
+    display_df['Data Conclusão'] = display_df['Data Conclusão'].apply(
+        lambda x: x.strftime('%d/%m/%Y') if not pd.isna(x) else ''
+    )
+    
+    # Selecionar colunas para exibição
+    cols_to_display = ['Obrigação', 'Descrição', 'Periodicidade', 'Órgão Responsável', 
+                      'Data Limite', 'Status', 'Dificuldade', 'Prazo', 'Dias Restantes']
+    
+    st.write(display_df[cols_to_display].to_html(escape=False, index=False), unsafe_allow_html=True)
+    
+    # Adicionar nova atividade
+    with st.expander("➕ Adicionar Nova Atividade", expanded=False):
+        with st.form("nova_atividade_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            with col1:
+                nova_obrigacao = st.text_input("Obrigação*", placeholder="Nome da obrigação fiscal")
+                nova_descricao = st.text_area("Descrição*", placeholder="Descrição detalhada da atividade")
+                nova_periodicidade = st.selectbox("Periodicidade*", ["Mensal", "Trimestral", "Anual", "Eventual", "Extinta"])
+            with col2:
+                novo_orgao = st.text_input("Órgão Responsável*", placeholder="Órgão responsável")
+                nova_data_limite = st.text_input("Data Limite de Entrega*", placeholder="Ex: Até o dia 10 do mês subsequente")
+                novo_status = st.selectbox("Status*", ["Pendente", "Em Andamento", "Finalizado"])
+                nova_dificuldade = st.selectbox("Dificuldade*", ["Baixa", "Média", "Alta"])
+                novo_prazo = st.date_input("Prazo Final*")
+            
+            if st.form_submit_button("Adicionar Atividade"):
+                if nova_obrigacao and nova_descricao and novo_orgao and nova_data_limite:
+                    nova_atividade = {
+                        "Obrigação": nova_obrigacao,
+                        "Descrição": nova_descricao,
+                        "Periodicidade": nova_periodicidade,
+                        "Órgão Responsável": novo_orgao,
+                        "Data Limite": nova_data_limite,
+                        "Status": novo_status,
+                        "Dificuldade": nova_dificuldade,
+                        "Prazo": datetime.combine(novo_prazo, datetime.min.time()),
+                        "Data Início": datetime.now() if novo_status == "Em Andamento" else None,
+                        "Data Conclusão": datetime.now() if novo_status == "Finalizado" else None
+                    }
+                    
+                    # Adicionar nova atividade usando concat
+                    new_df = pd.DataFrame([nova_atividade])
+                    st.session_state.df_atividades = pd.concat(
+                        [st.session_state.df_atividades, new_df], 
+                        ignore_index=True
+                    )
+                    st.success("✅ Atividade adicionada com sucesso!")
+                else:
+                    st.error("⚠️ Preencha todos os campos obrigatórios (marcados com *)")
+    
+    # Editar status das atividades
+    with st.expander("✏️ Editar Status das Atividades", expanded=False):
+        atividades_para_editar = st.session_state.df_atividades['Obrigação'].unique()
+        atividade_selecionada = st.selectbox("Selecione a atividade para editar", atividades_para_editar)
+        
+        atividade_idx = st.session_state.df_atividades[st.session_state.df_atividades['Obrigação'] == atividade_selecionada].index[0]
+        current_status = st.session_state.df_atividades.loc[atividade_idx, 'Status']
+        
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            novo_status = st.selectbox("Novo Status", ["Pendente", "Em Andamento", "Finalizado"], 
+                                      index=["Pendente", "Em Andamento", "Finalizado"].index(current_status))
+        
+        if st.button("Atualizar Status"):
+            st.session_state.df_atividades.loc[atividade_idx, 'Status'] = novo_status
+            
+            if novo_status == "Em Andamento" and pd.isna(st.session_state.df_atividades.loc[atividade_idx, 'Data Início']):
+                st.session_state.df_atividades.loc[atividade_idx, 'Data Início'] = datetime.now()
+            
+            if novo_status == "Finalizado":
+                st.session_state.df_atividades.loc[atividade_idx, 'Data Conclusão'] = datetime.now()
+            
+            st.success(f"✅ Status da atividade '{atividade_selecionada}' atualizado para '{novo_status}'!")
+
+if __name__ == "__main__":
+    main()
