@@ -6,11 +6,15 @@ def calcular_kpis(df_i155):
     kpis = {}
     
     def parse_valor(valor):
+        if pd.isna(valor):
+            return 0.0
         if isinstance(valor, str):
-            return float(valor.replace(',', '.')) if valor.replace(',', '').replace('.', '').isdigit() else 0.0
-        return float(valor) if pd.notna(valor) else 0.0
+            valor = valor.replace(',', '.')
+            if valor.replace('.', '').isdigit():
+                return float(valor)
+            return 0.0
+        return float(valor)
     
-    # Calculando KPIs baseados nos registros I155 (contas contábeis)
     try:
         # Encontrar contas relevantes nos registros I155
         ativo_total = df_i155[df_i155['COD_CTA'].str.startswith('1', na=False)]['SALDO_FINAL'].apply(parse_valor).sum()
@@ -21,11 +25,27 @@ def calcular_kpis(df_i155):
         despesas = df_i155[df_i155['COD_CTA'].str.startswith('4', na=False)]['SALDO_FINAL'].apply(parse_valor).sum()
         custos = df_i155[df_i155['COD_CTA'].str.startswith('5', na=False)]['SALDO_FINAL'].apply(parse_valor).sum()
         
-        lucro_liquido = receitas - despesas - custos
-        ebitda = lucro_liquido  # Simplificado - seria necessário ajustar para adicionar depreciação/amortização
+        # Ajustar saldos conforme a natureza (Débito ou Crédito)
+        def ajustar_saldo(row):
+            valor = parse_valor(row['SALDO_FINAL'])
+            if row['NATUREZA_FINAL'] == 'D':
+                return valor
+            return -valor
         
-        ativo_circulante = df_i155[df_i155['COD_CTA'].str.startswith('1.1', na=False)]['SALDO_FINAL'].apply(parse_valor).sum()
-        passivo_circulante = df_i155[df_i155['COD_CTA'].str.startswith('2.1', na=False)]['SALDO_FINAL'].apply(parse_valor).sum()
+        # Recalcular totais considerando a natureza dos saldos
+        ativo_total = df_i155[df_i155['COD_CTA'].str.startswith('1', na=False)].apply(ajustar_saldo, axis=1).sum()
+        passivo_total = df_i155[df_i155['COD_CTA'].str.startswith('2', na=False)].apply(ajustar_saldo, axis=1).sum()
+        patrimonio_liquido = df_i155[df_i155['COD_CTA'].str.startswith('2.3', na=False)].apply(ajustar_saldo, axis=1).sum()
+        
+        receitas = df_i155[df_i155['COD_CTA'].str.startswith('3', na=False)].apply(ajustar_saldo, axis=1).sum()
+        despesas = abs(df_i155[df_i155['COD_CTA'].str.startswith('4', na=False)].apply(ajustar_saldo, axis=1).sum())
+        custos = abs(df_i155[df_i155['COD_CTA'].str.startswith('5', na=False)].apply(ajustar_saldo, axis=1).sum())
+        
+        lucro_liquido = receitas - despesas - custos
+        ebitda = lucro_liquido  # Simplificado
+        
+        ativo_circulante = df_i155[df_i155['COD_CTA'].str.startswith('1.1', na=False)].apply(ajustar_saldo, axis=1).sum()
+        passivo_circulante = abs(df_i155[df_i155['COD_CTA'].str.startswith('2.1', na=False)].apply(ajustar_saldo, axis=1).sum())
         
         kpis['Lucro Líquido'] = lucro_liquido
         kpis['Margem de Lucro Líquido (%)'] = (lucro_liquido / receitas * 100) if receitas else 0
@@ -57,36 +77,29 @@ if uploaded_file:
         content = uploaded_file.read().decode('latin1')
         linhas = content.splitlines()
 
-        # Filtrar registros
         registros_i155 = [l for l in linhas if l.startswith('|I155|')]
         
-        # Função para parsear registros com tratamento robusto
         def parse_registros(registros, colunas):
             dados = []
             for r in registros:
-                campos = r.strip('|').split('|')[1:]  # Remove os | iniciais/finais e divide
-                # Garante que temos dados suficientes para as colunas
+                campos = r.strip('|').split('|')[1:]
                 if len(campos) >= len(colunas):
                     dados.append(campos[:len(colunas)])
                 else:
-                    # Preenche com None se faltarem campos
                     dados.append(campos + [None]*(len(colunas)-len(campos)))
             return pd.DataFrame(dados, columns=colunas)
         
-        # Parsear registros I155 (que têm 9 campos)
         df_i155 = parse_registros(registros_i155, [
             'REG', 'COD_CTA', 'VAZIO', 'VALOR_INICIAL', 'NATUREZA_INICIAL', 
             'DEBITOS', 'CREDITOS', 'SALDO_FINAL', 'NATUREZA_FINAL'
         ])
         
-        # Converter valores numéricos
+        # Converter apenas colunas numéricas
         for col in ['VALOR_INICIAL', 'DEBITOS', 'CREDITOS', 'SALDO_FINAL']:
-            df_i155[col] = df_i155[col].str.replace(',', '.').astype(float)
+            df_i155[col] = df_i155[col].apply(lambda x: float(x.replace(',', '.')) if isinstance(x, str) and x.replace(',', '').replace('.', '').isdigit() else 0.0)
         
-        # Calcular KPIs apenas com I155 (já que J100/J150 não estão presentes no arquivo)
         kpis = calcular_kpis(df_i155)
         
-        # Exibir KPIs
         st.subheader("📈 Indicadores Financeiros")
         col1, col2 = st.columns(2)
         
@@ -100,14 +113,13 @@ if uploaded_file:
             st.metric("Endividamento", f"{kpis['Endividamento (%)']:.2f}%")
             st.metric("ROE", f"{kpis['ROE (%)']:.2f}%")
         
-        # Visualização dos dados
         with st.expander("🔍 Visualizar dados brutos"):
             st.write("Registros I155 (Contas Contábeis)")
             st.dataframe(df_i155)
             
             st.write("Resumo por Tipo de Conta")
-            df_resumo = df_i155.groupby(df_i155['COD_CTA'].str.slice(0, 1))['SALDO_FINAL'].sum().reset_index()
-            df_resumo['Tipo'] = df_resumo['COD_CTA'].map({
+            df_resumo = df_i155.copy()
+            df_resumo['Tipo'] = df_resumo['COD_CTA'].str.slice(0, 1).map({
                 '1': 'Ativo',
                 '2': 'Passivo',
                 '3': 'Receitas',
@@ -115,9 +127,10 @@ if uploaded_file:
                 '5': 'Custos',
                 '6': 'Contas de Compensação'
             })
-            st.dataframe(df_resumo)
+            st.dataframe(df_resumo.groupby('Tipo')['SALDO_FINAL'].sum().reset_index())
             
     except Exception as e:
         st.error(f"Erro ao processar o arquivo: {str(e)}")
+        st.error("Verifique se o arquivo está no formato correto da ECD.")
 else:
     st.info("Por favor, envie um arquivo ECD no formato .txt para iniciar a análise.")
