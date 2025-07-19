@@ -63,7 +63,7 @@ st.markdown("""
 
     .card:hover {
         transform: translateY(-5px);
-        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+        box_shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
     }
 
     /* Estilo dos botões */
@@ -551,25 +551,34 @@ def calculate_deadline(data_limite_text, mes_ano_referencia):
     # Converte o mes_ano_referencia para um objeto datetime
     ref_month, ref_year = map(int, mes_ano_referencia.split('/'))
     
-    today = datetime(ref_year, ref_month, 1)
+    today = datetime(ref_year, ref_month, 1) # Usar o primeiro dia do mês de referência para base de cálculo
 
+    # Lógica de cálculo de prazo ajustada para o mês de referência
     if "dia 10 do mês subsequente" in data_limite_text:
-        return (today.replace(day=1) + timedelta(days=32)).replace(day=10) # Próximo mês dia 10
+        # Pega o primeiro dia do mês subsequente e adiciona 9 dias para chegar ao dia 10
+        date_for_calc = datetime(ref_year, ref_month, 1) + pd.DateOffset(months=1)
+        return date_for_calc.replace(day=10)
     elif "dia 15 do mês subsequente" in data_limite_text:
-        return (today.replace(day=1) + timedelta(days=32)).replace(day=15) # Próximo mês dia 15
+        date_for_calc = datetime(ref_year, ref_month, 1) + pd.DateOffset(months=1)
+        return date_for_calc.replace(day=15)
     elif "dia 20 do mês subsequente" in data_limite_text:
-        return (today.replace(day=1) + timedelta(days=32)).replace(day=20) # Próximo mês dia 20
+        date_for_calc = datetime(ref_year, ref_month, 1) + pd.DateOffset(months=1)
+        return date_for_calc.replace(day=20)
     elif "dia 25 do mês subsequente" in data_limite_text:
-        return (today.replace(day=1) + timedelta(days=32)).replace(day=25) # Próximo mês dia 25
+        date_for_calc = datetime(ref_year, ref_month, 1) + pd.DateOffset(months=1)
+        return date_for_calc.replace(day=25)
     elif "último dia útil do mês subsequente" in data_limite_text:
-        next_month = today.replace(day=1) + timedelta(days=32)
-        last_day = (next_month.replace(day=1) + timedelta(days=32)).replace(day=1) - timedelta(days=1)
-        return last_day # Último dia do próximo mês
+        next_month_start = datetime(ref_year, ref_month, 1) + pd.DateOffset(months=1)
+        # Para encontrar o último dia útil, começa do último dia do mês e volta se for fim de semana
+        last_day_next_month = (next_month_start + pd.DateOffset(months=1)) - timedelta(days=1)
+        while last_day_next_month.weekday() >= 5: # 5 = Saturday, 6 = Sunday
+            last_day_next_month -= timedelta(days=1)
+        return last_day_next_month
     elif "10º dia útil do segundo mês subsequente" in data_limite_text:
-        second_next_month = (today.replace(day=1) + timedelta(days=62)).replace(day=1) # Dois meses à frente
-        # Lógica para encontrar o 10º dia útil (simplificado, pode ser mais complexo)
+        # Pega o primeiro dia do segundo mês subsequente
+        second_next_month_start = datetime(ref_year, ref_month, 1) + pd.DateOffset(months=2)
         day_count = 0
-        current_date = second_next_month
+        current_date = second_next_month_start
         while day_count < 10:
             if current_date.weekday() < 5: # Monday to Friday
                 day_count += 1
@@ -577,18 +586,34 @@ def calculate_deadline(data_limite_text, mes_ano_referencia):
                 current_date += timedelta(days=1)
         return current_date
     elif "Último dia útil de fevereiro" in data_limite_text:
-        return datetime(ref_year, 2, 28) if ref_year % 4 != 0 else datetime(ref_year, 2, 29) # Considera ano bissexto
+        # Assumindo que o ano da DIRF é o ano da referência
+        try:
+            feb_last_day = datetime(ref_year, 2, 28)
+            if ref_year % 4 == 0 and (ref_year % 100 != 0 or ref_year % 400 == 0): # Ano bissexto
+                feb_last_day = datetime(ref_year, 2, 29)
+            while feb_last_day.weekday() >= 5:
+                feb_last_day -= timedelta(days=1)
+            return feb_last_day
+        except ValueError: # Caso o mês de referência seja anterior a fevereiro no primeiro ano
+            return None # Ou definir uma lógica de fallback
     elif "Último dia útil do mês subsequente ao trimestre" in data_limite_text:
-        quarter_end_month = ((ref_month - 1) // 3 + 1) * 3
-        if quarter_end_month == ref_month: # Se o mês atual for o último do trimestre
-            next_month = today.replace(month=quarter_end_month, day=1) + timedelta(days=32)
-            last_day = (next_month.replace(day=1) + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+        # Calcular o último dia do trimestre fiscal atual (para o mês de referência)
+        current_quarter = (ref_month - 1) // 3
+        quarter_end_month = (current_quarter * 3) + 3 # 3, 6, 9, 12
+        
+        if ref_month == quarter_end_month: # Se o mês de referência for o final de um trimestre
+            # O prazo é o último dia útil do mês subsequente ao trimestre
+            next_month_after_quarter = datetime(ref_year, quarter_end_month, 1) + pd.DateOffset(months=1)
+            last_day = (next_month_after_quarter + pd.DateOffset(months=1)) - timedelta(days=1)
+            while last_day.weekday() >= 5:
+                last_day -= timedelta(days=1)
             return last_day
-        else: # Se não for o último mês do trimestre, não tem prazo para este mês
-            return None
+        else:
+            return None # Não há prazo trimestral para este mês de referência específico
     else:
-        # Para "Conforme publicação de nova legislação" ou outras, pode ser definido manualmente
-        return today + timedelta(days=90) # Exemplo: 90 dias para eventuais
+        # Para "Conforme publicação de nova legislação" ou outras que não têm data fixa
+        # Pode-se definir um prazo padrão ou deixar como None para ser preenchido manualmente
+        return datetime(ref_year, ref_month, 1) + timedelta(days=90) # Exemplo: 90 dias a partir do início do mês
 
 # Inicializar o banco de dados e carregar dados
 create_table()
@@ -601,23 +626,30 @@ def apply_status_style(status):
         return '<span class="status-badge status-andamento">Em Andamento</span>'
     elif status == "Finalizado":
         return '<span class="status-badge status-finalizado">Finalizado</span>'
-    else: # Status "Fechado"
+    elif status == "Fechado":
         return '<span class="status-badge status-fechado">Fechado</span>'
+    else:
+        return f'<span class="status-badge">{status}</span>' # Fallback para status desconhecido
 
 def apply_difficulty_style(dificuldade):
     if dificuldade == "Baixa":
         return '<span class="dificuldade-badge dificuldade-baixa">Baixa</span>'
     elif dificuldade == "Média":
         return '<span class="dificuldade-badge dificuldade-media">Média</span>'
-    else:
+    elif dificuldade == "Alta":
         return '<span class="dificuldade-badge dificuldade-alta">Alta</span>'
+    else:
+        return f'<span class="dificuldade-badge">{dificuldade}</span>' # Fallback
 
 def calculate_days_remaining(row):
+    # Use datetime.now() para a data atual, independente do mês de referência
+    hoje = datetime.now()
     if pd.isna(row['Prazo']) or row['Status'] in ['Finalizado', 'Fechado']:
         return None
-    hoje = datetime.now()
     prazo = row['Prazo']
-    return (prazo - hoje).days
+    days = (prazo - hoje).days
+    return days if days >= 0 else 0 # Retorna 0 se o prazo já passou
+
 
 # Interface do usuário
 def main():
@@ -631,32 +663,49 @@ def main():
     with col_nav1:
         if st.button("Mês Anterior ◀️"):
             st.session_state.mes_ano_referencia = get_previous_month_year(st.session_state.mes_ano_referencia)
-            st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia) # Recarrega dados
-            if st.session_state.df_atividades.empty:
-                st.warning(f"Não há dados para {st.session_state.mes_ano_referencia}. Use 'Habilitar Próximo Mês' para gerar atividades.")
+            # Ao mudar de mês, recarregamos os dados. Não precisamos de experimental_rerun aqui.
+            st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
+            # Forçar uma nova execução para atualizar a UI imediatamente
+            st.experimental_rerun()
     with col_nav2:
         st.markdown(f"<h2 style='text-align: center;'>Mês/Ano de Referência: {st.session_state.mes_ano_referencia}</h2>", unsafe_allow_html=True)
     with col_nav3:
         if st.button("Próximo Mês ▶️"):
             st.session_state.mes_ano_referencia = get_next_month_year(st.session_state.mes_ano_referencia)
-            st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia) # Recarrega dados
-            if st.session_state.df_atividades.empty:
-                st.warning(f"Não há dados para {st.session_state.mes_ano_referencia}. Use 'Habilitar Próximo Mês' para gerar atividades.")
+            # Ao mudar de mês, recarregamos os dados.
+            st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
+            # Forçar uma nova execução para atualizar a UI imediatamente
+            st.experimental_rerun()
 
     # Carregar dados do banco de dados para o mês de referência atual
-    st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
+    # Garantir que st.session_state.df_atividades esteja sempre inicializado
+    if 'df_atividades' not in st.session_state:
+        st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
+    else:
+        # Isso garante que df_atividades está sincronizado com o mês atual após navegação
+        # ou se o app for iniciado.
+        # Evita recarregar desnecessariamente se o mês já foi carregado
+        current_df_month = None
+        if not st.session_state.df_atividades.empty:
+            current_df_month = st.session_state.df_atividades['MesAnoReferencia'].iloc[0]
+        
+        if current_df_month != st.session_state.mes_ano_referencia:
+             st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
+
 
     # Se não houver dados para o mês/ano de referência, perguntar se deseja inicializar
     if st.session_state.df_atividades.empty:
         st.warning(f"Não há atividades cadastradas para {st.session_state.mes_ano_referencia}.")
-        if st.button(f"Habilitar Mês {st.session_state.mes_ano_referencia}"):
+        if st.button(f"Habilitar Mês {st.session_state.mes_ano_referencia}", key="habilitar_mes_btn"):
             initial_templates = load_initial_data_template()
             activities_to_insert = []
             for activity in initial_templates:
-                # Calcular o prazo com base no mês de referência
+                # Calcular o prazo com base no mês de referência atual
                 prazo_calculated = calculate_deadline(activity['Data Limite'], st.session_state.mes_ano_referencia)
                 activity['Prazo'] = prazo_calculated.strftime('%Y-%m-%d %H:%M:%S') if prazo_calculated else None
                 activity['MesAnoReferencia'] = st.session_state.mes_ano_referencia
+                activity['Data Inicio'] = None # Assegurar que Data Inicio seja None no início
+                activity['Data Conclusao'] = None # Assegurar que Data Conclusao seja None no início
                 activities_to_insert.append(activity)
             
             insert_initial_data(activities_to_insert)
@@ -664,43 +713,66 @@ def main():
             st.success(f"Atividades padrão para {st.session_state.mes_ano_referencia} habilitadas com sucesso!")
             st.experimental_rerun() # Recarregar a página para mostrar os dados
 
-    # Filtros
-    with st.expander("🔍 Filtros", expanded=True):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            status_filter = st.selectbox("Status", ["Todos", "Pendente", "Em Andamento", "Finalizado", "Fechado"])
-        with col2:
-            dificuldade_filter = st.selectbox("Dificuldade", ["Todos", "Baixa", "Média", "Alta"])
-        with col3:
-            orgao_filter = st.selectbox("Órgão Responsável", ["Todos"] + list(st.session_state.df_atividades['Órgão Responsável'].unique()))
+    # Filtrar DF para exibição e métricas
+    # APLICAR FILTROS APENAS SE HOUVER DADOS
+    filtered_df = pd.DataFrame() # Inicializa como DataFrame vazio
+    if not st.session_state.df_atividades.empty:
+        filtered_df = st.session_state.df_atividades.copy()
 
-    # Aplicar filtros
-    filtered_df = st.session_state.df_atividades.copy()
-    if status_filter != "Todos":
-        filtered_df = filtered_df[filtered_df['Status'] == status_filter]
-    if dificuldade_filter != "Todos":
-        filtered_df = filtered_df[filtered_df['Dificuldade'] == dificuldade_filter]
-    if orgao_filter != "Todos":
-        filtered_df = filtered_df[filtered_df['Órgão Responsável'] == orgao_filter]
+        # Filtros
+        with st.expander("🔍 Filtros", expanded=True):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                status_options = ["Todos", "Pendente", "Em Andamento", "Finalizado", "Fechado"]
+                if 'Status' in filtered_df.columns:
+                    status_filter = st.selectbox("Status", status_options)
+                else:
+                    status_filter = st.selectbox("Status", status_options, disabled=True)
+            with col2:
+                difficulty_options = ["Todos", "Baixa", "Média", "Alta"]
+                if 'Dificuldade' in filtered_df.columns:
+                    dificuldade_filter = st.selectbox("Dificuldade", difficulty_options)
+                else:
+                    dificuldade_filter = st.selectbox("Dificuldade", difficulty_options, disabled=True)
+            with col3:
+                orgao_options = ["Todos"]
+                if 'Órgão Responsável' in filtered_df.columns:
+                    orgao_options.extend(list(filtered_df['Órgão Responsável'].unique()))
+                    orgao_filter = st.selectbox("Órgão Responsável", orgao_options)
+                else:
+                    orgao_filter = st.selectbox("Órgão Responsável", orgao_options, disabled=True)
 
-    # Calcular dias restantes
-    filtered_df['Dias Restantes'] = filtered_df.apply(calculate_days_remaining, axis=1)
+        if not filtered_df.empty: # Re-verificar após carregar para garantir que não está vazia após filtros
+            if status_filter != "Todos":
+                filtered_df = filtered_df[filtered_df['Status'] == status_filter]
+            if dificuldade_filter != "Todos":
+                filtered_df = filtered_df[filtered_df['Dificuldade'] == dificuldade_filter]
+            if orgao_filter != "Todos":
+                filtered_df = filtered_df[filtered_df['Órgão Responsável'] == orgao_filter]
+        
+        # Calcular dias restantes, aplicando apenas se o DF não estiver vazio
+        if not filtered_df.empty:
+            filtered_df['Dias Restantes'] = filtered_df.apply(calculate_days_remaining, axis=1)
+        else:
+            filtered_df['Dias Restantes'] = None # Garante a coluna mesmo se o filtro esvaziar o DF
 
-    # Mostrar métricas
+    # Mostrar métricas - sempre mostrar, mesmo que com zero
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
-        st.metric("Total de Atividades", len(st.session_state.df_atividades))
+        st.metric("Total de Atividades", len(st.session_state.df_atividades) if not st.session_state.df_atividades.empty else 0)
     with col2:
-        st.metric("Pendentes", len(st.session_state.df_atividades[st.session_state.df_atividades['Status'] == "Pendente"]))
+        st.metric("Pendentes", len(st.session_state.df_atividades[st.session_state.df_atividades['Status'] == "Pendente"]) if not st.session_state.df_atividades.empty else 0)
     with col3:
-        st.metric("Em Andamento", len(st.session_state.df_atividades[st.session_state.df_atividades['Status'] == "Em Andamento"]))
+        st.metric("Em Andamento", len(st.session_state.df_atividades[st.session_state.df_atividades['Status'] == "Em Andamento"]) if not st.session_state.df_atividades.empty else 0)
     with col4:
-        st.metric("Finalizadas", len(st.session_state.df_atividades[st.session_state.df_atividades['Status'] == "Finalizado"]))
+        st.metric("Finalizadas", len(st.session_state.df_atividades[st.session_state.df_atividades['Status'] == "Finalizado"]) if not st.session_state.df_atividades.empty else 0)
     with col5:
-        st.metric("Fechadas", len(st.session_state.df_atividades[st.session_state.df_atividades['Status'] == "Fechado"]))
+        st.metric("Fechadas", len(st.session_state.df_atividades[st.session_state.df_atividades['Status'] == "Fechado"]) if not st.session_state.df_atividades.empty else 0)
 
     # Gráficos
-    with st.expander("📈 Análise Gráfica", expanded=True):
+    st.markdown("---")
+    st.markdown('<div class="card animate-fadeIn"><h3>📈 Análise Gráfica</h3></div>', unsafe_allow_html=True)
+    if not st.session_state.df_atividades.empty:
         tab1, tab2, tab3 = st.tabs(["Status", "Dificuldade", "Prazo"])
 
         with tab1:
@@ -723,59 +795,74 @@ def main():
 
         with tab3:
             prazo_df = st.session_state.df_atividades.copy()
-            prazo_df['Prazo'] = pd.to_datetime(prazo_df['Prazo'])
-            prazo_df = prazo_df.sort_values('Prazo')
-            prazo_df['Prazo Formatado'] = prazo_df['Prazo'].dt.strftime('%d/%m/%Y')
+            prazo_df['Prazo'] = pd.to_datetime(prazo_df['Prazo'], errors='coerce')
+            prazo_df = prazo_df.dropna(subset=['Prazo']) # Remove linhas sem prazo válido para o gráfico
+            
+            if not prazo_df.empty:
+                prazo_df = prazo_df.sort_values('Prazo')
+                prazo_df['Prazo Formatado'] = prazo_df['Prazo'].dt.strftime('%d/%m/%Y')
 
-            # Criar datas mínimas para o gráfico de timeline
-            prazo_df['Data Início'] = prazo_df['Data Início'].fillna(prazo_df['Prazo'].dt.date - timedelta(days=1))
-            prazo_df['Data Início'] = prazo_df['Data Início'].apply(lambda x: pd.to_datetime(x) if x is not None else None)
+                # Para o gráfico de timeline, 'Data Início' precisa ser datetime.
+                # Se for None/NaT, atribua um valor para visualização (ex: 1 dia antes do prazo)
+                prazo_df['Data Início Visual'] = prazo_df['Data Início'].fillna(prazo_df['Prazo'] - timedelta(days=1))
+                
+                fig_prazo = px.timeline(prazo_df, x_start="Data Início Visual", x_end="Prazo", y="Obrigação",
+                                       color="Status",
+                                       title='Linha do Tempo das Atividades',
+                                       color_discrete_map={'Pendente':'#ffc107', 'Em Andamento':'#007bff', 'Finalizado':'#28a745', 'Fechado':'#6c757d'},
+                                       hover_name="Obrigação",
+                                       hover_data={"Status": True, "Dificuldade": True, "Prazo Formatado": True, "Data Início Visual": False}) # Não mostrar Data Início Visual no hover
+                fig_prazo.update_yaxes(autorange="reversed")
+                fig_prazo.update_layout(showlegend=True)
+                st.plotly_chart(fig_prazo, use_container_width=True)
+            else:
+                st.info("Não há atividades com prazo definido para exibir na linha do tempo.")
+    else:
+        st.info("Adicione atividades ou habilite um mês para ver as análises gráficas.")
 
-            fig_prazo = px.timeline(prazo_df, x_start="Data Início", x_end="Prazo", y="Obrigação",
-                                   color="Status",
-                                   title='Linha do Tempo das Atividades',
-                                   color_discrete_map={'Pendente':'#ffc107', 'Em Andamento':'#007bff', 'Finalizado':'#28a745', 'Fechado':'#6c757d'},
-                                   hover_name="Obrigação",
-                                   hover_data=["Status", "Dificuldade", "Prazo Formatado"])
-            fig_prazo.update_yaxes(autorange="reversed")
-            fig_prazo.update_layout(showlegend=True)
-            st.plotly_chart(fig_prazo, use_container_width=True)
 
     # Tabela de atividades
+    st.markdown("---")
     st.markdown('<div class="card animate-fadeIn"><h3>📋 Lista de Atividades</h3></div>', unsafe_allow_html=True)
 
-    # Formatar DataFrame para exibição
-    display_df = filtered_df.copy()
-    display_df['Status'] = display_df['Status'].apply(apply_status_style)
-    display_df['Dificuldade'] = display_df['Dificuldade'].apply(apply_difficulty_style)
-    display_df['Prazo'] = display_df['Prazo'].dt.strftime('%d/%m/%Y')
-    display_df['Data Início'] = display_df['Data Início'].apply(
-        lambda x: x.strftime('%d/%m/%Y') if pd.notna(x) else ''
-    )
-    display_df['Data Conclusão'] = display_df['Data Conclusão'].apply(
-        lambda x: x.strftime('%d/%m/%Y') if pd.notna(x) else ''
-    )
+    if not filtered_df.empty:
+        # Formatar DataFrame para exibição
+        display_df = filtered_df.copy()
+        display_df['Status'] = display_df['Status'].apply(apply_status_style)
+        display_df['Dificuldade'] = display_df['Dificuldade'].apply(apply_difficulty_style)
+        
+        # Formatar datas para exibição, tratando NaT (Not a Time)
+        display_df['Prazo'] = display_df['Prazo'].dt.strftime('%d/%m/%Y').replace({pd.NaT: ''})
+        display_df['Data Início'] = display_df['Data Início'].dt.strftime('%d/%m/%Y').replace({pd.NaT: ''})
+        display_df['Data Conclusão'] = display_df['Data Conclusão'].dt.strftime('%d/%m/%Y').replace({pd.NaT: ''})
+        
+        # Selecionar colunas para exibição
+        cols_to_display = ['Obrigação', 'Descrição', 'Periodicidade', 'Órgão Responsável',
+                          'Data Limite', 'Status', 'Dificuldade', 'Prazo', 'Dias Restantes']
+        
+        # Assegurar que todas as colunas existem antes de tentar selecioná-las
+        cols_exist = [col for col in cols_to_display if col in display_df.columns]
+        
+        st.write(display_df[cols_exist].to_html(escape=False, index=False), unsafe_allow_html=True)
+    else:
+        st.info("Nenhuma atividade encontrada com os filtros selecionados.")
 
-    # Selecionar colunas para exibição
-    cols_to_display = ['Obrigação', 'Descrição', 'Periodicidade', 'Órgão Responsável',
-                      'Data Limite', 'Status', 'Dificuldade', 'Prazo', 'Dias Restantes']
-
-    st.write(display_df[cols_to_display].to_html(escape=False, index=False), unsafe_allow_html=True)
 
     # Adicionar nova atividade
+    st.markdown("---")
     with st.expander("➕ Adicionar Nova Atividade", expanded=False):
         with st.form("nova_atividade_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                nova_obrigacao = st.text_input("Obrigação*", placeholder="Nome da obrigação fiscal")
-                nova_descricao = st.text_area("Descrição*", placeholder="Descrição detalhada da atividade")
-                nova_periodicidade = st.selectbox("Periodicidade*", ["Mensal", "Trimestral", "Anual", "Eventual", "Extinta"])
+                nova_obrigacao = st.text_input("Obrigação*", placeholder="Nome da obrigação fiscal", key="nova_obrigacao")
+                nova_descricao = st.text_area("Descrição*", placeholder="Descrição detalhada da atividade", key="nova_descricao")
+                nova_periodicidade = st.selectbox("Periodicidade*", ["Mensal", "Trimestral", "Anual", "Eventual", "Extinta"], key="nova_periodicidade")
             with col2:
-                novo_orgao = st.text_input("Órgão Responsável*", placeholder="Órgão responsável")
-                nova_data_limite = st.text_input("Data Limite de Entrega*", placeholder="Ex: Até o dia 10 do mês subsequente")
-                novo_status = st.selectbox("Status*", ["Pendente", "Em Andamento", "Finalizado"])
-                nova_dificuldade = st.selectbox("Dificuldade*", ["Baixa", "Média", "Alta"])
-                novo_prazo = st.date_input("Prazo Final*")
+                novo_orgao = st.text_input("Órgão Responsável*", placeholder="Órgão responsável", key="novo_orgao")
+                nova_data_limite = st.text_input("Data Limite de Entrega*", placeholder="Ex: Até o dia 10 do mês subsequente", key="nova_data_limite")
+                novo_status = st.selectbox("Status*", ["Pendente", "Em Andamento", "Finalizado", "Fechado"], key="novo_status")
+                nova_dificuldade = st.selectbox("Dificuldade*", ["Baixa", "Média", "Alta"], key="nova_dificuldade")
+                novo_prazo = st.date_input("Prazo Final*", key="novo_prazo_data")
 
             if st.form_submit_button("Adicionar Atividade"):
                 if nova_obrigacao and nova_descricao and novo_orgao and nova_data_limite and novo_prazo:
@@ -801,16 +888,19 @@ def main():
                     st.error("⚠️ Preencha todos os campos obrigatórios (marcados com *)")
 
     # Editar status e prazo das atividades
-    if not st.session_state.df_atividades.empty:
-        with st.expander("✏️ Editar Atividades", expanded=False):
+    st.markdown("---")
+    with st.expander("✏️ Editar Atividades", expanded=False):
+        if not st.session_state.df_atividades.empty:
             atividades_para_editar = st.session_state.df_atividades['Obrigação'].unique()
             atividade_selecionada = st.selectbox("Selecione a atividade para editar", atividades_para_editar, key="edit_select")
 
             if atividade_selecionada:
-                atividade_row = st.session_state.df_atividades[st.session_state.df_atividades['Obrigação'] == atividade_selecionada].iloc[0]
-                atividade_id = atividade_row['id']
-                current_status = atividade_row['Status']
-                current_prazo = atividade_row['Prazo'].date() if pd.notna(atividade_row['Prazo']) else datetime.now().date()
+                atividade_row_series = st.session_state.df_atividades[st.session_state.df_atividades['Obrigação'] == atividade_selecionada].iloc[0]
+                atividade_id = atividade_row_series['id']
+                current_status = atividade_row_series['Status']
+                
+                # Certifica-se de que current_prazo é um objeto date
+                current_prazo = atividade_row_series['Prazo'].date() if pd.notna(atividade_row_series['Prazo']) else datetime.now().date()
 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -823,10 +913,18 @@ def main():
                     # Atualizar status
                     if novo_status != current_status:
                         update_activity_in_db(atividade_id, 'Status', novo_status)
-                        if novo_status == "Em Andamento" and pd.isna(atividade_row['Data Início']):
+                        
+                        # Atualizar DataInicio e DataConclusao com base no novo status
+                        if novo_status == "Em Andamento" and (pd.isna(atividade_row_series['Data Início']) or atividade_row_series['Data Início'] == ''):
                             update_activity_in_db(atividade_id, 'DataInicio', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                        elif novo_status != "Em Andamento" and pd.notna(atividade_row_series['Data Início']): # Limpar se não estiver mais em andamento
+                             update_activity_in_db(atividade_id, 'DataInicio', None)
+
                         if novo_status == "Finalizado":
                             update_activity_in_db(atividade_id, 'DataConclusao', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                        elif novo_status != "Finalizado" and pd.notna(atividade_row_series['Data Conclusão']): # Limpar se não estiver mais finalizado
+                            update_activity_in_db(atividade_id, 'DataConclusao', None)
+
                         st.success(f"✅ Status da atividade '{atividade_selecionada}' atualizado para '{novo_status}'!")
                     
                     # Atualizar prazo
@@ -836,18 +934,21 @@ def main():
                     
                     st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
                     st.experimental_rerun()
-    else:
-        st.info("Nenhuma atividade para editar. Adicione atividades ou habilite um novo mês.")
+        else:
+            st.info("Nenhuma atividade para editar. Adicione atividades ou habilite um novo mês.")
 
     # Fechar período e habilitar próximo mês
     st.markdown("---")
     st.markdown('<div class="card animate-fadeIn"><h3>🗓️ Fechamento e Habilitação de Período</h3></div>', unsafe_allow_html=True)
 
-    todas_finalizadas = all(st.session_state.df_atividades['Status'].isin(["Finalizado", "Fechado"]))
+    todas_finalizadas_ou_fechadas = False
+    if not st.session_state.df_atividades.empty:
+        # Verifica se todas as atividades do mês de referência estão Finalizadas ou Fechadas
+        todas_finalizadas_ou_fechadas = all(st.session_state.df_atividades['Status'].isin(["Finalizado", "Fechado"]))
 
-    if todas_finalizadas and not st.session_state.df_atividades.empty:
-        st.success(f"🎉 Todas as atividades para {st.session_state.mes_ano_referencia} estão finalizadas!")
-        if st.button("Fechar Período e Habilitar Próximo Mês"):
+    if todas_finalizadas_ou_fechadas and not st.session_state.df_atividades.empty:
+        st.success(f"🎉 Todas as atividades para {st.session_state.mes_ano_referencia} estão finalizadas ou fechadas!")
+        if st.button("Fechar Período e Habilitar Próximo Mês", key="fechar_periodo_btn"):
             # Mudar o status de todas as atividades do mês atual para "Fechado"
             conn = create_connection()
             if conn:
@@ -864,6 +965,7 @@ def main():
                 finally:
                     conn.close()
 
+            # Avança para o próximo mês
             st.session_state.mes_ano_referencia = get_next_month_year(st.session_state.mes_ano_referencia)
             st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
 
@@ -872,7 +974,6 @@ def main():
                 initial_templates = load_initial_data_template()
                 activities_to_insert = []
                 for activity in initial_templates:
-                    # Calcular o prazo com base no mês de referência
                     prazo_calculated = calculate_deadline(activity['Data Limite'], st.session_state.mes_ano_referencia)
                     activity['Prazo'] = prazo_calculated.strftime('%Y-%m-%d %H:%M:%S') if prazo_calculated else None
                     activity['MesAnoReferencia'] = st.session_state.mes_ano_referencia
@@ -885,6 +986,8 @@ def main():
             st.experimental_rerun()
     elif not st.session_state.df_atividades.empty:
         st.warning(f"Ainda há atividades pendentes ou em andamento para {st.session_state.mes_ano_referencia}. Finalize-as para fechar o período.")
+    else:
+        st.info("Nenhuma atividade para fechar. Habilite um mês primeiro.")
 
 
 if __name__ == "__main__":
