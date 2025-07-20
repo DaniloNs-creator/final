@@ -214,9 +214,10 @@ diet_plan = {
     }
 }
 
-# Plano de treino de 60 dias
-def generate_workout_plan(start_date):
+# Plano de treino de 60 dias começando em 21/07/2025
+def generate_workout_plan():
     plan = []
+    start_date = datetime(2025, 7, 21).date()
     current_date = start_date
     
     for week in range(1, 9):  # 8 semanas = ~60 dias
@@ -325,8 +326,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Download do Plano")
     if st.button("Exportar para Excel"):
-        today = datetime.now().date()
-        workout_plan = generate_workout_plan(today)
+        workout_plan = generate_workout_plan()
         
         # Criar um arquivo Excel em memória
         output = BytesIO()
@@ -349,9 +349,8 @@ with st.sidebar:
 tab1, tab2 = st.tabs(["📅 Plano de Treino", "🍽 Plano Alimentar"])
 
 with tab1:
-    st.header("Plano de Treino - 60 Dias")
-    today = datetime.now().date()
-    workout_plan = generate_workout_plan(today)
+    st.header("Plano de Treino - 60 Dias (21/07/2025 a 18/09/2025)")
+    workout_plan = generate_workout_plan()
     
     # Seletor de data em formato de calendário
     st.subheader("📆 Consultar Treino por Data")
@@ -363,7 +362,7 @@ with tab1:
     # Widget de seleção de data
     selected_date = st.date_input(
         "Selecione a data para ver o treino:",
-        value=today,
+        value=min_date,
         min_value=min_date,
         max_value=max_date,
         format="DD/MM/YYYY"
@@ -388,7 +387,7 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
     else:
-        st.warning("Nenhum treino encontrado para a data selecionada.")
+        st.warning("Dia de descanso ou nenhum treino encontrado para a data selecionada.")
     
     # Filtros
     st.subheader("Filtrar Treinos")
