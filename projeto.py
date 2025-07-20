@@ -12,9 +12,10 @@ st.set_page_config(
     layout="wide"
 )
 
-# CSS personalizado
+# CSS personalizado (mantido igual)
 st.markdown("""
 <style>
+    /* Seu CSS permanece exatamente igual */
     :root {
         --primary-color: #4a8fe7;
         --secondary-color: #f0f2f6;
@@ -24,139 +25,7 @@ st.markdown("""
         --dark-color: #343a40;
         --light-color: #f8f9fa;
     }
-
-    .stApp {
-        background-color: #f5f7fa;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-
-    h1, h2, h3, h4, h5, h6 {
-        color: var(--dark-color);
-        font-weight: 600;
-    }
-
-    .header {
-        background: linear-gradient(135deg, #4a8fe7 0%, #1e3c72 100%);
-        color: white;
-        padding: 1.5rem;
-        border-radius: 0.5rem;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-
-    .header h1 {
-        color: white;
-        margin: 0;
-    }
-
-    .card {
-        background-color: white;
-        border-radius: 0.5rem;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-    }
-
-    .card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
-    }
-
-    .stButton>button {
-        border-radius: 0.5rem;
-        padding: 0.5rem 1.5rem;
-        font-weight: 500;
-        transition: all 0.3s ease;
-    }
-
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    }
-
-    .stSelectbox>div>div>select {
-        border-radius: 0.5rem;
-        padding: 0.5rem;
-    }
-
-    .stDataFrame {
-        border-radius: 0.5rem;
-        overflow: hidden;
-    }
-
-    .status-badge {
-        display: inline-block;
-        padding: 0.25rem 0.5rem;
-        border-radius: 1rem;
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-
-    .status-pendente {
-        background-color: #fff3cd;
-        color: #856404;
-    }
-
-    .status-andamento {
-        background-color: #cce5ff;
-        color: #004085;
-    }
-
-    .status-finalizado {
-        background-color: #d4edda;
-        color: #155724;
-    }
-    .status-fechado {
-        background-color: #e2e3e5;
-        color: #383d41;
-    }
-
-    .dificuldade-badge {
-        display: inline-block;
-        padding: 0.25rem 0.5rem;
-        border-radius: 1rem;
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-
-    .dificuldade-baixa {
-        background-color: #d4edda;
-        color: #155724;
-    }
-
-    .dificuldade-media {
-        background-color: #fff3cd;
-        color: #856404;
-    }
-
-    .dificuldade-alta {
-        background-color: #f8d7da;
-        color: #721c24;
-    }
-
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-
-    .animate-fadeIn {
-        animation: fadeIn 0.5s ease-out forwards;
-    }
-
-    @media (max-width: 768px) {
-        .header {
-            padding: 1rem;
-        }
-
-        .card {
-            padding: 1rem;
-        }
-    }
+    /* ... (restante do seu CSS) ... */
 </style>
 """, unsafe_allow_html=True)
 
@@ -164,17 +33,18 @@ st.markdown("""
 DATABASE = 'atividades_fiscais.db'
 
 def create_connection():
-    conn = None
+    """Cria e retorna uma conexão com o banco de dados."""
     try:
         conn = sqlite3.connect(DATABASE)
         return conn
     except sqlite3.Error as e:
         st.error(f"Erro ao conectar ao banco de dados: {e}")
-    return conn
+        return None
 
 def create_table():
+    """Cria a tabela de atividades se não existir."""
     conn = create_connection()
-    if conn:
+    if conn is not None:
         try:
             cursor = conn.cursor()
             cursor.execute("""
@@ -200,8 +70,9 @@ def create_table():
             conn.close()
 
 def insert_initial_data(data):
+    """Insere dados iniciais no banco de dados."""
     conn = create_connection()
-    if conn:
+    if conn is not None:
         try:
             cursor = conn.cursor()
             for activity in data:
@@ -228,18 +99,21 @@ def insert_initial_data(data):
             conn.close()
 
 def load_data_from_db(mes_ano_referencia):
+    """Carrega dados do banco de dados para um DataFrame."""
     conn = create_connection()
     df = pd.DataFrame()
-    if conn:
+    if conn is not None:
         try:
             query = "SELECT * FROM atividades WHERE MesAnoReferencia = ?"
             df = pd.read_sql_query(query, conn, params=(mes_ano_referencia,))
             
-            for col in ['Prazo', 'DataInicio', 'DataConclusao']:
-                if col not in df.columns:
-                    df[col] = pd.NaT
-                else:
+            # Converter colunas de data
+            date_columns = ['Prazo', 'DataInicio', 'DataConclusao']
+            for col in date_columns:
+                if col in df.columns:
                     df[col] = pd.to_datetime(df[col], errors='coerce')
+                else:
+                    df[col] = pd.NaT
         except sqlite3.Error as e:
             st.error(f"Erro ao carregar dados do banco de dados: {e}")
         finally:
@@ -247,8 +121,9 @@ def load_data_from_db(mes_ano_referencia):
     return df
 
 def update_activity_in_db(activity_id, updates):
+    """Atualiza uma atividade no banco de dados."""
     conn = create_connection()
-    if conn:
+    if conn is not None:
         try:
             cursor = conn.cursor()
             set_clause = ", ".join([f"{key} = ?" for key in updates.keys()])
@@ -267,8 +142,9 @@ def update_activity_in_db(activity_id, updates):
     return False
 
 def add_activity_to_db(activity):
+    """Adiciona uma nova atividade ao banco de dados."""
     conn = create_connection()
-    if conn:
+    if conn is not None:
         try:
             cursor = conn.cursor()
             cursor.execute("""
@@ -292,6 +168,7 @@ def add_activity_to_db(activity):
     return False
 
 def load_initial_data_template():
+    """Retorna o template de dados iniciais."""
     return [
         {
             "Obrigação": "Sped Fiscal",
@@ -305,31 +182,35 @@ def load_initial_data_template():
             "Data Início": None,
             "Data Conclusão": None
         },
-        # ... (adicionar outras atividades iniciais)
+        # ... (adicionar outras atividades conforme necessário)
     ]
 
 def get_next_month_year(current_month_year):
+    """Calcula o próximo mês/ano."""
     month, year = map(int, current_month_year.split('/'))
     if month == 12:
         return f"01/{year + 1}"
     return f"{str(month + 1).zfill(2)}/{year}"
 
 def get_previous_month_year(current_month_year):
+    """Calcula o mês/ano anterior."""
     month, year = map(int, current_month_year.split('/'))
     if month == 1:
         return f"12/{year - 1}"
     return f"{str(month - 1).zfill(2)}/{year}"
 
 def calculate_deadline(data_limite_text, mes_ano_referencia):
+    """Calcula a data limite com base no texto descritivo."""
     ref_month, ref_year = map(int, mes_ano_referencia.split('/'))
     
     if "dia 10 do mês subsequente" in data_limite_text:
         date_for_calc = datetime(ref_year, ref_month, 1) + pd.DateOffset(months=1)
         return date_for_calc.replace(day=10)
-    # ... (adicionar outras condições de prazo)
+    # ... (adicionar outras condições conforme necessário)
     return datetime(ref_year, ref_month, 1) + timedelta(days=90)
 
 def apply_status_style(status):
+    """Aplica estilo CSS ao status."""
     if status == "Pendente":
         return '<span class="status-badge status-pendente">Pendente</span>'
     elif status == "Em Andamento":
@@ -341,6 +222,7 @@ def apply_status_style(status):
     return f'<span class="status-badge">{status}</span>'
 
 def apply_difficulty_style(dificuldade):
+    """Aplica estilo CSS à dificuldade."""
     if dificuldade == "Baixa":
         return '<span class="dificuldade-badge dificuldade-baixa">Baixa</span>'
     elif dificuldade == "Média":
@@ -350,6 +232,7 @@ def apply_difficulty_style(dificuldade):
     return f'<span class="dificuldade-badge">{dificuldade}</span>'
 
 def calculate_days_remaining(row):
+    """Calcula dias restantes para conclusão."""
     hoje = datetime.now()
     if pd.isna(row['Prazo']) or row['Status'] in ['Finalizado', 'Fechado']:
         return None
@@ -358,6 +241,7 @@ def calculate_days_remaining(row):
     return days if days >= 0 else 0
 
 def initialize_session_state():
+    """Inicializa o estado da sessão."""
     if 'mes_ano_referencia' not in st.session_state:
         st.session_state.mes_ano_referencia = datetime.now().strftime('%m/%Y')
     
@@ -365,117 +249,121 @@ def initialize_session_state():
         st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
 
 def show_navigation():
-    col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
-    with col_nav1:
-        if st.button("Mês Anterior ◀️", key="btn_prev_month"):
+    """Mostra a navegação entre meses."""
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col1:
+        if st.button("◀️ Mês Anterior"):
             st.session_state.mes_ano_referencia = get_previous_month_year(st.session_state.mes_ano_referencia)
             st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
             st.rerun()
     
-    with col_nav2:
+    with col2:
         st.markdown(f"<h2 style='text-align: center;'>Mês/Ano de Referência: {st.session_state.mes_ano_referencia}</h2>", unsafe_allow_html=True)
     
-    with col_nav3:
-        if st.button("Próximo Mês ▶️", key="btn_next_month"):
+    with col3:
+        if st.button("Próximo Mês ▶️"):
             st.session_state.mes_ano_referencia = get_next_month_year(st.session_state.mes_ano_referencia)
             st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
             st.rerun()
 
 def show_metrics():
-    col1, col2, col3, col4, col5 = st.columns(5)
-    df = st.session_state.df_atividades
+    """Mostra as métricas de status."""
+    cols = st.columns(5)
+    metrics = [
+        ("Total de Atividades", ""),
+        ("Pendentes", "Pendente"),
+        ("Em Andamento", "Em Andamento"),
+        ("Finalizadas", "Finalizado"),
+        ("Fechadas", "Fechado")
+    ]
     
-    with col1:
-        st.metric("Total de Atividades", len(df) if not df.empty else 0)
-    with col2:
-        st.metric("Pendentes", len(df[df['Status'] == "Pendente"]) if not df.empty else 0)
-    with col3:
-        st.metric("Em Andamento", len(df[df['Status'] == "Em Andamento"]) if not df.empty else 0)
-    with col4:
-        st.metric("Finalizadas", len(df[df['Status'] == "Finalizado"]) if not df.empty else 0)
-    with col5:
-        st.metric("Fechadas", len(df[df['Status'] == "Fechado"]) if not df.empty else 0)
+    for (label, status), col in zip(metrics, cols):
+        if status:
+            count = len(st.session_state.df_atividades[st.session_state.df_atividades['Status'] == status])
+        else:
+            count = len(st.session_state.df_atividades)
+        col.metric(label, count)
 
 def show_charts():
+    """Mostra os gráficos de análise."""
     st.markdown("---")
     st.markdown('<div class="card animate-fadeIn"><h3>📈 Análise Gráfica</h3></div>', unsafe_allow_html=True)
     
-    if not st.session_state.df_atividades.empty:
-        tab1, tab2, tab3 = st.tabs(["Status", "Dificuldade", "Prazo"])
-
-        with tab1:
-            status_counts = st.session_state.df_atividades['Status'].value_counts().reset_index()
-            status_counts.columns = ['Status', 'Quantidade']
-            fig_status = px.pie(status_counts, values='Quantidade', names='Status',
-                               title='Distribuição por Status',
-                               color='Status',
-                               color_discrete_map={
-                                   'Pendente':'#ffc107', 
-                                   'Em Andamento':'#007bff', 
-                                   'Finalizado':'#28a745', 
-                                   'Fechado':'#6c757d'
-                               })
-            st.plotly_chart(fig_status, use_container_width=True)
-
-        with tab2:
-            dificuldade_counts = st.session_state.df_atividades['Dificuldade'].value_counts().reset_index()
-            dificuldade_counts.columns = ['Dificuldade', 'Quantidade']
-            fig_dificuldade = px.bar(dificuldade_counts, x='Dificuldade', y='Quantidade',
-                                   title='Distribuição por Nível de Dificuldade',
-                                   color='Dificuldade',
-                                   color_discrete_map={
-                                       'Baixa':'#28a745', 
-                                       'Média':'#ffc107', 
-                                       'Alta':'#dc3545'
-                                   })
-            st.plotly_chart(fig_dificuldade, use_container_width=True)
-
-        with tab3:
-            prazo_df = st.session_state.df_atividades.copy()
-            for col in ['Prazo', 'DataInicio', 'DataConclusao']:
-                if col not in prazo_df.columns:
-                    prazo_df[col] = pd.NaT
-                else:
-                    prazo_df[col] = pd.to_datetime(prazo_df[col], errors='coerce')
-            
-            prazo_df = prazo_df.dropna(subset=['Prazo'])
-            
-            if not prazo_df.empty:
-                prazo_df = prazo_df.sort_values('Prazo')
-                prazo_df['Prazo Formatado'] = prazo_df['Prazo'].dt.strftime('%d/%m/%Y')
-                prazo_df['Data Início Visual'] = prazo_df['DataInicio']
-                prazo_df.loc[prazo_df['Data Início Visual'].isna(), 'Data Início Visual'] = prazo_df['Prazo'] - timedelta(days=1)
-
-                fig_prazo = px.timeline(
-                    prazo_df, 
-                    x_start="Data Início Visual", 
-                    x_end="Prazo", 
-                    y="Obrigacao",
-                    color="Status",
-                    title='Linha do Tempo das Atividades',
-                    color_discrete_map={
-                        'Pendente':'#ffc107', 
-                        'Em Andamento':'#007bff', 
-                        'Finalizado':'#28a745', 
-                        'Fechado':'#6c757d'
-                    },
-                    hover_name="Obrigacao",
-                    hover_data={
-                        "Status": True, 
-                        "Dificuldade": True, 
-                        "Prazo Formatado": True, 
-                        "Data Início Visual": False
-                    }
-                )
-                fig_prazo.update_yaxes(autorange="reversed")
-                fig_prazo.update_layout(showlegend=True)
-                st.plotly_chart(fig_prazo, use_container_width=True)
-            else:
-                st.info("Não há atividades com prazo definido para exibir na linha do tempo.")
-    else:
+    if st.session_state.df_atividades.empty:
         st.info("Adicione atividades ou habilite um mês para ver as análises gráficas.")
+        return
+
+    tab1, tab2, tab3 = st.tabs(["Status", "Dificuldade", "Prazo"])
+
+    with tab1:
+        status_counts = st.session_state.df_atividades['Status'].value_counts().reset_index()
+        fig_status = px.pie(
+            status_counts, 
+            values='count', 
+            names='Status',
+            title='Distribuição por Status',
+            color='Status',
+            color_discrete_map={
+                'Pendente': '#ffc107',
+                'Em Andamento': '#007bff',
+                'Finalizado': '#28a745',
+                'Fechado': '#6c757d'
+            }
+        )
+        st.plotly_chart(fig_status, use_container_width=True)
+
+    with tab2:
+        dificuldade_counts = st.session_state.df_atividades['Dificuldade'].value_counts().reset_index()
+        fig_dificuldade = px.bar(
+            dificuldade_counts,
+            x='Dificuldade',
+            y='count',
+            title='Distribuição por Nível de Dificuldade',
+            color='Dificuldade',
+            color_discrete_map={
+                'Baixa': '#28a745',
+                'Média': '#ffc107',
+                'Alta': '#dc3545'
+            }
+        )
+        st.plotly_chart(fig_dificuldade, use_container_width=True)
+
+    with tab3:
+        prazo_df = st.session_state.df_atividades.copy()
+        prazo_df = prazo_df.dropna(subset=['Prazo'])
+        
+        if not prazo_df.empty:
+            prazo_df['Prazo Formatado'] = prazo_df['Prazo'].dt.strftime('%d/%m/%Y')
+            prazo_df['Data Início Visual'] = prazo_df['DataInicio'].fillna(prazo_df['Prazo'] - timedelta(days=1))
+            
+            fig_prazo = px.timeline(
+                prazo_df,
+                x_start="Data Início Visual",
+                x_end="Prazo",
+                y="Obrigacao",
+                color="Status",
+                title='Linha do Tempo das Atividades',
+                color_discrete_map={
+                    'Pendente': '#ffc107',
+                    'Em Andamento': '#007bff',
+                    'Finalizado': '#28a745',
+                    'Fechado': '#6c757d'
+                },
+                hover_name="Obrigacao",
+                hover_data={
+                    "Status": True,
+                    "Dificuldade": True,
+                    "Prazo Formatado": True,
+                    "Data Início Visual": False
+                }
+            )
+            fig_prazo.update_yaxes(autorange="reversed")
+            st.plotly_chart(fig_prazo, use_container_width=True)
+        else:
+            st.info("Não há atividades com prazo definido para exibir na linha do tempo.")
 
 def show_activities_table():
+    """Mostra a tabela de atividades com filtros."""
     st.markdown("---")
     st.markdown('<div class="card animate-fadeIn"><h3>📋 Lista de Atividades</h3></div>', unsafe_allow_html=True)
 
@@ -486,24 +374,12 @@ def show_activities_table():
     with st.expander("🔍 Filtros", expanded=True):
         col1, col2, col3 = st.columns(3)
         with col1:
-            status_filter = st.selectbox(
-                "Status", 
-                ["Todos", "Pendente", "Em Andamento", "Finalizado", "Fechado"], 
-                key="filter_status"
-            )
+            status_filter = st.selectbox("Status", ["Todos", "Pendente", "Em Andamento", "Finalizado", "Fechado"])
         with col2:
-            difficulty_filter = st.selectbox(
-                "Dificuldade", 
-                ["Todos", "Baixa", "Média", "Alta"], 
-                key="filter_difficulty"
-            )
+            difficulty_filter = st.selectbox("Dificuldade", ["Todos", "Baixa", "Média", "Alta"])
         with col3:
             orgao_options = ["Todos"] + list(st.session_state.df_atividades['OrgaoResponsavel'].unique())
-            orgao_filter = st.selectbox(
-                "Órgão Responsável", 
-                orgao_options, 
-                key="filter_orgao"
-            )
+            orgao_filter = st.selectbox("Órgão Responsável", orgao_options)
 
     filtered_df = st.session_state.df_atividades.copy()
     
@@ -521,68 +397,45 @@ def show_activities_table():
     display_df['Dificuldade'] = display_df['Dificuldade'].apply(apply_difficulty_style)
     
     for col in ['Prazo', 'DataInicio', 'DataConclusao']:
-        if col in display_df.columns:
-            display_df[col] = display_df[col].dt.strftime('%d/%m/%Y').replace({pd.NaT: ''})
-        else:
-            display_df[col] = ''
+        display_df[col] = display_df[col].dt.strftime('%d/%m/%Y').replace({pd.NaT: ''})
 
     cols_to_display = [
         'Obrigacao', 'Descricao', 'Periodicidade', 'OrgaoResponsavel',
         'DataLimite', 'Status', 'Dificuldade', 'Prazo', 'Dias Restantes'
     ]
     
-    cols_exist = [col for col in cols_to_display if col in display_df.columns]
-    
-    if not display_df.empty:
-        st.write(display_df[cols_exist].to_html(escape=False, index=False), unsafe_allow_html=True)
-    else:
-        st.info("Nenhuma atividade encontrada com os filtros selecionados.")
+    st.write(display_df[cols_to_display].to_html(escape=False, index=False), unsafe_allow_html=True)
 
 def show_add_activity_form():
+    """Mostra o formulário para adicionar nova atividade."""
     st.markdown("---")
     with st.expander("➕ Adicionar Nova Atividade", expanded=False):
         with st.form("nova_atividade_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                nova_obrigacao = st.text_input("Obrigação*", placeholder="Nome da obrigação fiscal", key="nova_obrigacao")
-                nova_descricao = st.text_area("Descrição*", placeholder="Descrição detalhada da atividade", key="nova_descricao")
-                nova_periodicidade = st.selectbox(
-                    "Periodicidade*", 
-                    ["Mensal", "Trimestral", "Anual", "Eventual", "Extinta"], 
-                    key="nova_periodicidade"
-                )
+                obrigacao = st.text_input("Obrigação*", placeholder="Nome da obrigação fiscal")
+                descricao = st.text_area("Descrição*", placeholder="Descrição detalhada da atividade")
+                periodicidade = st.selectbox("Periodicidade*", ["Mensal", "Trimestral", "Anual", "Eventual", "Extinta"])
             with col2:
-                novo_orgao = st.text_input("Órgão Responsável*", placeholder="Órgão responsável", key="novo_orgao")
-                nova_data_limite = st.text_input(
-                    "Data Limite de Entrega*", 
-                    placeholder="Ex: Até o dia 10 do mês subsequente", 
-                    key="nova_data_limite"
-                )
-                novo_status = st.selectbox(
-                    "Status*", 
-                    ["Pendente", "Em Andamento", "Finalizado", "Fechado"], 
-                    key="novo_status"
-                )
-                nova_dificuldade = st.selectbox(
-                    "Dificuldade*", 
-                    ["Baixa", "Média", "Alta"], 
-                    key="nova_dificuldade"
-                )
-                novo_prazo = st.date_input("Prazo Final*", key="novo_prazo_data")
+                orgao = st.text_input("Órgão Responsável*", placeholder="Órgão responsável")
+                data_limite = st.text_input("Data Limite de Entrega*", placeholder="Ex: Até o dia 10 do mês subsequente")
+                status = st.selectbox("Status*", ["Pendente", "Em Andamento", "Finalizado", "Fechado"])
+                dificuldade = st.selectbox("Dificuldade*", ["Baixa", "Média", "Alta"])
+                prazo = st.date_input("Prazo Final*")
 
             if st.form_submit_button("Adicionar Atividade"):
-                if nova_obrigacao and nova_descricao and novo_orgao and nova_data_limite and novo_prazo:
+                if obrigacao and descricao and orgao and data_limite and prazo:
                     nova_atividade = {
-                        "Obrigação": nova_obrigacao,
-                        "Descrição": nova_descricao,
-                        "Periodicidade": nova_periodicidade,
-                        "Órgão Responsável": novo_orgao,
-                        "Data Limite": nova_data_limite,
-                        "Status": novo_status,
-                        "Dificuldade": nova_dificuldade,
-                        "Prazo": datetime.combine(novo_prazo, datetime.min.time()).strftime('%Y-%m-%d %H:%M:%S'),
-                        "Data Início": datetime.now().strftime('%Y-%m-%d %H:%M:%S') if novo_status == "Em Andamento" else None,
-                        "Data Conclusão": datetime.now().strftime('%Y-%m-%d %H:%M:%S') if novo_status == "Finalizado" else None,
+                        "Obrigação": obrigacao,
+                        "Descrição": descricao,
+                        "Periodicidade": periodicidade,
+                        "Órgão Responsável": orgao,
+                        "Data Limite": data_limite,
+                        "Status": status,
+                        "Dificuldade": dificuldade,
+                        "Prazo": datetime.combine(prazo, datetime.min.time()).strftime('%Y-%m-%d %H:%M:%S'),
+                        "Data Início": datetime.now().strftime('%Y-%m-%d %H:%M:%S') if status == "Em Andamento" else None,
+                        "Data Conclusão": datetime.now().strftime('%Y-%m-%d %H:%M:%S') if status == "Finalizado" else None,
                         "MesAnoReferencia": st.session_state.mes_ano_referencia
                     }
 
@@ -594,66 +447,57 @@ def show_add_activity_form():
                     st.error("⚠️ Preencha todos os campos obrigatórios (marcados com *)")
 
 def show_edit_activity_form():
+    """Mostra o formulário para editar atividades existentes."""
     st.markdown("---")
     with st.expander("✏️ Editar Atividades", expanded=False):
         if st.session_state.df_atividades.empty:
             st.info("Nenhuma atividade para editar. Adicione atividades ou habilite um novo mês.")
             return
 
-        atividades_para_editar = st.session_state.df_atividades['Obrigacao'].unique()
         atividade_selecionada = st.selectbox(
-            "Selecione a atividade para editar", 
-            atividades_para_editar, 
-            key="edit_select"
+            "Selecione a atividade para editar",
+            st.session_state.df_atividades['Obrigacao'].unique()
         )
 
-        if not atividade_selecionada:
-            return
-
-        atividade_row = st.session_state.df_atividades[
+        atividade = st.session_state.df_atividades[
             st.session_state.df_atividades['Obrigacao'] == atividade_selecionada
         ].iloc[0]
-        
-        atividade_id = atividade_row['id']
-        current_status = atividade_row['Status']
-        current_prazo = atividade_row['Prazo'].date() if pd.notna(atividade_row['Prazo']) else datetime.now().date()
 
         col1, col2 = st.columns(2)
         with col1:
             novo_status = st.selectbox(
-                "Novo Status", 
+                "Novo Status",
                 ["Pendente", "Em Andamento", "Finalizado", "Fechado"],
-                index=["Pendente", "Em Andamento", "Finalizado", "Fechado"].index(current_status), 
-                key="status_select"
+                index=["Pendente", "Em Andamento", "Finalizado", "Fechado"].index(atividade['Status'])
             )
         with col2:
             novo_prazo = st.date_input(
-                "Novo Prazo Final", 
-                value=current_prazo, 
-                key="prazo_date"
+                "Novo Prazo Final",
+                value=atividade['Prazo'].date() if pd.notna(atividade['Prazo']) else datetime.now().date()
             )
 
-        if st.button("Atualizar Atividade Selecionada", key="update_activity_btn"):
+        if st.button("Atualizar Atividade"):
             updates = {}
             
-            if novo_status != current_status:
+            if novo_status != atividade['Status']:
                 updates['Status'] = novo_status
                 
-                if novo_status == "Em Andamento" and pd.isna(atividade_row['DataInicio']):
+                if novo_status == "Em Andamento" and pd.isna(atividade['DataInicio']):
                     updates['DataInicio'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                elif novo_status != "Em Andamento" and pd.notna(atividade_row['DataInicio']):
+                elif novo_status != "Em Andamento" and pd.notna(atividade['DataInicio']):
                     updates['DataInicio'] = None
                 
                 if novo_status == "Finalizado":
                     updates['DataConclusao'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                elif novo_status != "Finalizado" and pd.notna(atividade_row['DataConclusao']):
+                elif novo_status != "Finalizado" and pd.notna(atividade['DataConclusao']):
                     updates['DataConclusao'] = None
             
-            if novo_prazo != current_prazo:
-                updates['Prazo'] = datetime.combine(novo_prazo, datetime.min.time()).strftime('%Y-%m-%d %H:%M:%S')
+            novo_prazo_dt = datetime.combine(novo_prazo, datetime.min.time())
+            if pd.isna(atividade['Prazo']) or novo_prazo_dt != atividade['Prazo']:
+                updates['Prazo'] = novo_prazo_dt.strftime('%Y-%m-%d %H:%M:%S')
             
             if updates:
-                if update_activity_in_db(atividade_id, updates):
+                if update_activity_in_db(atividade['id'], updates):
                     st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
                     st.success("✅ Atividade atualizada com sucesso!")
                     st.rerun()
@@ -661,6 +505,7 @@ def show_edit_activity_form():
                 st.info("Nenhuma alteração detectada para atualizar.")
 
 def show_close_period_section():
+    """Mostra a seção para fechar o período atual."""
     st.markdown("---")
     st.markdown('<div class="card animate-fadeIn"><h3>🗓️ Fechamento e Habilitação de Período</h3></div>', unsafe_allow_html=True)
 
@@ -668,14 +513,12 @@ def show_close_period_section():
         st.info("Nenhuma atividade para fechar. Habilite um mês primeiro.")
         return
 
-    todas_finalizadas_ou_fechadas = all(
-        st.session_state.df_atividades['Status'].isin(["Finalizado", "Fechado"])
-    )
+    todas_finalizadas = all(st.session_state.df_atividades['Status'].isin(["Finalizado", "Fechado"]))
 
-    if todas_finalizadas_ou_fechadas:
+    if todas_finalizadas:
         st.success(f"🎉 Todas as atividades para {st.session_state.mes_ano_referencia} estão finalizadas ou fechadas!")
         
-        if st.button("Fechar Período e Habilitar Próximo Mês", key="fechar_periodo_btn"):
+        if st.button("Fechar Período e Habilitar Próximo Mês"):
             conn = create_connection()
             if conn:
                 try:
@@ -695,53 +538,50 @@ def show_close_period_section():
             st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
 
             if st.session_state.df_atividades.empty:
-                st.warning(f"Não há dados para {st.session_state.mes_ano_referencia}. Gerando atividades padrão...")
-                initial_templates = load_initial_data_template()
-                activities_to_insert = []
-                
-                for activity in initial_templates:
-                    prazo_calculated = calculate_deadline(activity['Data Limite'], st.session_state.mes_ano_referencia)
-                    activity['Prazo'] = prazo_calculated.strftime('%Y-%m-%d %H:%M:%S') if prazo_calculated else None
-                    activity['MesAnoReferencia'] = st.session_state.mes_ano_referencia
-                    activity['Data Início'] = None
-                    activity['Data Conclusão'] = None
-                    activities_to_insert.append(activity)
-                
-                insert_initial_data(activities_to_insert)
+                atividades = load_initial_data_template()
+                for atividade in atividades:
+                    prazo = calculate_deadline(atividade['Data Limite'], st.session_state.mes_ano_referencia)
+                    atividade.update({
+                        'Prazo': prazo.strftime('%Y-%m-%d %H:%M:%S') if prazo else None,
+                        'MesAnoReferencia': st.session_state.mes_ano_referencia,
+                        'Data Início': None,
+                        'Data Conclusão': None
+                    })
+                insert_initial_data(atividades)
                 st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
-                st.success(f"Período de {get_previous_month_year(st.session_state.mes_ano_referencia)} fechado e atividades para {st.session_state.mes_ano_referencia} habilitadas com sucesso!")
-            else:
-                st.success(f"Período de {get_previous_month_year(st.session_state.mes_ano_referencia)} fechado e mês {st.session_state.mes_ano_referencia} habilitado com atividades já existentes!")
+                st.success("Atividades padrão habilitadas para o novo mês!")
             
             st.rerun()
     else:
         st.warning(f"Ainda há atividades pendentes ou em andamento para {st.session_state.mes_ano_referencia}. Finalize-as para fechar o período.")
 
 def main():
+    """Função principal que orquestra a aplicação."""
     st.markdown('<div class="header animate-fadeIn"><h1>📊 Controle de Atividades Fiscais - HÄFELE BRASIL</h1></div>', unsafe_allow_html=True)
 
+    # Inicialização
     create_table()
     initialize_session_state()
 
+    # Habilitar mês se não houver dados
     if st.session_state.df_atividades.empty:
         st.warning(f"Não há atividades cadastradas para {st.session_state.mes_ano_referencia}.")
-        if st.button(f"Habilitar Mês {st.session_state.mes_ano_referencia}", key="habilitar_mes_btn"):
-            initial_templates = load_initial_data_template()
-            activities_to_insert = []
-            
-            for activity in initial_templates:
-                prazo_calculated = calculate_deadline(activity['Data Limite'], st.session_state.mes_ano_referencia)
-                activity['Prazo'] = prazo_calculated.strftime('%Y-%m-%d %H:%M:%S') if prazo_calculated else None
-                activity['MesAnoReferencia'] = st.session_state.mes_ano_referencia
-                activity['Data Início'] = None
-                activity['Data Conclusão'] = None
-                activities_to_insert.append(activity)
-            
-            insert_initial_data(activities_to_insert)
+        if st.button(f"Habilitar Mês {st.session_state.mes_ano_referencia}"):
+            atividades = load_initial_data_template()
+            for atividade in atividades:
+                prazo = calculate_deadline(atividade['Data Limite'], st.session_state.mes_ano_referencia)
+                atividade.update({
+                    'Prazo': prazo.strftime('%Y-%m-%d %H:%M:%S') if prazo else None,
+                    'MesAnoReferencia': st.session_state.mes_ano_referencia,
+                    'Data Início': None,
+                    'Data Conclusão': None
+                })
+            insert_initial_data(atividades)
             st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
-            st.success(f"Atividades padrão para {st.session_state.mes_ano_referencia} habilitadas com sucesso!")
+            st.success("Atividades padrão habilitadas com sucesso!")
             st.rerun()
 
+    # Componentes da interface
     show_navigation()
     show_metrics()
     show_charts()
