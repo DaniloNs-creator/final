@@ -150,6 +150,24 @@ def inject_css():
         .date-picker-container {
             margin-bottom: 1.5rem;
         }
+        
+        /* Inputs de acompanhamento */
+        .tracking-input {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            margin-bottom: 1.5rem;
+        }
+        
+        /* Gráficos */
+        .chart-container {
+            background: white;
+            padding: 1rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            margin-bottom: 2rem;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -162,7 +180,7 @@ user_data = {
     "idade": 28,
     "altura": 1.87,
     "peso": 108,
-    "v02max": 183,  # Alterado para 183 conforme solicitado
+    "v02max": 183,
     "objetivo": "Emagrecimento e Performance no Ciclismo",
     "nivel": "Iniciante",
     "disponibilidade": "6 dias/semana"
@@ -213,6 +231,19 @@ diet_plan = {
         "Opção 3": "1 fatia queijo branco"
     }
 }
+
+# Dados de acompanhamento (persistência com session_state)
+if 'tracking_data' not in st.session_state:
+    st.session_state.tracking_data = pd.DataFrame(columns=['Data', 'Peso', 'Frequencia_Cardiaca'])
+
+# Função para adicionar novos dados de acompanhamento
+def add_tracking_data(date, weight, heart_rate):
+    new_data = pd.DataFrame({
+        'Data': [date],
+        'Peso': [weight],
+        'Frequencia_Cardiaca': [heart_rate]
+    })
+    st.session_state.tracking_data = pd.concat([st.session_state.tracking_data, new_data]).sort_values('Data').drop_duplicates('Data', keep='last')
 
 # Plano de treino de 60 dias começando em 21/07/2025 com FCs atualizadas
 def generate_workout_plan():
@@ -365,6 +396,10 @@ with st.sidebar:
                                                for j in diet_plan[i].keys()},
                                                orient='index')
             diet_sheet.to_excel(writer, sheet_name='Plano Alimentar')
+            
+            # Adicionar dados de acompanhamento
+            if not st.session_state.tracking_data.empty:
+                st.session_state.tracking_data.to_excel(writer, sheet_name='Acompanhamento', index=False)
         
         output.seek(0)
         b64 = base64.b64encode(output.read()).decode()
@@ -372,7 +407,7 @@ with st.sidebar:
         st.markdown(href, unsafe_allow_html=True)
 
 # Abas principais
-tab1, tab2 = st.tabs(["📅 Plano de Treino", "🍽 Plano Alimentar"])
+tab1, tab2, tab3 = st.tabs(["📅 Plano de Treino", "🍽 Plano Alimentar", "📊 Acompanhamento"])
 
 with tab1:
     workout_plan = generate_workout_plan()
@@ -469,6 +504,62 @@ with tab2:
     - Gorduras saudáveis (castanhas, azeite, abacate)
     - Coma legumes e verduras à vontade
     """)
+
+with tab3:
+    st.header("📊 Acompanhamento de Evolução")
+    
+    # Seção para adicionar novos dados
+    with st.container():
+        st.subheader("Adicionar Novos Dados")
+        today = datetime.now().date()
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            tracking_date = st.date_input("Data", value=today)
+        with col2:
+            weight = st.number_input("Peso (kg)", min_value=30.0, max_value=200.0, value=user_data["peso"], step=0.1)
+        with col3:
+            heart_rate = st.number_input("Frequência Cardíaca em Repouso (bpm)", min_value=40, max_value=120, value=65)
+        
+        if st.button("Salvar Dados"):
+            add_tracking_data(tracking_date, weight, heart_rate)
+            st.success("Dados salvos com sucesso!")
+            user_data["peso"] = weight  # Atualiza o peso no perfil
+    
+    # Seção de gráficos
+    if not st.session_state.tracking_data.empty:
+        st.markdown("---")
+        st.subheader("Evolução ao Longo do Tempo")
+        
+        # Processar dados
+        tracking_df = st.session_state.tracking_data.sort_values('Data')
+        tracking_df['Data'] = pd.to_datetime(tracking_df['Data'])
+        tracking_df = tracking_df.set_index('Data').resample('D').mean().interpolate().reset_index()
+        
+        # Gráfico de peso
+        st.markdown("#### Evolução do Peso")
+        fig_weight = px.line(tracking_df, x='Data', y='Peso', 
+                            labels={'Peso': 'Peso (kg)'},
+                            markers=True,
+                            color_discrete_sequence=['#1e3c72'])
+        fig_weight.update_layout(yaxis_range=[tracking_df['Peso'].min()-2, tracking_df['Peso'].max()+2])
+        st.plotly_chart(fig_weight, use_container_width=True)
+        
+        # Gráfico de frequência cardíaca
+        st.markdown("#### Evolução da Frequência Cardíaca em Repouso")
+        fig_hr = px.line(tracking_df, x='Data', y='Frequencia_Cardiaca', 
+                        labels={'Frequencia_Cardiaca': 'FC (bpm)'},
+                        markers=True,
+                        color_discrete_sequence=['#e63946'])
+        fig_hr.update_layout(yaxis_range=[tracking_df['Frequencia_Cardiaca'].min()-5, tracking_df['Frequencia_Cardiaca'].max()+5])
+        st.plotly_chart(fig_hr, use_container_width=True)
+        
+        # Mostrar tabela com dados históricos
+        st.markdown("---")
+        st.subheader("Histórico Completo")
+        st.dataframe(st.session_state.tracking_data.sort_values('Data', ascending=False), hide_index=True)
+    else:
+        st.warning("Nenhum dado de acompanhamento registrado ainda. Adicione dados acima.")
 
 # Rodapé
 st.markdown("---")
