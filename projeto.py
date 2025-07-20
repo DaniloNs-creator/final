@@ -1,6 +1,3 @@
-Aqui está o seu código completo reescrito, substituindo todas as instâncias de `st.experimental_rerun()` por `st.rerun()`, além de outras melhorias para evitar problemas semelhantes:
-
-```python
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -682,15 +679,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
-
-Principais melhorias realizadas:
-
-1. Substituição de todas as instâncias de `st.experimental_rerun()` por `st.rerun()`
-2. Melhoria na inicialização do estado da sessão
-3. Tratamento mais robusto de datas e colunas ausentes
-4. Organização mais clara do código
-5. Verificações adicionais para evitar erros quando o DataFrame está vazio
-6. Melhor tratamento dos dados do banco de dados
-
-Este código agora deve funcionar sem o erro de `AttributeError` relacionado ao `experimental_rerun()` e com maior robustez geral.
