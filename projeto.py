@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import sqlite3
 import numpy as np
 import io
+import time
 
 # Configuração inicial da página
 st.set_page_config(
@@ -196,23 +197,36 @@ st.markdown("""
         animation: spin 1s ease-in-out infinite;
         margin-right: 10px;
     }
+    
+    .error-message {
+        color: var(--danger-color);
+        background-color: #f8d7da;
+        padding: 10px;
+        border-radius: 5px;
+        margin: 10px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # Conexão com o banco de dados SQLite
 DATABASE = 'atividades_fiscais.db'
 
-def create_connection():
-    """Cria e retorna uma conexão com o banco de dados."""
-    try:
-        conn = sqlite3.connect(DATABASE)
-        return conn
-    except sqlite3.Error as e:
-        st.error(f"Erro ao conectar ao banco de dados: {e}")
-        return None
+def create_connection(max_retries=3, retry_delay=1):
+    """Cria e retorna uma conexão com o banco de dados com tratamento de erro robusto."""
+    retries = 0
+    while retries < max_retries:
+        try:
+            conn = sqlite3.connect(DATABASE)
+            return conn
+        except sqlite3.Error as e:
+            retries += 1
+            st.error(f"Erro ao conectar ao banco de dados (tentativa {retries}/{max_retries}): {e}")
+            if retries < max_retries:
+                time.sleep(retry_delay)
+    return None
 
 def create_table():
-    """Cria a tabela de atividades se não existir."""
+    """Cria a tabela de atividades se não existir com tratamento de erro robusto."""
     conn = create_connection()
     if conn is not None:
         try:
@@ -240,11 +254,17 @@ def create_table():
             conn.close()
 
 def load_data_from_db(mes_ano_referencia):
-    """Carrega dados do banco de dados para um DataFrame."""
+    """Carrega dados do banco de dados para um DataFrame com tratamento de erro robusto."""
     conn = create_connection()
     df = pd.DataFrame()
     if conn is not None:
         try:
+            # Verifica se a tabela existe antes de tentar ler
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='atividades'")
+            if not cursor.fetchone():
+                return pd.DataFrame()
+            
             query = "SELECT * FROM atividades WHERE MesAnoReferencia = ?"
             df = pd.read_sql_query(query, conn, params=(mes_ano_referencia,))
             
@@ -257,12 +277,16 @@ def load_data_from_db(mes_ano_referencia):
                     df[col] = pd.NaT
         except sqlite3.Error as e:
             st.error(f"Erro ao carregar dados do banco de dados: {e}")
+            return pd.DataFrame()
+        except pd.errors.DatabaseError as e:
+            st.error(f"Erro no banco de dados ao carregar dados: {e}")
+            return pd.DataFrame()
         finally:
             conn.close()
     return df
 
 def update_activity_in_db(activity_id, updates):
-    """Atualiza uma atividade no banco de dados."""
+    """Atualiza uma atividade no banco de dados com tratamento de erro robusto."""
     conn = create_connection()
     if conn is not None:
         try:
@@ -283,7 +307,7 @@ def update_activity_in_db(activity_id, updates):
     return False
 
 def add_activity_to_db(activity):
-    """Adiciona uma nova atividade ao banco de dados."""
+    """Adiciona uma nova atividade ao banco de dados com tratamento de erro robusto."""
     conn = create_connection()
     if conn is not None:
         try:
@@ -351,29 +375,38 @@ def load_initial_data_template():
 
 def get_next_month_year(current_month_year):
     """Calcula o próximo mês/ano."""
-    month, year = map(int, current_month_year.split('/'))
-    if month == 12:
-        return f"01/{year + 1}"
-    return f"{str(month + 1).zfill(2)}/{year}"
+    try:
+        month, year = map(int, current_month_year.split('/'))
+        if month == 12:
+            return f"01/{year + 1}"
+        return f"{str(month + 1).zfill(2)}/{year}"
+    except:
+        return datetime.now().strftime('%m/%Y')
 
 def get_previous_month_year(current_month_year):
     """Calcula o mês/ano anterior."""
-    month, year = map(int, current_month_year.split('/'))
-    if month == 1:
-        return f"12/{year - 1}"
-    return f"{str(month - 1).zfill(2)}/{year}"
+    try:
+        month, year = map(int, current_month_year.split('/'))
+        if month == 1:
+            return f"12/{year - 1}"
+        return f"{str(month - 1).zfill(2)}/{year}"
+    except:
+        return datetime.now().strftime('%m/%Y')
 
 def calculate_deadline(data_limite_text, mes_ano_referencia):
     """Calcula a data limite com base no texto descritivo."""
-    ref_month, ref_year = map(int, mes_ano_referencia.split('/'))
-    
-    if "dia 10 do mês subsequente" in data_limite_text:
-        date_for_calc = datetime(ref_year, ref_month, 1) + pd.DateOffset(months=1)
-        return date_for_calc.replace(day=10)
-    elif "dia 15 do mês subsequente" in data_limite_text:
-        date_for_calc = datetime(ref_year, ref_month, 1) + pd.DateOffset(months=1)
-        return date_for_calc.replace(day=15)
-    return datetime(ref_year, ref_month, 1) + timedelta(days=90)
+    try:
+        ref_month, ref_year = map(int, mes_ano_referencia.split('/'))
+        
+        if "dia 10 do mês subsequente" in data_limite_text:
+            date_for_calc = datetime(ref_year, ref_month, 1) + pd.DateOffset(months=1)
+            return date_for_calc.replace(day=10)
+        elif "dia 15 do mês subsequente" in data_limite_text:
+            date_for_calc = datetime(ref_year, ref_month, 1) + pd.DateOffset(months=1)
+            return date_for_calc.replace(day=15)
+        return datetime(ref_year, ref_month, 1) + timedelta(days=90)
+    except:
+        return datetime.now() + timedelta(days=30)
 
 def apply_status_style(status):
     """Aplica estilo CSS ao status."""
@@ -399,31 +432,46 @@ def apply_difficulty_style(dificuldade):
 
 def calculate_days_remaining(row):
     """Calcula dias restantes para conclusão."""
-    hoje = datetime.now()
-    if pd.isna(row['Prazo']) or row['Status'] in ['Finalizado', 'Fechado']:
+    try:
+        hoje = datetime.now()
+        if pd.isna(row['Prazo']) or row['Status'] in ['Finalizado', 'Fechado']:
+            return None
+        prazo = row['Prazo']
+        days = (prazo - hoje).days
+        return days if days >= 0 else 0
+    except:
         return None
-    prazo = row['Prazo']
-    days = (prazo - hoje).days
-    return days if days >= 0 else 0
 
 def initialize_session_state():
-    """Inicializa o estado da sessão."""
-    if 'mes_ano_referencia' not in st.session_state:
+    """Inicializa o estado da sessão com tratamento de erro robusto."""
+    try:
+        if 'mes_ano_referencia' not in st.session_state:
+            st.session_state.mes_ano_referencia = datetime.now().strftime('%m/%Y')
+        
+        if 'df_atividades' not in st.session_state:
+            st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
+            if st.session_state.df_atividades is None:
+                st.session_state.df_atividades = pd.DataFrame()
+        
+        if 'force_refresh' not in st.session_state:
+            st.session_state.force_refresh = False
+        
+        if 'current_page' not in st.session_state:
+            st.session_state.current_page = 'menu'
+    except Exception as e:
+        st.error(f"Erro ao inicializar estado da sessão: {e}")
+        st.session_state.df_atividades = pd.DataFrame()
         st.session_state.mes_ano_referencia = datetime.now().strftime('%m/%Y')
-    
-    if 'df_atividades' not in st.session_state:
-        st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
-    
-    if 'force_refresh' not in st.session_state:
-        st.session_state.force_refresh = False
-    
-    if 'current_page' not in st.session_state:
         st.session_state.current_page = 'menu'
 
 def refresh_data():
     """Força o recarregamento dos dados do banco."""
-    st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
-    st.session_state.force_refresh = False
+    try:
+        st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
+        st.session_state.force_refresh = False
+    except Exception as e:
+        st.error(f"Erro ao recarregar dados: {e}")
+        st.session_state.df_atividades = pd.DataFrame()
 
 def show_menu():
     """Mostra o menu inicial com os dois containers."""
@@ -465,36 +513,39 @@ def show_conversor_efd():
         uploaded_file = st.file_uploader("Faça upload do arquivo EFD (.txt)", type="txt")
         
         if uploaded_file is not None:
-            # Lê o arquivo como string
-            stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
-            content = stringio.read()
-            
-            # Divide o conteúdo em linhas
-            lines = content.split('\n')
-            
-            # Filtra as linhas
-            filtered_lines = []
-            for line in lines:
-                # Remove linhas em branco ou que contenham apenas '-'
-                stripped_line = line.strip()
-                if stripped_line and not stripped_line.startswith('----------------'):
-                    filtered_lines.append(line)
-            
-            # Junta as linhas filtradas
-            filtered_content = '\n'.join(filtered_lines)
-            
-            # Mostra pré-visualização
-            st.subheader("Pré-visualização do arquivo processado")
-            st.code(filtered_content[:1000] + ("..." if len(filtered_content) > 1000 else ""), language="text")
-            
-            # Botão de download
-            st.download_button(
-                label="⬇️ Baixar arquivo processado",
-                data=filtered_content,
-                file_name="EFD_processado.txt",
-                mime="text/plain",
-                key="download_processed"
-            )
+            try:
+                # Lê o arquivo como string
+                stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
+                content = stringio.read()
+                
+                # Divide o conteúdo em linhas
+                lines = content.split('\n')
+                
+                # Filtra as linhas
+                filtered_lines = []
+                for line in lines:
+                    # Remove linhas em branco ou que contenham apenas '-'
+                    stripped_line = line.strip()
+                    if stripped_line and not stripped_line.startswith('----------------'):
+                        filtered_lines.append(line)
+                
+                # Junta as linhas filtradas
+                filtered_content = '\n'.join(filtered_lines)
+                
+                # Mostra pré-visualização
+                st.subheader("Pré-visualização do arquivo processado")
+                st.code(filtered_content[:1000] + ("..." if len(filtered_content) > 1000 else ""), language="text")
+                
+                # Botão de download
+                st.download_button(
+                    label="⬇️ Baixar arquivo processado",
+                    data=filtered_content,
+                    file_name="EFD_processado.txt",
+                    mime="text/plain",
+                    key="download_processed"
+                )
+            except Exception as e:
+                st.error(f"Erro ao processar arquivo: {e}")
         
         st.markdown('</div>', unsafe_allow_html=True)
     
@@ -548,71 +599,80 @@ def show_charts():
 
     with tab1:
         if not st.session_state.df_atividades.empty and 'Status' in st.session_state.df_atividades.columns:
-            status_counts = st.session_state.df_atividades['Status'].value_counts().reset_index()
-            fig_status = px.pie(
-                status_counts, 
-                values='count', 
-                names='Status',
-                title='Distribuição por Status',
-                color='Status',
-                color_discrete_map={
-                    'Pendente': '#ffc107',
-                    'Em Andamento': '#007bff',
-                    'Finalizado': '#28a745',
-                    'Fechado': '#6c757d'
-                }
-            )
-            st.plotly_chart(fig_status, use_container_width=True)
-
-    with tab2:
-        if not st.session_state.df_atividades.empty and 'Dificuldade' in st.session_state.df_atividades.columns:
-            dificuldade_counts = st.session_state.df_atividades['Dificuldade'].value_counts().reset_index()
-            fig_dificuldade = px.bar(
-                dificuldade_counts,
-                x='Dificuldade',
-                y='count',
-                title='Distribuição por Nível de Dificuldade',
-                color='Dificuldade',
-                color_discrete_map={
-                    'Baixa': '#28a745',
-                    'Média': '#ffc107',
-                    'Alta': '#dc3545'
-                }
-            )
-            st.plotly_chart(fig_dificuldade, use_container_width=True)
-
-    with tab3:
-        if not st.session_state.df_atividades.empty and 'Prazo' in st.session_state.df_atividades.columns:
-            prazo_df = st.session_state.df_atividades.copy()
-            prazo_df = prazo_df.dropna(subset=['Prazo'])
-            
-            if not prazo_df.empty:
-                prazo_df['Prazo Formatado'] = prazo_df['Prazo'].dt.strftime('%d/%m/%Y')
-                prazo_df['Data Início Visual'] = prazo_df['DataInicio'].fillna(prazo_df['Prazo'] - timedelta(days=1))
-                
-                fig_prazo = px.timeline(
-                    prazo_df,
-                    x_start="Data Início Visual",
-                    x_end="Prazo",
-                    y="Obrigacao",
-                    color="Status",
-                    title='Linha do Tempo das Atividades',
+            try:
+                status_counts = st.session_state.df_atividades['Status'].value_counts().reset_index()
+                fig_status = px.pie(
+                    status_counts, 
+                    values='count', 
+                    names='Status',
+                    title='Distribuição por Status',
+                    color='Status',
                     color_discrete_map={
                         'Pendente': '#ffc107',
                         'Em Andamento': '#007bff',
                         'Finalizado': '#28a745',
                         'Fechado': '#6c757d'
-                    },
-                    hover_name="Obrigacao",
-                    hover_data={
-                        "Status": True,
-                        "Dificuldade": True,
-                        "Prazo Formatado": True,
-                        "Data Início Visual": False
                     }
                 )
-                fig_prazo.update_yaxes(autorange="reversed")
-                st.plotly_chart(fig_prazo, use_container_width=True)
+                st.plotly_chart(fig_status, use_container_width=True)
+            except Exception as e:
+                st.error(f"Erro ao gerar gráfico de status: {e}")
+
+    with tab2:
+        if not st.session_state.df_atividades.empty and 'Dificuldade' in st.session_state.df_atividades.columns:
+            try:
+                dificuldade_counts = st.session_state.df_atividades['Dificuldade'].value_counts().reset_index()
+                fig_dificuldade = px.bar(
+                    dificuldade_counts,
+                    x='Dificuldade',
+                    y='count',
+                    title='Distribuição por Nível de Dificuldade',
+                    color='Dificuldade',
+                    color_discrete_map={
+                        'Baixa': '#28a745',
+                        'Média': '#ffc107',
+                        'Alta': '#dc3545'
+                    }
+                )
+                st.plotly_chart(fig_dificuldade, use_container_width=True)
+            except Exception as e:
+                st.error(f"Erro ao gerar gráfico de dificuldade: {e}")
+
+    with tab3:
+        if not st.session_state.df_atividades.empty and 'Prazo' in st.session_state.df_atividades.columns:
+            try:
+                prazo_df = st.session_state.df_atividades.copy()
+                prazo_df = prazo_df.dropna(subset=['Prazo'])
+                
+                if not prazo_df.empty:
+                    prazo_df['Prazo Formatado'] = prazo_df['Prazo'].dt.strftime('%d/%m/%Y')
+                    prazo_df['Data Início Visual'] = prazo_df['DataInicio'].fillna(prazo_df['Prazo'] - timedelta(days=1))
+                    
+                    fig_prazo = px.timeline(
+                        prazo_df,
+                        x_start="Data Início Visual",
+                        x_end="Prazo",
+                        y="Obrigacao",
+                        color="Status",
+                        title='Linha do Tempo das Atividades',
+                        color_discrete_map={
+                            'Pendente': '#ffc107',
+                            'Em Andamento': '#007bff',
+                            'Finalizado': '#28a745',
+                            'Fechado': '#6c757d'
+                        },
+                        hover_name="Obrigacao",
+                        hover_data={
+                            "Status": True,
+                            "Dificuldade": True,
+                            "Prazo Formatado": True,
+                            "Data Início Visual": False
+                        }
+                    )
+                    fig_prazo.update_yaxes(autorange="reversed")
+                    st.plotly_chart(fig_prazo, use_container_width=True)
+            except Exception as e:
+                st.error(f"Erro ao gerar gráfico de prazos: {e}")
 
 def show_activities_table():
     """Mostra a tabela de atividades com filtros."""
@@ -633,30 +693,33 @@ def show_activities_table():
             orgao_options = ["Todos"] + list(st.session_state.df_atividades['OrgaoResponsavel'].unique())
             orgao_filter = st.selectbox("Órgão Responsável", orgao_options)
 
-    filtered_df = st.session_state.df_atividades.copy()
-    
-    if status_filter != "Todos":
-        filtered_df = filtered_df[filtered_df['Status'] == status_filter]
-    if difficulty_filter != "Todos":
-        filtered_df = filtered_df[filtered_df['Dificuldade'] == difficulty_filter]
-    if orgao_filter != "Todos":
-        filtered_df = filtered_df[filtered_df['OrgaoResponsavel'] == orgao_filter]
-    
-    filtered_df['Dias Restantes'] = filtered_df.apply(calculate_days_remaining, axis=1)
+    try:
+        filtered_df = st.session_state.df_atividades.copy()
+        
+        if status_filter != "Todos":
+            filtered_df = filtered_df[filtered_df['Status'] == status_filter]
+        if difficulty_filter != "Todos":
+            filtered_df = filtered_df[filtered_df['Dificuldade'] == difficulty_filter]
+        if orgao_filter != "Todos":
+            filtered_df = filtered_df[filtered_df['OrgaoResponsavel'] == orgao_filter]
+        
+        filtered_df['Dias Restantes'] = filtered_df.apply(calculate_days_remaining, axis=1)
 
-    display_df = filtered_df.copy()
-    display_df['Status'] = display_df['Status'].apply(apply_status_style)
-    display_df['Dificuldade'] = display_df['Dificuldade'].apply(apply_difficulty_style)
-    
-    for col in ['Prazo', 'DataInicio', 'DataConclusao']:
-        display_df[col] = display_df[col].dt.strftime('%d/%m/%Y').replace({pd.NaT: ''})
+        display_df = filtered_df.copy()
+        display_df['Status'] = display_df['Status'].apply(apply_status_style)
+        display_df['Dificuldade'] = display_df['Dificuldade'].apply(apply_difficulty_style)
+        
+        for col in ['Prazo', 'DataInicio', 'DataConclusao']:
+            display_df[col] = display_df[col].dt.strftime('%d/%m/%Y').replace({pd.NaT: ''})
 
-    cols_to_display = [
-        'Obrigacao', 'Descricao', 'Periodicidade', 'OrgaoResponsavel',
-        'DataLimite', 'Status', 'Dificuldade', 'Prazo', 'Dias Restantes'
-    ]
-    
-    st.write(display_df[cols_to_display].to_html(escape=False, index=False), unsafe_allow_html=True)
+        cols_to_display = [
+            'Obrigacao', 'Descricao', 'Periodicidade', 'OrgaoResponsavel',
+            'DataLimite', 'Status', 'Dificuldade', 'Prazo', 'Dias Restantes'
+        ]
+        
+        st.write(display_df[cols_to_display].to_html(escape=False, index=False), unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"Erro ao exibir tabela de atividades: {e}")
 
 def show_add_activity_form():
     """Mostra o formulário para adicionar nova atividade."""
@@ -705,54 +768,57 @@ def show_edit_activity_form():
             st.info("Nenhuma atividade para editar. Adicione atividades ou habilite um novo mês.")
             return
 
-        atividade_selecionada = st.selectbox(
-            "Selecione a atividade para editar",
-            st.session_state.df_atividades['Obrigacao'].unique()
-        )
-
-        atividade = st.session_state.df_atividades[
-            st.session_state.df_atividades['Obrigacao'] == atividade_selecionada
-        ].iloc[0]
-
-        col1, col2 = st.columns(2)
-        with col1:
-            novo_status = st.selectbox(
-                "Novo Status",
-                ["Pendente", "Em Andamento", "Finalizado", "Fechado"],
-                index=["Pendente", "Em Andamento", "Finalizado", "Fechado"].index(atividade['Status'])
-            )
-        with col2:
-            novo_prazo = st.date_input(
-                "Novo Prazo Final",
-                value=atividade['Prazo'].date() if pd.notna(atividade['Prazo']) else datetime.now().date()
+        try:
+            atividade_selecionada = st.selectbox(
+                "Selecione a atividade para editar",
+                st.session_state.df_atividades['Obrigacao'].unique()
             )
 
-        if st.button("Atualizar Atividade"):
-            updates = {}
-            
-            if novo_status != atividade['Status']:
-                updates['Status'] = novo_status
+            atividade = st.session_state.df_atividades[
+                st.session_state.df_atividades['Obrigacao'] == atividade_selecionada
+            ].iloc[0]
+
+            col1, col2 = st.columns(2)
+            with col1:
+                novo_status = st.selectbox(
+                    "Novo Status",
+                    ["Pendente", "Em Andamento", "Finalizado", "Fechado"],
+                    index=["Pendente", "Em Andamento", "Finalizado", "Fechado"].index(atividade['Status'])
+                )
+            with col2:
+                novo_prazo = st.date_input(
+                    "Novo Prazo Final",
+                    value=atividade['Prazo'].date() if pd.notna(atividade['Prazo']) else datetime.now().date()
+                )
+
+            if st.button("Atualizar Atividade"):
+                updates = {}
                 
-                if novo_status == "Em Andamento" and pd.isna(atividade['DataInicio']):
-                    updates['DataInicio'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                elif novo_status != "Em Andamento" and pd.notna(atividade['DataInicio']):
-                    updates['DataInicio'] = None
+                if novo_status != atividade['Status']:
+                    updates['Status'] = novo_status
+                    
+                    if novo_status == "Em Andamento" and pd.isna(atividade['DataInicio']):
+                        updates['DataInicio'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    elif novo_status != "Em Andamento" and pd.notna(atividade['DataInicio']):
+                        updates['DataInicio'] = None
+                    
+                    if novo_status == "Finalizado":
+                        updates['DataConclusao'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    elif novo_status != "Finalizado" and pd.notna(atividade['DataConclusao']):
+                        updates['DataConclusao'] = None
                 
-                if novo_status == "Finalizado":
-                    updates['DataConclusao'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                elif novo_status != "Finalizado" and pd.notna(atividade['DataConclusao']):
-                    updates['DataConclusao'] = None
-            
-            novo_prazo_dt = datetime.combine(novo_prazo, datetime.min.time())
-            if pd.isna(atividade['Prazo']) or novo_prazo_dt != atividade['Prazo']:
-                updates['Prazo'] = novo_prazo_dt.strftime('%Y-%m-%d %H:%M:%S')
-            
-            if updates:
-                if update_activity_in_db(atividade['id'], updates):
-                    st.success("✅ Atividade atualizada com sucesso!")
-                    refresh_data()
-            else:
-                st.info("Nenhuma alteração detectada para atualizar.")
+                novo_prazo_dt = datetime.combine(novo_prazo, datetime.min.time())
+                if pd.isna(atividade['Prazo']) or novo_prazo_dt != atividade['Prazo']:
+                    updates['Prazo'] = novo_prazo_dt.strftime('%Y-%m-%d %H:%M:%S')
+                
+                if updates:
+                    if update_activity_in_db(atividade['id'], updates):
+                        st.success("✅ Atividade atualizada com sucesso!")
+                        refresh_data()
+                else:
+                    st.info("Nenhuma alteração detectada para atualizar.")
+        except Exception as e:
+            st.error(f"Erro ao editar atividade: {e}")
 
 def show_close_period_section():
     """Mostra a seção para fechar o período atual."""
@@ -763,31 +829,65 @@ def show_close_period_section():
         st.info("Nenhuma atividade para fechar. Habilite um mês primeiro.")
         return
 
-    todas_finalizadas = all(st.session_state.df_atividades['Status'].isin(["Finalizado", "Fechado"]))
+    try:
+        todas_finalizadas = all(st.session_state.df_atividades['Status'].isin(["Finalizado", "Fechado"]))
 
-    if todas_finalizadas:
-        st.success(f"🎉 Todas as atividades para {st.session_state.mes_ano_referencia} estão finalizadas ou fechadas!")
-        
-        if st.button("Fechar Período e Habilitar Próximo Mês"):
-            conn = create_connection()
-            if conn:
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        UPDATE atividades
-                        SET Status = 'Fechado'
-                        WHERE MesAnoReferencia = ? AND Status = 'Finalizado'
-                    """, (st.session_state.mes_ano_referencia,))
-                    conn.commit()
-                except sqlite3.Error as e:
-                    st.error(f"Erro ao fechar período: {e}")
-                finally:
-                    conn.close()
+        if todas_finalizadas:
+            st.success(f"🎉 Todas as atividades para {st.session_state.mes_ano_referencia} estão finalizadas ou fechadas!")
+            
+            if st.button("Fechar Período e Habilitar Próximo Mês"):
+                conn = create_connection()
+                if conn:
+                    try:
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            UPDATE atividades
+                            SET Status = 'Fechado'
+                            WHERE MesAnoReferencia = ? AND Status = 'Finalizado'
+                        """, (st.session_state.mes_ano_referencia,))
+                        conn.commit()
+                    except sqlite3.Error as e:
+                        st.error(f"Erro ao fechar período: {e}")
+                    finally:
+                        conn.close()
 
-            st.session_state.mes_ano_referencia = get_next_month_year(st.session_state.mes_ano_referencia)
-            refresh_data()
+                st.session_state.mes_ano_referencia = get_next_month_year(st.session_state.mes_ano_referencia)
+                refresh_data()
 
-            if st.session_state.df_atividades.empty:
+                if st.session_state.df_atividades.empty:
+                    atividades = load_initial_data_template()
+                    for atividade in atividades:
+                        prazo = calculate_deadline(atividade['Data Limite'], st.session_state.mes_ano_referencia)
+                        atividade.update({
+                            'Prazo': prazo.strftime('%Y-%m-%d %H:%M:%S') if prazo else None,
+                            'MesAnoReferencia': st.session_state.mes_ano_referencia,
+                            'Data Início': None,
+                            'Data Conclusão': None
+                        })
+                    
+                    for atividade in atividades:
+                        add_activity_to_db(atividade)
+                    
+                    refresh_data()
+                    st.success("Atividades padrão habilitadas para o novo mês!")
+        else:
+            st.warning(f"Ainda há atividades pendentes ou em andamento para {st.session_state.mes_ano_referencia}. Finalize-as para fechar o período.")
+    except Exception as e:
+        st.error(f"Erro ao fechar período: {e}")
+
+def show_atividades_fiscais():
+    """Mostra a interface de controle de atividades fiscais."""
+    st.markdown('<div class="header animate-fadeIn"><h1>📊 Controle de Atividades Fiscais</h1></div>', unsafe_allow_html=True)
+
+    # Inicialização
+    create_table()
+    initialize_session_state()
+
+    # Habilitar mês se não houver dados
+    if st.session_state.df_atividades.empty:
+        st.warning(f"Não há atividades cadastradas para {st.session_state.mes_ano_referencia}.")
+        if st.button(f"Habilitar Mês {st.session_state.mes_ano_referencia}"):
+            try:
                 atividades = load_initial_data_template()
                 for atividade in atividades:
                     prazo = calculate_deadline(atividade['Data Limite'], st.session_state.mes_ano_referencia)
@@ -802,37 +902,9 @@ def show_close_period_section():
                     add_activity_to_db(atividade)
                 
                 refresh_data()
-                st.success("Atividades padrão habilitadas para o novo mês!")
-    else:
-        st.warning(f"Ainda há atividades pendentes ou em andamento para {st.session_state.mes_ano_referencia}. Finalize-as para fechar o período.")
-
-def show_atividades_fiscais():
-    """Mostra a interface de controle de atividades fiscais."""
-    st.markdown('<div class="header animate-fadeIn"><h1>📊 Controle de Atividades Fiscais</h1></div>', unsafe_allow_html=True)
-
-    # Inicialização
-    create_table()
-    initialize_session_state()
-
-    # Habilitar mês se não houver dados
-    if st.session_state.df_atividades.empty:
-        st.warning(f"Não há atividades cadastradas para {st.session_state.mes_ano_referencia}.")
-        if st.button(f"Habilitar Mês {st.session_state.mes_ano_referencia}"):
-            atividades = load_initial_data_template()
-            for atividade in atividades:
-                prazo = calculate_deadline(atividade['Data Limite'], st.session_state.mes_ano_referencia)
-                atividade.update({
-                    'Prazo': prazo.strftime('%Y-%m-%d %H:%M:%S') if prazo else None,
-                    'MesAnoReferencia': st.session_state.mes_ano_referencia,
-                    'Data Início': None,
-                    'Data Conclusão': None
-                })
-            
-            for atividade in atividades:
-                add_activity_to_db(atividade)
-            
-            refresh_data()
-            st.success("Atividades padrão habilitadas com sucesso!")
+                st.success("Atividades padrão habilitadas com sucesso!")
+            except Exception as e:
+                st.error(f"Erro ao habilitar mês: {e}")
 
     # Botão para forçar atualização
     if st.button("🔄 Atualizar Dados"):
@@ -853,14 +925,21 @@ def show_atividades_fiscais():
 
 def main():
     """Função principal que orquestra a aplicação."""
-    initialize_session_state()
-    
-    if st.session_state.current_page == 'menu':
-        show_menu()
-    elif st.session_state.current_page == 'atividades':
-        show_atividades_fiscais()
-    elif st.session_state.current_page == 'conversor':
-        show_conversor_efd()
+    try:
+        initialize_session_state()
+        
+        if st.session_state.current_page == 'menu':
+            show_menu()
+        elif st.session_state.current_page == 'atividades':
+            show_atividades_fiscais()
+        elif st.session_state.current_page == 'conversor':
+            show_conversor_efd()
+    except Exception as e:
+        st.error(f"Erro crítico na aplicação: {e}")
+        st.write("Reiniciando o sistema...")
+        st.session_state.clear()
+        initialize_session_state()
+        st.experimental_rerun()
 
 if __name__ == "__main__":
     main()
