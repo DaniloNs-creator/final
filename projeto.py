@@ -12,10 +12,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# CSS personalizado (mantido igual)
+# CSS personalizado
 st.markdown("""
 <style>
-    /* Seu CSS permanece exatamente igual */
     :root {
         --primary-color: #4a8fe7;
         --secondary-color: #f0f2f6;
@@ -25,7 +24,80 @@ st.markdown("""
         --dark-color: #343a40;
         --light-color: #f8f9fa;
     }
-    /* ... (restante do seu CSS) ... */
+    
+    .header {
+        background-color: var(--primary-color);
+        color: white;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+    }
+    
+    .card {
+        background-color: white;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    }
+    
+    .status-badge {
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+        font-weight: 600;
+    }
+    
+    .status-pendente {
+        background-color: var(--warning-color);
+        color: var(--dark-color);
+    }
+    
+    .status-andamento {
+        background-color: var(--primary-color);
+        color: white;
+    }
+    
+    .status-finalizado {
+        background-color: var(--success-color);
+        color: white;
+    }
+    
+    .status-fechado {
+        background-color: var(--light-color);
+        color: var(--dark-color);
+    }
+    
+    .dificuldade-badge {
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+        font-weight: 600;
+    }
+    
+    .dificuldade-baixa {
+        background-color: var(--success-color);
+        color: white;
+    }
+    
+    .dificuldade-media {
+        background-color: var(--warning-color);
+        color: var(--dark-color);
+    }
+    
+    .dificuldade-alta {
+        background-color: var(--danger-color);
+        color: white;
+    }
+    
+    .animate-fadeIn {
+        animation: fadeIn 0.5s ease-in-out;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -182,7 +254,30 @@ def load_initial_data_template():
             "Data Início": None,
             "Data Conclusão": None
         },
-        # ... (adicionar outras atividades conforme necessário)
+        {
+            "Obrigação": "DCTF",
+            "Descrição": "Declaração de Débitos e Créditos Tributários Federais",
+            "Periodicidade": "Mensal",
+            "Órgão Responsável": "RFB",
+            "Data Limite": "Até o dia 15 do mês subsequente",
+            "Status": "Pendente",
+            "Dificuldade": "Alta",
+            "Prazo": None,
+            "Data Início": None,
+            "Data Conclusão": None
+        },
+        {
+            "Obrigação": "EFD Contribuições",
+            "Descrição": "Escrituração Fiscal Digital de Contribuições",
+            "Periodicidade": "Mensal",
+            "Órgão Responsável": "RFB",
+            "Data Limite": "Até o dia 15 do mês subsequente",
+            "Status": "Pendente",
+            "Dificuldade": "Média",
+            "Prazo": None,
+            "Data Início": None,
+            "Data Conclusão": None
+        }
     ]
 
 def get_next_month_year(current_month_year):
@@ -206,7 +301,9 @@ def calculate_deadline(data_limite_text, mes_ano_referencia):
     if "dia 10 do mês subsequente" in data_limite_text:
         date_for_calc = datetime(ref_year, ref_month, 1) + pd.DateOffset(months=1)
         return date_for_calc.replace(day=10)
-    # ... (adicionar outras condições conforme necessário)
+    elif "dia 15 do mês subsequente" in data_limite_text:
+        date_for_calc = datetime(ref_year, ref_month, 1) + pd.DateOffset(months=1)
+        return date_for_calc.replace(day=15)
     return datetime(ref_year, ref_month, 1) + timedelta(days=90)
 
 def apply_status_style(status):
