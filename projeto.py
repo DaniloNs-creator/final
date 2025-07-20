@@ -4,10 +4,11 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import sqlite3
 import numpy as np
+import io
 
 # Configuração inicial da página
 st.set_page_config(
-    page_title="Controle de Atividades Fiscais - HÄFELE BRASIL",
+    page_title="Sistema Fiscal - HÄFELE BRASIL",
     page_icon="📊",
     layout="wide"
 )
@@ -23,6 +24,7 @@ st.markdown("""
         --danger-color: #dc3545;
         --dark-color: #343a40;
         --light-color: #f8f9fa;
+        --menu-color: #2c3e50;
     }
     
     .header {
@@ -31,14 +33,51 @@ st.markdown("""
         padding: 1rem;
         border-radius: 0.5rem;
         margin-bottom: 1rem;
+        text-align: center;
     }
     
     .card {
         background-color: white;
         border-radius: 0.5rem;
-        padding: 1rem;
-        margin-bottom: 1rem;
-        box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+        padding: 2rem;
+        margin: 1rem;
+        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+        transition: all 0.3s ease;
+        height: 200px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+    }
+    
+    .card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 1rem 2rem rgba(0, 0, 0, 0.2);
+    }
+    
+    .menu-container {
+        display: flex;
+        justify-content: space-around;
+        flex-wrap: wrap;
+        margin: 2rem 0;
+    }
+    
+    .menu-button {
+        background-color: var(--menu-color);
+        color: white;
+        border: none;
+        padding: 1rem 2rem;
+        font-size: 1.2rem;
+        border-radius: 0.5rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        width: 100%;
+        text-align: center;
+    }
+    
+    .menu-button:hover {
+        background-color: var(--primary-color);
+        transform: scale(1.05);
     }
     
     .status-badge {
@@ -95,8 +134,34 @@ st.markdown("""
     }
     
     @keyframes fadeIn {
-        from { opacity: 0; }
-        to { opacity: 1; }
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .converter-container {
+        background-color: white;
+        border-radius: 0.5rem;
+        padding: 2rem;
+        margin: 2rem auto;
+        max-width: 800px;
+        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.1);
+        animation: fadeIn 0.5s ease-out;
+    }
+    
+    .download-btn {
+        background-color: var(--success-color);
+        color: white;
+        border: none;
+        padding: 0.5rem 1rem;
+        border-radius: 0.25rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        margin-top: 1rem;
+    }
+    
+    .download-btn:hover {
+        background-color: #218838;
+        transform: translateY(-2px);
     }
     
     /* Estilo para a tabela */
@@ -113,6 +178,23 @@ st.markdown("""
     
     tr:hover {
         background-color: #f5f5f5;
+    }
+    
+    /* Efeito de loading */
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    .loading {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid rgba(255,255,255,.3);
+        border-radius: 50%;
+        border-top-color: #fff;
+        animation: spin 1s ease-in-out infinite;
+        margin-right: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -334,11 +416,90 @@ def initialize_session_state():
     
     if 'force_refresh' not in st.session_state:
         st.session_state.force_refresh = False
+    
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = 'menu'
 
 def refresh_data():
     """Força o recarregamento dos dados do banco."""
     st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
     st.session_state.force_refresh = False
+
+def show_menu():
+    """Mostra o menu inicial com os dois containers."""
+    st.markdown('<div class="header animate-fadeIn"><h1>📊 Sistema Fiscal - HÄFELE BRASIL</h1></div>', unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="menu-container animate-fadeIn">
+        <div class="card">
+            <h3>Controle de Atividades Fiscais</h3>
+            <button class="menu-button" onclick="window.streamlitApi.setComponentValue('atividades')">
+                Acessar
+            </button>
+        </div>
+        <div class="card">
+            <h3>Conversor EFD</h3>
+            <button class="menu-button" onclick="window.streamlitApi.setComponentValue('conversor')">
+                Acessar
+            </button>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Botões funcionais para Streamlit
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Controle de Atividades Fiscais"):
+            st.session_state.current_page = 'atividades'
+    with col2:
+        if st.button("Conversor EFD"):
+            st.session_state.current_page = 'conversor'
+
+def show_conversor_efd():
+    """Mostra a interface do conversor EFD."""
+    st.markdown('<div class="header animate-fadeIn"><h1>🔄 Conversor EFD</h1></div>', unsafe_allow_html=True)
+    
+    with st.container():
+        st.markdown('<div class="converter-container">', unsafe_allow_html=True)
+        
+        uploaded_file = st.file_uploader("Faça upload do arquivo EFD (.txt)", type="txt")
+        
+        if uploaded_file is not None:
+            # Lê o arquivo como string
+            stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
+            content = stringio.read()
+            
+            # Divide o conteúdo em linhas
+            lines = content.split('\n')
+            
+            # Filtra as linhas
+            filtered_lines = []
+            for line in lines:
+                # Remove linhas em branco ou que contenham apenas '-'
+                stripped_line = line.strip()
+                if stripped_line and not stripped_line.startswith('----------------'):
+                    filtered_lines.append(line)
+            
+            # Junta as linhas filtradas
+            filtered_content = '\n'.join(filtered_lines)
+            
+            # Mostra pré-visualização
+            st.subheader("Pré-visualização do arquivo processado")
+            st.code(filtered_content[:1000] + ("..." if len(filtered_content) > 1000 else ""), language="text")
+            
+            # Botão de download
+            st.download_button(
+                label="⬇️ Baixar arquivo processado",
+                data=filtered_content,
+                file_name="EFD_processado.txt",
+                mime="text/plain",
+                key="download_processed"
+            )
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    if st.button("Voltar ao Menu"):
+        st.session_state.current_page = 'menu'
 
 def show_navigation():
     """Mostra a navegação entre meses."""
@@ -645,9 +806,9 @@ def show_close_period_section():
     else:
         st.warning(f"Ainda há atividades pendentes ou em andamento para {st.session_state.mes_ano_referencia}. Finalize-as para fechar o período.")
 
-def main():
-    """Função principal que orquestra a aplicação."""
-    st.markdown('<div class="header animate-fadeIn"><h1>📊 Controle de Atividades Fiscais - HÄFELE BRASIL</h1></div>', unsafe_allow_html=True)
+def show_atividades_fiscais():
+    """Mostra a interface de controle de atividades fiscais."""
+    st.markdown('<div class="header animate-fadeIn"><h1>📊 Controle de Atividades Fiscais</h1></div>', unsafe_allow_html=True)
 
     # Inicialização
     create_table()
@@ -686,6 +847,20 @@ def main():
     show_add_activity_form()
     show_edit_activity_form()
     show_close_period_section()
+    
+    if st.button("Voltar ao Menu"):
+        st.session_state.current_page = 'menu'
+
+def main():
+    """Função principal que orquestra a aplicação."""
+    initialize_session_state()
+    
+    if st.session_state.current_page == 'menu':
+        show_menu()
+    elif st.session_state.current_page == 'atividades':
+        show_atividades_fiscais()
+    elif st.session_state.current_page == 'conversor':
+        show_conversor_efd()
 
 if __name__ == "__main__":
     main()
