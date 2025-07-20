@@ -5,6 +5,10 @@ from datetime import datetime, timedelta
 import sqlite3
 import numpy as np
 
+# Configuração para evitar erros de inotify
+st.runtime.legacy_caching.clear_cache()
+st.set_option('deprecation.showfileUploaderEncoding', False)
+
 # Configuração inicial da página
 st.set_page_config(
     page_title="Controle de Atividades Fiscais - HÄFELE BRASIL",
@@ -393,71 +397,80 @@ def show_charts():
     tab1, tab2, tab3 = st.tabs(["Status", "Dificuldade", "Prazo"])
 
     with tab1:
-        status_counts = st.session_state.df_atividades['Status'].value_counts().reset_index()
-        fig_status = px.pie(
-            status_counts, 
-            values='count', 
-            names='Status',
-            title='Distribuição por Status',
-            color='Status',
-            color_discrete_map={
-                'Pendente': '#ffc107',
-                'Em Andamento': '#007bff',
-                'Finalizado': '#28a745',
-                'Fechado': '#6c757d'
-            }
-        )
-        st.plotly_chart(fig_status, use_container_width=True)
-
-    with tab2:
-        dificuldade_counts = st.session_state.df_atividades['Dificuldade'].value_counts().reset_index()
-        fig_dificuldade = px.bar(
-            dificuldade_counts,
-            x='Dificuldade',
-            y='count',
-            title='Distribuição por Nível de Dificuldade',
-            color='Dificuldade',
-            color_discrete_map={
-                'Baixa': '#28a745',
-                'Média': '#ffc107',
-                'Alta': '#dc3545'
-            }
-        )
-        st.plotly_chart(fig_dificuldade, use_container_width=True)
-
-    with tab3:
-        prazo_df = st.session_state.df_atividades.copy()
-        prazo_df = prazo_df.dropna(subset=['Prazo'])
-        
-        if not prazo_df.empty:
-            prazo_df['Prazo Formatado'] = prazo_df['Prazo'].dt.strftime('%d/%m/%Y')
-            prazo_df['Data Início Visual'] = prazo_df['DataInicio'].fillna(prazo_df['Prazo'] - timedelta(days=1))
-            
-            fig_prazo = px.timeline(
-                prazo_df,
-                x_start="Data Início Visual",
-                x_end="Prazo",
-                y="Obrigacao",
-                color="Status",
-                title='Linha do Tempo das Atividades',
+        if not st.session_state.df_atividades.empty and 'Status' in st.session_state.df_atividades.columns:
+            status_counts = st.session_state.df_atividades['Status'].value_counts().reset_index()
+            fig_status = px.pie(
+                status_counts, 
+                values='count', 
+                names='Status',
+                title='Distribuição por Status',
+                color='Status',
                 color_discrete_map={
                     'Pendente': '#ffc107',
                     'Em Andamento': '#007bff',
                     'Finalizado': '#28a745',
                     'Fechado': '#6c757d'
-                },
-                hover_name="Obrigacao",
-                hover_data={
-                    "Status": True,
-                    "Dificuldade": True,
-                    "Prazo Formatado": True,
-                    "Data Início Visual": False
                 }
             )
-            fig_prazo.update_yaxes(autorange="reversed")
-            st.plotly_chart(fig_prazo, use_container_width=True)
+            st.plotly_chart(fig_status, use_container_width=True)
         else:
-            st.info("Não há atividades com prazo definido para exibir na linha do tempo.")
+            st.info("Não há dados de status para exibir.")
+
+    with tab2:
+        if not st.session_state.df_atividades.empty and 'Dificuldade' in st.session_state.df_atividades.columns:
+            dificuldade_counts = st.session_state.df_atividades['Dificuldade'].value_counts().reset_index()
+            fig_dificuldade = px.bar(
+                dificuldade_counts,
+                x='Dificuldade',
+                y='count',
+                title='Distribuição por Nível de Dificuldade',
+                color='Dificuldade',
+                color_discrete_map={
+                    'Baixa': '#28a745',
+                    'Média': '#ffc107',
+                    'Alta': '#dc3545'
+                }
+            )
+            st.plotly_chart(fig_dificuldade, use_container_width=True)
+        else:
+            st.info("Não há dados de dificuldade para exibir.")
+
+    with tab3:
+        if not st.session_state.df_atividades.empty and 'Prazo' in st.session_state.df_atividades.columns:
+            prazo_df = st.session_state.df_atividades.copy()
+            prazo_df = prazo_df.dropna(subset=['Prazo'])
+            
+            if not prazo_df.empty:
+                prazo_df['Prazo Formatado'] = prazo_df['Prazo'].dt.strftime('%d/%m/%Y')
+                prazo_df['Data Início Visual'] = prazo_df['DataInicio'].fillna(prazo_df['Prazo'] - timedelta(days=1))
+                
+                fig_prazo = px.timeline(
+                    prazo_df,
+                    x_start="Data Início Visual",
+                    x_end="Prazo",
+                    y="Obrigacao",
+                    color="Status",
+                    title='Linha do Tempo das Atividades',
+                    color_discrete_map={
+                        'Pendente': '#ffc107',
+                        'Em Andamento': '#007bff',
+                        'Finalizado': '#28a745',
+                        'Fechado': '#6c757d'
+                    },
+                    hover_name="Obrigacao",
+                    hover_data={
+                        "Status": True,
+                        "Dificuldade": True,
+                        "Prazo Formatado": True,
+                        "Data Início Visual": False
+                    }
+                )
+                fig_prazo.update_yaxes(autorange="reversed")
+                st.plotly_chart(fig_prazo, use_container_width=True)
+            else:
+                st.info("Não há atividades com prazo definido para exibir na linha do tempo.")
+        else:
+            st.info("Não há dados de prazos para exibir.")
 
 def show_activities_table():
     """Mostra a tabela de atividades com filtros."""
