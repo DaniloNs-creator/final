@@ -156,26 +156,26 @@ def inject_css():
 # Injetar CSS
 inject_css()
 
-# Dados do usuário
+# Dados do usuário - ATUALIZADO com VO2 Max de 183
 user_data = {
     "nome": "Usuário",
     "idade": 28,
     "altura": 1.87,
     "peso": 108,
-    "v02max": 173,
+    "v02max": 183,  # Alterado para 183 conforme solicitado
     "objetivo": "Emagrecimento e Performance no Ciclismo",
     "nivel": "Iniciante",
     "disponibilidade": "6 dias/semana"
 }
 
-# Zonas de frequência cardíaca baseadas no VO2max
+# Zonas de frequência cardíaca baseadas no VO2max de 183
 def calculate_zones(v02max):
     return {
-        "Z1 (Recuperação)": (0.50 * v02max, 0.60 * v02max),
-        "Z2 (Aeróbico)": (0.60 * v02max, 0.70 * v02max),
-        "Z3 (Tempo)": (0.70 * v02max, 0.80 * v02max),
-        "Z4 (Limiar)": (0.80 * v02max, 0.90 * v02max),
-        "Z5 (VO2 Max)": (0.90 * v02max, 1.00 * v02max)
+        "Z1 (Recuperação)": (0.50 * v02max, 0.60 * v02max),  # 92-110 bpm
+        "Z2 (Aeróbico)": (0.60 * v02max, 0.70 * v02max),     # 110-128 bpm
+        "Z3 (Tempo)": (0.70 * v02max, 0.80 * v02max),        # 128-146 bpm
+        "Z4 (Limiar)": (0.80 * v02max, 0.90 * v02max),       # 146-165 bpm
+        "Z5 (VO2 Max)": (0.90 * v02max, 1.00 * v02max)       # 165-183 bpm
     }
 
 zones = calculate_zones(user_data["v02max"])
@@ -214,21 +214,51 @@ diet_plan = {
     }
 }
 
-# Plano de treino de 60 dias começando em 21/07/2025
+# Plano de treino de 60 dias começando em 21/07/2025 com FCs atualizadas
 def generate_workout_plan():
     plan = []
     start_date = datetime(2025, 7, 21).date()
     current_date = start_date
     workout_count = 0
     
-    # Padrão de treino semanal
+    # Padrão de treino semanal com FCs atualizadas para VO2 Max de 183
     workout_pattern = [
-        {"name": "Ciclismo - Endurance", "duration": "1h15min", "zone": "Z2 (Aeróbico)", "desc": "Pedal constante em terreno plano, mantendo FC na Z2"},
-        {"name": "Força - Membros Inferiores", "duration": "1h", "zone": "N/A", "desc": "Agachamento 4x12, Leg Press 4x12, Cadeira Extensora 3x15, Panturrilha 4x20"},
-        {"name": "Ciclismo - Intervalado", "duration": "1h", "zone": "Z4-Z5 (Limiar-VO2)", "desc": "8x (2min Z4 + 2min Z1 recuperação)"},
-        {"name": "Ciclismo - Recuperação Ativa", "duration": "45min", "zone": "Z1 (Recuperação)", "desc": "Pedal leve em terreno plano"},
-        {"name": "Força - Core e Superior", "duration": "1h", "zone": "N/A", "desc": "Flexões 4x12, Remada Curvada 4x12, Prancha 3x1min, Abdominal Supra 3x20"},
-        {"name": "Ciclismo - Longão", "duration": "2h30min", "zone": "Z2-Z3 (Aeróbico-Tempo)", "desc": "Pedal longo com variação de terreno, focando em manter FC"}
+        {   # Segunda-feira
+            "name": "Ciclismo - Endurance", 
+            "duration": "1h15min", 
+            "zone": "Z2 (Aeróbico)", 
+            "desc": "Pedal constante em terreno plano, mantendo FC entre 110-128 bpm"
+        },
+        {   # Terça-feira
+            "name": "Força - Membros Inferiores", 
+            "duration": "1h", 
+            "zone": "N/A", 
+            "desc": "Agachamento 4x12, Leg Press 4x12, Cadeira Extensora 3x15, Panturrilha 4x20"
+        },
+        {   # Quarta-feira
+            "name": "Ciclismo - Intervalado", 
+            "duration": "1h", 
+            "zone": "Z4-Z5 (Limiar-VO2)", 
+            "desc": "8x (2min em 146-183 bpm + 2min recuperação em Z1)"
+        },
+        {   # Quinta-feira
+            "name": "Ciclismo - Recuperação Ativa", 
+            "duration": "45min", 
+            "zone": "Z1 (Recuperação)", 
+            "desc": "Pedal leve em terreno plano, mantendo FC entre 92-110 bpm"
+        },
+        {   # Sexta-feira
+            "name": "Força - Core e Superior", 
+            "duration": "1h", 
+            "zone": "N/A", 
+            "desc": "Flexões 4x12, Remada Curvada 4x12, Prancha 3x1min, Abdominal Supra 3x20"
+        },
+        {   # Sábado
+            "name": "Ciclismo - Longão", 
+            "duration": "2h30min", 
+            "zone": "Z2-Z3 (Aeróbico-Tempo)", 
+            "desc": "Pedal longo com variação de terreno, FC entre 110-146 bpm"
+        }
     ]
     
     # Ajustar duração do longão conforme as semanas avançam
@@ -259,18 +289,18 @@ def generate_workout_plan():
                     "name": "Ciclismo - Longão",
                     "duration": get_long_duration(week_number),
                     "zone": "Z2-Z3 (Aeróbico-Tempo)",
-                    "desc": "Pedal longo com variação de terreno, focando em manter FC"
+                    "desc": f"Pedal longo com variação de terreno, FC entre 110-146 bpm"
                 }
             
-            # Calcular FC Alvo
+            # Calcular FC Alvo com base no VO2 Max de 183
             if "Z1" in workout_type["zone"]:
-                fc_range = f"{int(zones['Z1 (Recuperação)'][0])}-{int(zones['Z1 (Recuperação)'][1])} bpm"
+                fc_range = "92-110 bpm"
             elif "Z2" in workout_type["zone"]:
-                fc_range = f"{int(zones['Z2 (Aeróbico)'][0])}-{int(zones['Z2 (Aeróbico)'][1])} bpm"
+                fc_range = "110-128 bpm"
             elif "Z3" in workout_type["zone"]:
-                fc_range = f"{int(zones['Z3 (Tempo)'][0])}-{int(zones['Z3 (Tempo)'][1])} bpm"
+                fc_range = "128-146 bpm"
             elif "Z4-Z5" in workout_type["zone"]:
-                fc_range = f"{int(zones['Z4 (Limiar)'][0])}-{int(zones['Z5 (VO2 Max)'][1])} bpm"
+                fc_range = "146-183 bpm"
             else:
                 fc_range = "N/A"
             
@@ -296,7 +326,7 @@ def generate_workout_plan():
 st.title("🚴‍♂️ PerformanceFit - Controle de Treinos e Dieta")
 st.markdown("---")
 
-# Sidebar com informações do usuário
+# Sidebar com informações do usuário ATUALIZADAS
 with st.sidebar:
     st.markdown("""
     <div class="user-profile">
@@ -315,7 +345,7 @@ with st.sidebar:
     """.format(**user_data), unsafe_allow_html=True)
     
     st.markdown("---")
-    st.markdown("### Zonas de Frequência Cardíaca")
+    st.markdown("### Zonas de Frequência Cardíaca (VO2 Max: 183 bpm)")
     for zone, (min_fc, max_fc) in zones.items():
         st.markdown(f"**{zone}:** {int(min_fc)}-{int(max_fc)} bpm")
     
