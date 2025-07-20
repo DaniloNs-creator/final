@@ -5,9 +5,6 @@ from datetime import datetime, timedelta
 import sqlite3
 import numpy as np
 
-# Configuração para evitar erros de inotify
-st.set_option('deprecation.showfileUploaderEncoding', False)
-
 # Configuração inicial da página
 st.set_page_config(
     page_title="Controle de Atividades Fiscais - HÄFELE BRASIL",
@@ -100,6 +97,22 @@ st.markdown("""
     @keyframes fadeIn {
         from { opacity: 0; }
         to { opacity: 1; }
+    }
+    
+    /* Estilo para a tabela */
+    table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    
+    th, td {
+        padding: 8px;
+        text-align: left;
+        border-bottom: 1px solid #ddd;
+    }
+    
+    tr:hover {
+        background-color: #f5f5f5;
     }
 </style>
 """, unsafe_allow_html=True)
