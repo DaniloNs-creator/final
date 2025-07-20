@@ -219,80 +219,76 @@ def generate_workout_plan():
     plan = []
     start_date = datetime(2025, 7, 21).date()
     current_date = start_date
+    workout_count = 0
     
-    for week in range(1, 9):  # 8 semanas = ~60 dias
-        for day in range(1, 7):  # 6 dias de treino por semana
-            if day == 1:  # Segunda-feira
-                workout = {
-                    "Dia": current_date.strftime("%d/%m/%Y"),
-                    "Data": current_date,
-                    "Dia da Semana": current_date.strftime("%A"),
-                    "Tipo de Treino": "Ciclismo - Endurance",
-                    "Duração": "1h15min",
-                    "Zona FC": "Z2 (Aeróbico)",
-                    "FC Alvo": f"{int(zones['Z2 (Aeróbico)'][0])}-{int(zones['Z2 (Aeróbico)'][1])} bpm",
-                    "Descrição": "Pedal constante em terreno plano, mantendo FC na Z2"
-                }
-            elif day == 2:  # Terça-feira
-                workout = {
-                    "Dia": current_date.strftime("%d/%m/%Y"),
-                    "Data": current_date,
-                    "Dia da Semana": current_date.strftime("%A"),
-                    "Tipo de Treino": "Força - Membros Inferiores",
-                    "Duração": "1h",
-                    "Zona FC": "N/A",
-                    "FC Alvo": "N/A",
-                    "Descrição": "Agachamento 4x12, Leg Press 4x12, Cadeira Extensora 3x15, Panturrilha 4x20"
-                }
-            elif day == 3:  # Quarta-feira
-                workout = {
-                    "Dia": current_date.strftime("%d/%m/%Y"),
-                    "Data": current_date,
-                    "Dia da Semana": current_date.strftime("%A"),
-                    "Tipo de Treino": "Ciclismo - Intervalado",
-                    "Duração": "1h",
-                    "Zona FC": "Z4-Z5 (Limiar-VO2)",
-                    "FC Alvo": f"{int(zones['Z4 (Limiar)'][0])}-{int(zones['Z5 (VO2 Max)'][1])} bpm",
-                    "Descrição": "8x (2min Z4 + 2min Z1 recuperação)"
-                }
-            elif day == 4:  # Quinta-feira
-                workout = {
-                    "Dia": current_date.strftime("%d/%m/%Y"),
-                    "Data": current_date,
-                    "Dia da Semana": current_date.strftime("%A"),
-                    "Tipo de Treino": "Ciclismo - Recuperação Ativa",
-                    "Duração": "45min",
-                    "Zona FC": "Z1 (Recuperação)",
-                    "FC Alvo": f"{int(zones['Z1 (Recuperação)'][0])}-{int(zones['Z1 (Recuperação)'][1])} bpm",
-                    "Descrição": "Pedal leve em terreno plano"
-                }
-            elif day == 5:  # Sexta-feira
-                workout = {
-                    "Dia": current_date.strftime("%d/%m/%Y"),
-                    "Data": current_date,
-                    "Dia da Semana": current_date.strftime("%A"),
-                    "Tipo de Treino": "Força - Core e Superior",
-                    "Duração": "1h",
-                    "Zona FC": "N/A",
-                    "FC Alvo": "N/A",
-                    "Descrição": "Flexões 4x12, Remada Curvada 4x12, Prancha 3x1min, Abdominal Supra 3x20"
-                }
-            elif day == 6:  # Sábado
-                workout = {
-                    "Dia": current_date.strftime("%d/%m/%Y"),
-                    "Data": current_date,
-                    "Dia da Semana": current_date.strftime("%A"),
-                    "Tipo de Treino": "Ciclismo - Longão",
-                    "Duração": "2h30min" if week < 3 else "3h" if week < 6 else "3h30min",
-                    "Zona FC": "Z2-Z3 (Aeróbico-Tempo)",
-                    "FC Alvo": f"{int(zones['Z2 (Aeróbico)'][0])}-{int(zones['Z3 (Tempo)'][1])} bpm",
-                    "Descrição": "Pedal longo com variação de terreno, focando em manter FC"
+    # Padrão de treino semanal
+    workout_pattern = [
+        {"name": "Ciclismo - Endurance", "duration": "1h15min", "zone": "Z2 (Aeróbico)", "desc": "Pedal constante em terreno plano, mantendo FC na Z2"},
+        {"name": "Força - Membros Inferiores", "duration": "1h", "zone": "N/A", "desc": "Agachamento 4x12, Leg Press 4x12, Cadeira Extensora 3x15, Panturrilha 4x20"},
+        {"name": "Ciclismo - Intervalado", "duration": "1h", "zone": "Z4-Z5 (Limiar-VO2)", "desc": "8x (2min Z4 + 2min Z1 recuperação)"},
+        {"name": "Ciclismo - Recuperação Ativa", "duration": "45min", "zone": "Z1 (Recuperação)", "desc": "Pedal leve em terreno plano"},
+        {"name": "Força - Core e Superior", "duration": "1h", "zone": "N/A", "desc": "Flexões 4x12, Remada Curvada 4x12, Prancha 3x1min, Abdominal Supra 3x20"},
+        {"name": "Ciclismo - Longão", "duration": "2h30min", "zone": "Z2-Z3 (Aeróbico-Tempo)", "desc": "Pedal longo com variação de terreno, focando em manter FC"}
+    ]
+    
+    # Ajustar duração do longão conforme as semanas avançam
+    def get_long_duration(week):
+        if week < 3:
+            return "2h30min"
+        elif week < 6:
+            return "3h"
+        else:
+            return "3h30min"
+    
+    while workout_count < 60:
+        day_of_week = current_date.weekday()  # 0=Segunda, 6=Domingo
+        
+        # Domingo é dia de descanso
+        if day_of_week == 6:
+            current_date += timedelta(days=1)
+            continue
+            
+        # Determinar o tipo de treino baseado no dia da semana
+        if day_of_week < 6:  # Segunda a Sábado
+            workout_type = workout_pattern[day_of_week]
+            
+            # Ajustar o longão no sábado
+            if day_of_week == 5:  # Sábado
+                week_number = (workout_count // 6) + 1
+                workout_type = {
+                    "name": "Ciclismo - Longão",
+                    "duration": get_long_duration(week_number),
+                    "zone": "Z2-Z3 (Aeróbico-Tempo)",
+                    "desc": "Pedal longo com variação de terreno, focando em manter FC"
                 }
             
+            # Calcular FC Alvo
+            if "Z1" in workout_type["zone"]:
+                fc_range = f"{int(zones['Z1 (Recuperação)'][0])}-{int(zones['Z1 (Recuperação)'][1])} bpm"
+            elif "Z2" in workout_type["zone"]:
+                fc_range = f"{int(zones['Z2 (Aeróbico)'][0])}-{int(zones['Z2 (Aeróbico)'][1])} bpm"
+            elif "Z3" in workout_type["zone"]:
+                fc_range = f"{int(zones['Z3 (Tempo)'][0])}-{int(zones['Z3 (Tempo)'][1])} bpm"
+            elif "Z4-Z5" in workout_type["zone"]:
+                fc_range = f"{int(zones['Z4 (Limiar)'][0])}-{int(zones['Z5 (VO2 Max)'][1])} bpm"
+            else:
+                fc_range = "N/A"
+            
+            workout = {
+                "Dia": current_date.strftime("%d/%m/%Y"),
+                "Data": current_date,
+                "Dia da Semana": current_date.strftime("%A"),
+                "Tipo de Treino": workout_type["name"],
+                "Duração": workout_type["duration"],
+                "Zona FC": workout_type["zone"],
+                "FC Alvo": fc_range,
+                "Descrição": workout_type["desc"]
+            }
+            
             plan.append(workout)
-            current_date += timedelta(days=1)
+            workout_count += 1
         
-        current_date += timedelta(days=1)  # Domingo é dia de descanso
+        current_date += timedelta(days=1)
     
     return pd.DataFrame(plan)
 
@@ -349,8 +345,9 @@ with st.sidebar:
 tab1, tab2 = st.tabs(["📅 Plano de Treino", "🍽 Plano Alimentar"])
 
 with tab1:
-    st.header("Plano de Treino - 60 Dias (21/07/2025 a 18/09/2025)")
     workout_plan = generate_workout_plan()
+    end_date = workout_plan["Data"].max()
+    st.header(f"Plano de Treino - 60 Dias (21/07/2025 a {end_date.strftime('%d/%m/%Y')})")
     
     # Seletor de data em formato de calendário
     st.subheader("📆 Consultar Treino por Data")
@@ -395,7 +392,7 @@ with tab1:
     with col1:
         filter_type = st.selectbox("Filtrar por Tipo de Treino", ["Todos"] + list(workout_plan["Tipo de Treino"].unique()))
     with col2:
-        filter_week = st.selectbox("Filtrar por Semana", ["Todas"] + [f"Semana {i}" for i in range(1, 9)])
+        filter_week = st.selectbox("Filtrar por Semana", ["Todas"] + [f"Semana {i}" for i in range(1, 11)])
     
     # Aplicar filtros
     filtered_plan = workout_plan.copy()
