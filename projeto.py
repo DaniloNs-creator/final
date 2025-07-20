@@ -1,945 +1,454 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 from datetime import datetime, timedelta
-import sqlite3
-import numpy as np
-import io
-import time
+import base64
+from io import BytesIO
 
-# Configuração inicial da página
+# Configuração da página
 st.set_page_config(
-    page_title="Sistema Fiscal - HÄFELE BRASIL",
-    page_icon="📊",
-    layout="wide"
+    page_title="PerformanceFit - Controle de Treinos",
+    page_icon="🚴‍♂️",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# CSS personalizado
-st.markdown("""
-<style>
-    :root {
-        --primary-color: #4a8fe7;
-        --secondary-color: #f0f2f6;
-        --success-color: #28a745;
-        --warning-color: #ffc107;
-        --danger-color: #dc3545;
-        --dark-color: #343a40;
-        --light-color: #f8f9fa;
-        --menu-color: #2c3e50;
-    }
-    
-    .header {
-        background-color: var(--primary-color);
-        color: white;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin-bottom: 1rem;
-        text-align: center;
-    }
-    
-    .card {
-        background-color: white;
-        border-radius: 0.5rem;
-        padding: 2rem;
-        margin: 1rem;
-        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
-        transition: all 0.3s ease;
-        height: 200px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-    }
-    
-    .card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 1rem 2rem rgba(0, 0, 0, 0.2);
-    }
-    
-    .menu-container {
-        display: flex;
-        justify-content: space-around;
-        flex-wrap: wrap;
-        margin: 2rem 0;
-    }
-    
-    .menu-button {
-        background-color: var(--menu-color);
-        color: white;
-        border: none;
-        padding: 1rem 2rem;
-        font-size: 1.2rem;
-        border-radius: 0.5rem;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        width: 100%;
-        text-align: center;
-    }
-    
-    .menu-button:hover {
-        background-color: var(--primary-color);
-        transform: scale(1.05);
-    }
-    
-    .status-badge {
-        padding: 0.25rem 0.5rem;
-        border-radius: 0.25rem;
-        font-size: 0.875rem;
-        font-weight: 600;
-    }
-    
-    .status-pendente {
-        background-color: var(--warning-color);
-        color: var(--dark-color);
-    }
-    
-    .status-andamento {
-        background-color: var(--primary-color);
-        color: white;
-    }
-    
-    .status-finalizado {
-        background-color: var(--success-color);
-        color: white;
-    }
-    
-    .status-fechado {
-        background-color: var(--light-color);
-        color: var(--dark-color);
-    }
-    
-    .dificuldade-badge {
-        padding: 0.25rem 0.5rem;
-        border-radius: 0.25rem;
-        font-size: 0.875rem;
-        font-weight: 600;
-    }
-    
-    .dificuldade-baixa {
-        background-color: var(--success-color);
-        color: white;
-    }
-    
-    .dificuldade-media {
-        background-color: var(--warning-color);
-        color: var(--dark-color);
-    }
-    
-    .dificuldade-alta {
-        background-color: var(--danger-color);
-        color: white;
-    }
-    
-    .animate-fadeIn {
-        animation: fadeIn 0.5s ease-in-out;
-    }
-    
-    @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(20px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-    
-    .converter-container {
-        background-color: white;
-        border-radius: 0.5rem;
-        padding: 2rem;
-        margin: 2rem auto;
-        max-width: 800px;
-        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.1);
-        animation: fadeIn 0.5s ease-out;
-    }
-    
-    .download-btn {
-        background-color: var(--success-color);
-        color: white;
-        border: none;
-        padding: 0.5rem 1rem;
-        border-radius: 0.25rem;
-        cursor: pointer;
-        transition: all 0.3s ease;
-        margin-top: 1rem;
-    }
-    
-    .download-btn:hover {
-        background-color: #218838;
-        transform: translateY(-2px);
-    }
-    
-    /* Estilo para a tabela */
-    table {
-        width: 100%;
-        border-collapse: collapse;
-    }
-    
-    th, td {
-        padding: 8px;
-        text-align: left;
-        border-bottom: 1px solid #ddd;
-    }
-    
-    tr:hover {
-        background-color: #f5f5f5;
-    }
-    
-    /* Efeito de loading */
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-    
-    .loading {
-        display: inline-block;
-        width: 20px;
-        height: 20px;
-        border: 3px solid rgba(255,255,255,.3);
-        border-radius: 50%;
-        border-top-color: #fff;
-        animation: spin 1s ease-in-out infinite;
-        margin-right: 10px;
-    }
-    
-    .error-message {
-        color: var(--danger-color);
-        background-color: #f8d7da;
-        padding: 10px;
-        border-radius: 5px;
-        margin: 10px 0;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Conexão com o banco de dados SQLite
-DATABASE = 'atividades_fiscais.db'
-
-def create_connection(max_retries=3, retry_delay=1):
-    """Cria e retorna uma conexão com o banco de dados com tratamento de erro robusto."""
-    retries = 0
-    while retries < max_retries:
-        try:
-            conn = sqlite3.connect(DATABASE)
-            return conn
-        except sqlite3.Error as e:
-            retries += 1
-            st.error(f"Erro ao conectar ao banco de dados (tentativa {retries}/{max_retries}): {e}")
-            if retries < max_retries:
-                time.sleep(retry_delay)
-    return None
-
-def create_table():
-    """Cria a tabela de atividades se não existir com tratamento de erro robusto."""
-    conn = create_connection()
-    if conn is not None:
-        try:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS atividades (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    Obrigacao TEXT NOT NULL,
-                    Descricao TEXT,
-                    Periodicidade TEXT,
-                    OrgaoResponsavel TEXT,
-                    DataLimite TEXT,
-                    Status TEXT,
-                    Dificuldade TEXT,
-                    Prazo TEXT,
-                    DataInicio TEXT,
-                    DataConclusao TEXT,
-                    MesAnoReferencia TEXT NOT NULL
-                )
-            """)
-            conn.commit()
-        except sqlite3.Error as e:
-            st.error(f"Erro ao criar tabela: {e}")
-        finally:
-            conn.close()
-
-def load_data_from_db(mes_ano_referencia):
-    """Carrega dados do banco de dados para um DataFrame com tratamento de erro robusto."""
-    conn = create_connection()
-    df = pd.DataFrame()
-    if conn is not None:
-        try:
-            # Verifica se a tabela existe antes de tentar ler
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='atividades'")
-            if not cursor.fetchone():
-                return pd.DataFrame()
-            
-            query = "SELECT * FROM atividades WHERE MesAnoReferencia = ?"
-            df = pd.read_sql_query(query, conn, params=(mes_ano_referencia,))
-            
-            # Converter colunas de data
-            date_columns = ['Prazo', 'DataInicio', 'DataConclusao']
-            for col in date_columns:
-                if col in df.columns:
-                    df[col] = pd.to_datetime(df[col], format='%Y-%m-%d %H:%M:%S', errors='coerce')
-                else:
-                    df[col] = pd.NaT
-        except sqlite3.Error as e:
-            st.error(f"Erro ao carregar dados do banco de dados: {e}")
-            return pd.DataFrame()
-        except pd.errors.DatabaseError as e:
-            st.error(f"Erro no banco de dados ao carregar dados: {e}")
-            return pd.DataFrame()
-        finally:
-            conn.close()
-    return df
-
-def update_activity_in_db(activity_id, updates):
-    """Atualiza uma atividade no banco de dados com tratamento de erro robusto."""
-    conn = create_connection()
-    if conn is not None:
-        try:
-            cursor = conn.cursor()
-            set_clause = ", ".join([f"{key} = ?" for key in updates.keys()])
-            values = list(updates.values())
-            values.append(activity_id)
-            
-            query = f"UPDATE atividades SET {set_clause} WHERE id = ?"
-            cursor.execute(query, values)
-            conn.commit()
-            return True
-        except sqlite3.Error as e:
-            st.error(f"Erro ao atualizar atividade: {e}")
-            return False
-        finally:
-            conn.close()
-    return False
-
-def add_activity_to_db(activity):
-    """Adiciona uma nova atividade ao banco de dados com tratamento de erro robusto."""
-    conn = create_connection()
-    if conn is not None:
-        try:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO atividades (
-                    Obrigacao, Descricao, Periodicidade, OrgaoResponsavel, DataLimite,
-                    Status, Dificuldade, Prazo, DataInicio, DataConclusao, MesAnoReferencia
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                activity['Obrigação'], activity['Descrição'], activity['Periodicidade'],
-                activity['Órgão Responsável'], activity['Data Limite'], activity['Status'],
-                activity['Dificuldade'], activity['Prazo'], activity['Data Início'],
-                activity['Data Conclusão'], activity['MesAnoReferencia']
-            ))
-            conn.commit()
-            return cursor.lastrowid
-        except sqlite3.Error as e:
-            st.error(f"Erro ao adicionar atividade: {e}")
-            return None
-        finally:
-            conn.close()
-    return None
-
-def load_initial_data_template():
-    """Retorna o template de dados iniciais."""
-    return [
-        {
-            "Obrigação": "Sped Fiscal",
-            "Descrição": "Entrega do arquivo digital da EFD ICMS/IPI com registros fiscais de entradas, saídas, apuração de ICMS e IPI.",
-            "Periodicidade": "Mensal",
-            "Órgão Responsável": "SEFAZ-PR",
-            "Data Limite": "Até o dia 10 do mês subsequente",
-            "Status": "Pendente",
-            "Dificuldade": "Média",
-            "Prazo": None,
-            "Data Início": None,
-            "Data Conclusão": None
-        },
-        {
-            "Obrigação": "DCTF",
-            "Descrição": "Declaração de Débitos e Créditos Tributários Federais",
-            "Periodicidade": "Mensal",
-            "Órgão Responsável": "RFB",
-            "Data Limite": "Até o dia 15 do mês subsequente",
-            "Status": "Pendente",
-            "Dificuldade": "Alta",
-            "Prazo": None,
-            "Data Início": None,
-            "Data Conclusão": None
-        },
-        {
-            "Obrigação": "EFD Contribuições",
-            "Descrição": "Escrituração Fiscal Digital de Contribuições",
-            "Periodicidade": "Mensal",
-            "Órgão Responsável": "RFB",
-            "Data Limite": "Até o dia 15 do mês subsequente",
-            "Status": "Pendente",
-            "Dificuldade": "Média",
-            "Prazo": None,
-            "Data Início": None,
-            "Data Conclusão": None
-        }
-    ]
-
-def get_next_month_year(current_month_year):
-    """Calcula o próximo mês/ano."""
-    try:
-        month, year = map(int, current_month_year.split('/'))
-        if month == 12:
-            return f"01/{year + 1}"
-        return f"{str(month + 1).zfill(2)}/{year}"
-    except:
-        return datetime.now().strftime('%m/%Y')
-
-def get_previous_month_year(current_month_year):
-    """Calcula o mês/ano anterior."""
-    try:
-        month, year = map(int, current_month_year.split('/'))
-        if month == 1:
-            return f"12/{year - 1}"
-        return f"{str(month - 1).zfill(2)}/{year}"
-    except:
-        return datetime.now().strftime('%m/%Y')
-
-def calculate_deadline(data_limite_text, mes_ano_referencia):
-    """Calcula a data limite com base no texto descritivo."""
-    try:
-        ref_month, ref_year = map(int, mes_ano_referencia.split('/'))
-        
-        if "dia 10 do mês subsequente" in data_limite_text:
-            date_for_calc = datetime(ref_year, ref_month, 1) + pd.DateOffset(months=1)
-            return date_for_calc.replace(day=10)
-        elif "dia 15 do mês subsequente" in data_limite_text:
-            date_for_calc = datetime(ref_year, ref_month, 1) + pd.DateOffset(months=1)
-            return date_for_calc.replace(day=15)
-        return datetime(ref_year, ref_month, 1) + timedelta(days=90)
-    except:
-        return datetime.now() + timedelta(days=30)
-
-def apply_status_style(status):
-    """Aplica estilo CSS ao status."""
-    if status == "Pendente":
-        return '<span class="status-badge status-pendente">Pendente</span>'
-    elif status == "Em Andamento":
-        return '<span class="status-badge status-andamento">Em Andamento</span>'
-    elif status == "Finalizado":
-        return '<span class="status-badge status-finalizado">Finalizado</span>'
-    elif status == "Fechado":
-        return '<span class="status-badge status-fechado">Fechado</span>'
-    return f'<span class="status-badge">{status}</span>'
-
-def apply_difficulty_style(dificuldade):
-    """Aplica estilo CSS à dificuldade."""
-    if dificuldade == "Baixa":
-        return '<span class="dificuldade-badge dificuldade-baixa">Baixa</span>'
-    elif dificuldade == "Média":
-        return '<span class="dificuldade-badge dificuldade-media">Média</span>'
-    elif dificuldade == "Alta":
-        return '<span class="dificuldade-badge dificuldade-alta">Alta</span>'
-    return f'<span class="dificuldade-badge">{dificuldade}</span>'
-
-def calculate_days_remaining(row):
-    """Calcula dias restantes para conclusão."""
-    try:
-        hoje = datetime.now()
-        if pd.isna(row['Prazo']) or row['Status'] in ['Finalizado', 'Fechado']:
-            return None
-        prazo = row['Prazo']
-        days = (prazo - hoje).days
-        return days if days >= 0 else 0
-    except:
-        return None
-
-def initialize_session_state():
-    """Inicializa o estado da sessão com tratamento de erro robusto."""
-    try:
-        if 'mes_ano_referencia' not in st.session_state:
-            st.session_state.mes_ano_referencia = datetime.now().strftime('%m/%Y')
-        
-        if 'df_atividades' not in st.session_state:
-            st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
-            if st.session_state.df_atividades is None:
-                st.session_state.df_atividades = pd.DataFrame()
-        
-        if 'force_refresh' not in st.session_state:
-            st.session_state.force_refresh = False
-        
-        if 'current_page' not in st.session_state:
-            st.session_state.current_page = 'menu'
-    except Exception as e:
-        st.error(f"Erro ao inicializar estado da sessão: {e}")
-        st.session_state.df_atividades = pd.DataFrame()
-        st.session_state.mes_ano_referencia = datetime.now().strftime('%m/%Y')
-        st.session_state.current_page = 'menu'
-
-def refresh_data():
-    """Força o recarregamento dos dados do banco."""
-    try:
-        st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
-        st.session_state.force_refresh = False
-    except Exception as e:
-        st.error(f"Erro ao recarregar dados: {e}")
-        st.session_state.df_atividades = pd.DataFrame()
-
-def show_menu():
-    """Mostra o menu inicial com os dois containers."""
-    st.markdown('<div class="header animate-fadeIn"><h1>📊 Sistema Fiscal - HÄFELE BRASIL</h1></div>', unsafe_allow_html=True)
-    
+# CSS embutido diretamente no código
+def inject_css():
     st.markdown("""
-    <div class="menu-container animate-fadeIn">
-        <div class="card">
-            <h3>Controle de Atividades Fiscais</h3>
-            <button class="menu-button" onclick="window.streamlitApi.setComponentValue('atividades')">
-                Acessar
-            </button>
-        </div>
-        <div class="card">
-            <h3>Conversor EFD</h3>
-            <button class="menu-button" onclick="window.streamlitApi.setComponentValue('conversor')">
-                Acessar
-            </button>
+    <style>
+        /* Estilos gerais */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #333;
+            background-color: #f5f7fa;
+        }
+
+        /* Cabeçalho */
+        .stApp header {
+            background: linear-gradient(90deg, #1e3c72, #2a5298);
+            color: white;
+            padding: 1rem;
+            border-radius: 0 0 10px 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Sidebar */
+        .stSidebar {
+            background: linear-gradient(180deg, #ffffff, #f8f9fa);
+            padding: 1rem;
+            border-right: 1px solid #e1e5eb;
+        }
+
+        .user-profile {
+            animation: fadeIn 1s ease-in-out;
+        }
+
+        .profile-card {
+            background: white;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            margin-bottom: 1rem;
+            transition: transform 0.3s ease;
+        }
+
+        .profile-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Cards de refeição */
+        .meal-option {
+            background: white;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+            border-left: 4px solid #2a5298;
+        }
+
+        .meal-option:hover {
+            background: #f8f9fa;
+            transform: translateX(5px);
+        }
+
+        /* Abas */
+        .stTabs [aria-selected="true"] {
+            font-weight: bold;
+            color: #1e3c72 !important;
+        }
+
+        .stTabs [aria-selected="true"]:after {
+            content: '';
+            display: block;
+            width: 100%;
+            height: 3px;
+            background: #1e3c72;
+            margin-top: 5px;
+            animation: expand 0.3s ease-out;
+        }
+
+        /* Rodapé */
+        .footer {
+            text-align: center;
+            padding: 1rem;
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        /* Animações */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes expand {
+            from { width: 0; }
+            to { width: 100%; }
+        }
+
+        /* Botões */
+        .stButton>button {
+            background: linear-gradient(90deg, #1e3c72, #2a5298);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 0.5rem 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .stButton>button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Tabelas */
+        .stDataFrame {
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Card de treino do dia */
+        .workout-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8eb 100%);
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+            border-left: 5px solid #2a5298;
+        }
+        
+        /* Calendário */
+        .stDateInput>div>div>input {
+            font-size: 1rem;
+            padding: 0.5rem;
+        }
+        
+        .date-picker-container {
+            margin-bottom: 1.5rem;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+# Injetar CSS
+inject_css()
+
+# Dados do usuário
+user_data = {
+    "nome": "Usuário",
+    "idade": 28,
+    "altura": 1.87,
+    "peso": 108,
+    "v02max": 173,
+    "objetivo": "Emagrecimento e Performance no Ciclismo",
+    "nivel": "Iniciante",
+    "disponibilidade": "6 dias/semana"
+}
+
+# Zonas de frequência cardíaca baseadas no VO2max
+def calculate_zones(v02max):
+    return {
+        "Z1 (Recuperação)": (0.50 * v02max, 0.60 * v02max),
+        "Z2 (Aeróbico)": (0.60 * v02max, 0.70 * v02max),
+        "Z3 (Tempo)": (0.70 * v02max, 0.80 * v02max),
+        "Z4 (Limiar)": (0.80 * v02max, 0.90 * v02max),
+        "Z5 (VO2 Max)": (0.90 * v02max, 1.00 * v02max)
+    }
+
+zones = calculate_zones(user_data["v02max"])
+
+# Dieta baseada em alimentos acessíveis
+diet_plan = {
+    "Café da Manhã": {
+        "Opção 1": "3 ovos + 2 fatias pão integral + 1 banana + 1 colher aveia",
+        "Opção 2": "Vitamina (200ml leite + 1 banana + 1 colher aveia + 1 colher chia)",
+        "Opção 3": "2 fatias pão integral + queijo cottage + 1 fruta"
+    },
+    "Lanche da Manhã": {
+        "Opção 1": "1 fruta + 10 castanhas",
+        "Opção 2": "1 iogurte natural + 1 colher linhaça",
+        "Opção 3": "1 fatia pão integral + 1 colher pasta amendoim"
+    },
+    "Almoço": {
+        "Opção 1": "1 concha arroz + 1 concha feijão + 150g frango + salada",
+        "Opção 2": "2 batatas médias + 150g carne moída + legumes refogados",
+        "Opção 3": "1 concha arroz integral + 150g peixe + brócolis cozido"
+    },
+    "Lanche da Tarde": {
+        "Opção 1": "1 ovo cozido + 1 torrada integral",
+        "Opção 2": "1 copo de vitamina (leite + fruta)",
+        "Opção 3": "1 iogurte + 1 colher granola caseira"
+    },
+    "Jantar": {
+        "Opção 1": "Omelete (3 ovos) + salada + 1 fatia pão integral",
+        "Opção 2": "150g carne + purê de abóbora + salada",
+        "Opção 3": "Sopa de legumes com frango desfiado"
+    },
+    "Ceia": {
+        "Opção 1": "1 copo leite morno",
+        "Opção 2": "1 iogurte natural",
+        "Opção 3": "1 fatia queijo branco"
+    }
+}
+
+# Plano de treino de 60 dias
+def generate_workout_plan(start_date):
+    plan = []
+    current_date = start_date
+    
+    for week in range(1, 9):  # 8 semanas = ~60 dias
+        for day in range(1, 7):  # 6 dias de treino por semana
+            if day == 1:  # Segunda-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Endurance",
+                    "Duração": "1h15min",
+                    "Zona FC": "Z2 (Aeróbico)",
+                    "FC Alvo": f"{int(zones['Z2 (Aeróbico)'][0])}-{int(zones['Z2 (Aeróbico)'][1])} bpm",
+                    "Descrição": "Pedal constante em terreno plano, mantendo FC na Z2"
+                }
+            elif day == 2:  # Terça-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Força - Membros Inferiores",
+                    "Duração": "1h",
+                    "Zona FC": "N/A",
+                    "FC Alvo": "N/A",
+                    "Descrição": "Agachamento 4x12, Leg Press 4x12, Cadeira Extensora 3x15, Panturrilha 4x20"
+                }
+            elif day == 3:  # Quarta-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Intervalado",
+                    "Duração": "1h",
+                    "Zona FC": "Z4-Z5 (Limiar-VO2)",
+                    "FC Alvo": f"{int(zones['Z4 (Limiar)'][0])}-{int(zones['Z5 (VO2 Max)'][1])} bpm",
+                    "Descrição": "8x (2min Z4 + 2min Z1 recuperação)"
+                }
+            elif day == 4:  # Quinta-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Recuperação Ativa",
+                    "Duração": "45min",
+                    "Zona FC": "Z1 (Recuperação)",
+                    "FC Alvo": f"{int(zones['Z1 (Recuperação)'][0])}-{int(zones['Z1 (Recuperação)'][1])} bpm",
+                    "Descrição": "Pedal leve em terreno plano"
+                }
+            elif day == 5:  # Sexta-feira
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Força - Core e Superior",
+                    "Duração": "1h",
+                    "Zona FC": "N/A",
+                    "FC Alvo": "N/A",
+                    "Descrição": "Flexões 4x12, Remada Curvada 4x12, Prancha 3x1min, Abdominal Supra 3x20"
+                }
+            elif day == 6:  # Sábado
+                workout = {
+                    "Dia": current_date.strftime("%d/%m/%Y"),
+                    "Data": current_date,
+                    "Dia da Semana": current_date.strftime("%A"),
+                    "Tipo de Treino": "Ciclismo - Longão",
+                    "Duração": "2h30min" if week < 3 else "3h" if week < 6 else "3h30min",
+                    "Zona FC": "Z2-Z3 (Aeróbico-Tempo)",
+                    "FC Alvo": f"{int(zones['Z2 (Aeróbico)'][0])}-{int(zones['Z3 (Tempo)'][1])} bpm",
+                    "Descrição": "Pedal longo com variação de terreno, focando em manter FC"
+                }
+            
+            plan.append(workout)
+            current_date += timedelta(days=1)
+        
+        current_date += timedelta(days=1)  # Domingo é dia de descanso
+    
+    return pd.DataFrame(plan)
+
+# Interface do aplicativo
+st.title("🚴‍♂️ PerformanceFit - Controle de Treinos e Dieta")
+st.markdown("---")
+
+# Sidebar com informações do usuário
+with st.sidebar:
+    st.markdown("""
+    <div class="user-profile">
+        <h2>Perfil do Atleta</h2>
+        <div class="profile-card">
+            <p><strong>Nome:</strong> {nome}</p>
+            <p><strong>Idade:</strong> {idade} anos</p>
+            <p><strong>Altura:</strong> {altura}m</p>
+            <p><strong>Peso:</strong> {peso}kg</p>
+            <p><strong>VO2 Máx:</strong> {v02max} bpm</p>
+            <p><strong>Objetivo:</strong> {objetivo}</p>
+            <p><strong>Nível:</strong> {nivel}</p>
+            <p><strong>Disponibilidade:</strong> {disponibilidade}</p>
         </div>
     </div>
-    """, unsafe_allow_html=True)
+    """.format(**user_data), unsafe_allow_html=True)
     
-    # Botões funcionais para Streamlit
+    st.markdown("---")
+    st.markdown("### Zonas de Frequência Cardíaca")
+    for zone, (min_fc, max_fc) in zones.items():
+        st.markdown(f"**{zone}:** {int(min_fc)}-{int(max_fc)} bpm")
+    
+    st.markdown("---")
+    st.markdown("### Download do Plano")
+    if st.button("Exportar para Excel"):
+        today = datetime.now().date()
+        workout_plan = generate_workout_plan(today)
+        
+        # Criar um arquivo Excel em memória
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            workout_plan.to_excel(writer, sheet_name='Plano de Treino', index=False)
+            
+            # Adicionar a dieta
+            diet_sheet = pd.DataFrame.from_dict({(i,j): diet_plan[i][j] 
+                                               for i in diet_plan.keys() 
+                                               for j in diet_plan[i].keys()},
+                                               orient='index')
+            diet_sheet.to_excel(writer, sheet_name='Plano Alimentar')
+        
+        output.seek(0)
+        b64 = base64.b64encode(output.read()).decode()
+        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="Plano_Treino_Dieta.xlsx">Baixar Plano Completo</a>'
+        st.markdown(href, unsafe_allow_html=True)
+
+# Abas principais
+tab1, tab2 = st.tabs(["📅 Plano de Treino", "🍽 Plano Alimentar"])
+
+with tab1:
+    st.header("Plano de Treino - 60 Dias")
+    today = datetime.now().date()
+    workout_plan = generate_workout_plan(today)
+    
+    # Seletor de data em formato de calendário
+    st.subheader("📆 Consultar Treino por Data")
+    
+    # Definir range de datas para o calendário
+    min_date = workout_plan["Data"].min()
+    max_date = workout_plan["Data"].max()
+    
+    # Widget de seleção de data
+    selected_date = st.date_input(
+        "Selecione a data para ver o treino:",
+        value=today,
+        min_value=min_date,
+        max_value=max_date,
+        format="DD/MM/YYYY"
+    )
+    
+    # Converter a data selecionada para o mesmo formato usado no DataFrame
+    selected_date_str = selected_date.strftime("%d/%m/%Y")
+    
+    # Filtrar o treino da data selecionada
+    selected_workout = workout_plan[workout_plan["Dia"] == selected_date_str]
+    
+    if not selected_workout.empty:
+        workout = selected_workout.iloc[0]
+        st.markdown(f"""
+        <div class="workout-card">
+            <h3>Treino do dia {workout['Dia']} ({workout['Dia da Semana']})</h3>
+            <p><strong>🔹 Tipo de Treino:</strong> {workout['Tipo de Treino']}</p>
+            <p><strong>⏱ Duração:</strong> {workout['Duração']}</p>
+            <p><strong>❤️ Zona FC:</strong> {workout['Zona FC']}</p>
+            <p><strong>🎯 FC Alvo:</strong> {workout['FC Alvo']}</p>
+            <p><strong>📝 Descrição:</strong> {workout['Descrição']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.warning("Nenhum treino encontrado para a data selecionada.")
+    
+    # Filtros
+    st.subheader("Filtrar Treinos")
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Controle de Atividades Fiscais"):
-            st.session_state.current_page = 'atividades'
+        filter_type = st.selectbox("Filtrar por Tipo de Treino", ["Todos"] + list(workout_plan["Tipo de Treino"].unique()))
     with col2:
-        if st.button("Conversor EFD"):
-            st.session_state.current_page = 'conversor'
+        filter_week = st.selectbox("Filtrar por Semana", ["Todas"] + [f"Semana {i}" for i in range(1, 9)])
+    
+    # Aplicar filtros
+    filtered_plan = workout_plan.copy()
+    if filter_type != "Todos":
+        filtered_plan = filtered_plan[filtered_plan["Tipo de Treino"] == filter_type]
+    if filter_week != "Todas":
+        week_num = int(filter_week.split()[1])
+        start_idx = (week_num - 1) * 6
+        end_idx = start_idx + 6
+        filtered_plan = filtered_plan.iloc[start_idx:end_idx]
+    
+    # Mostrar tabela
+    st.dataframe(filtered_plan.drop(columns=["Data"]), hide_index=True, use_container_width=True)
+    
+    # Gráfico de distribuição de treinos
+    st.subheader("Distribuição de Treinos")
+    workout_dist = workout_plan["Tipo de Treino"].value_counts().reset_index()
+    workout_dist.columns = ["Tipo de Treino", "Quantidade"]
+    
+    fig = px.pie(workout_dist, values="Quantidade", names="Tipo de Treino", 
+                 color_discrete_sequence=px.colors.sequential.RdBu,
+                 hole=0.4)
+    st.plotly_chart(fig, use_container_width=True)
 
-def show_conversor_efd():
-    """Mostra a interface do conversor EFD."""
-    st.markdown('<div class="header animate-fadeIn"><h1>🔄 Conversor EFD</h1></div>', unsafe_allow_html=True)
+with tab2:
+    st.header("Plano Alimentar - Opções Variadas")
     
-    with st.container():
-        st.markdown('<div class="converter-container">', unsafe_allow_html=True)
-        
-        uploaded_file = st.file_uploader("Faça upload do arquivo EFD (.txt)", type="txt")
-        
-        if uploaded_file is not None:
-            try:
-                # Lê o arquivo como string
-                stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
-                content = stringio.read()
-                
-                # Divide o conteúdo em linhas
-                lines = content.split('\n')
-                
-                # Filtra as linhas
-                filtered_lines = []
-                for line in lines:
-                    # Remove linhas em branco ou que contenham apenas '-'
-                    stripped_line = line.strip()
-                    if stripped_line and not stripped_line.startswith('----------------'):
-                        filtered_lines.append(line)
-                
-                # Junta as linhas filtradas
-                filtered_content = '\n'.join(filtered_lines)
-                
-                # Mostra pré-visualização
-                st.subheader("Pré-visualização do arquivo processado")
-                st.code(filtered_content[:1000] + ("..." if len(filtered_content) > 1000 else ""), language="text")
-                
-                # Botão de download
-                st.download_button(
-                    label="⬇️ Baixar arquivo processado",
-                    data=filtered_content,
-                    file_name="EFD_processado.txt",
-                    mime="text/plain",
-                    key="download_processed"
-                )
-            except Exception as e:
-                st.error(f"Erro ao processar arquivo: {e}")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+    for meal, options in diet_plan.items():
+        with st.expander(f"🔸 {meal}"):
+            for opt, desc in options.items():
+                st.markdown(f"""
+                <div class="meal-option">
+                    <h4>{opt}</h4>
+                    <p>{desc}</p>
+                </div>
+                """, unsafe_allow_html=True)
     
-    if st.button("Voltar ao Menu"):
-        st.session_state.current_page = 'menu'
-
-def show_navigation():
-    """Mostra a navegação entre meses."""
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col1:
-        if st.button("◀️ Mês Anterior"):
-            st.session_state.mes_ano_referencia = get_previous_month_year(st.session_state.mes_ano_referencia)
-            refresh_data()
-    
-    with col2:
-        st.markdown(f"<h2 style='text-align: center;'>Mês/Ano de Referência: {st.session_state.mes_ano_referencia}</h2>", unsafe_allow_html=True)
-    
-    with col3:
-        if st.button("Próximo Mês ▶️"):
-            st.session_state.mes_ano_referencia = get_next_month_year(st.session_state.mes_ano_referencia)
-            refresh_data()
-
-def show_metrics():
-    """Mostra as métricas de status."""
-    cols = st.columns(5)
-    metrics = [
-        ("Total de Atividades", ""),
-        ("Pendentes", "Pendente"),
-        ("Em Andamento", "Em Andamento"),
-        ("Finalizadas", "Finalizado"),
-        ("Fechadas", "Fechado")
-    ]
-    
-    for (label, status), col in zip(metrics, cols):
-        if status:
-            count = len(st.session_state.df_atividades[st.session_state.df_atividades['Status'] == status])
-        else:
-            count = len(st.session_state.df_atividades)
-        col.metric(label, count)
-
-def show_charts():
-    """Mostra os gráficos de análise."""
     st.markdown("---")
-    st.markdown('<div class="card animate-fadeIn"><h3>📈 Análise Gráfica</h3></div>', unsafe_allow_html=True)
-    
-    if st.session_state.df_atividades.empty:
-        st.info("Adicione atividades ou habilite um mês para ver as análises gráficas.")
-        return
+    st.subheader("Recomendações Nutricionais")
+    st.markdown("""
+    - Consuma proteína em todas as refeições (ovos, frango, carne, peixe)
+    - Hidrate-se bem (3-4L de água por dia)
+    - Prefira carboidratos complexos (arroz integral, batata, aveia)
+    - Gorduras saudáveis (castanhas, azeite, abacate)
+    - Coma legumes e verduras à vontade
+    """)
 
-    tab1, tab2, tab3 = st.tabs(["Status", "Dificuldade", "Prazo"])
-
-    with tab1:
-        if not st.session_state.df_atividades.empty and 'Status' in st.session_state.df_atividades.columns:
-            try:
-                status_counts = st.session_state.df_atividades['Status'].value_counts().reset_index()
-                fig_status = px.pie(
-                    status_counts, 
-                    values='count', 
-                    names='Status',
-                    title='Distribuição por Status',
-                    color='Status',
-                    color_discrete_map={
-                        'Pendente': '#ffc107',
-                        'Em Andamento': '#007bff',
-                        'Finalizado': '#28a745',
-                        'Fechado': '#6c757d'
-                    }
-                )
-                st.plotly_chart(fig_status, use_container_width=True)
-            except Exception as e:
-                st.error(f"Erro ao gerar gráfico de status: {e}")
-
-    with tab2:
-        if not st.session_state.df_atividades.empty and 'Dificuldade' in st.session_state.df_atividades.columns:
-            try:
-                dificuldade_counts = st.session_state.df_atividades['Dificuldade'].value_counts().reset_index()
-                fig_dificuldade = px.bar(
-                    dificuldade_counts,
-                    x='Dificuldade',
-                    y='count',
-                    title='Distribuição por Nível de Dificuldade',
-                    color='Dificuldade',
-                    color_discrete_map={
-                        'Baixa': '#28a745',
-                        'Média': '#ffc107',
-                        'Alta': '#dc3545'
-                    }
-                )
-                st.plotly_chart(fig_dificuldade, use_container_width=True)
-            except Exception as e:
-                st.error(f"Erro ao gerar gráfico de dificuldade: {e}")
-
-    with tab3:
-        if not st.session_state.df_atividades.empty and 'Prazo' in st.session_state.df_atividades.columns:
-            try:
-                prazo_df = st.session_state.df_atividades.copy()
-                prazo_df = prazo_df.dropna(subset=['Prazo'])
-                
-                if not prazo_df.empty:
-                    prazo_df['Prazo Formatado'] = prazo_df['Prazo'].dt.strftime('%d/%m/%Y')
-                    prazo_df['Data Início Visual'] = prazo_df['DataInicio'].fillna(prazo_df['Prazo'] - timedelta(days=1))
-                    
-                    fig_prazo = px.timeline(
-                        prazo_df,
-                        x_start="Data Início Visual",
-                        x_end="Prazo",
-                        y="Obrigacao",
-                        color="Status",
-                        title='Linha do Tempo das Atividades',
-                        color_discrete_map={
-                            'Pendente': '#ffc107',
-                            'Em Andamento': '#007bff',
-                            'Finalizado': '#28a745',
-                            'Fechado': '#6c757d'
-                        },
-                        hover_name="Obrigacao",
-                        hover_data={
-                            "Status": True,
-                            "Dificuldade": True,
-                            "Prazo Formatado": True,
-                            "Data Início Visual": False
-                        }
-                    )
-                    fig_prazo.update_yaxes(autorange="reversed")
-                    st.plotly_chart(fig_prazo, use_container_width=True)
-            except Exception as e:
-                st.error(f"Erro ao gerar gráfico de prazos: {e}")
-
-def show_activities_table():
-    """Mostra a tabela de atividades com filtros."""
-    st.markdown("---")
-    st.markdown('<div class="card animate-fadeIn"><h3>📋 Lista de Atividades</h3></div>', unsafe_allow_html=True)
-
-    if st.session_state.df_atividades.empty:
-        st.info("Nenhuma atividade encontrada para o mês selecionado.")
-        return
-
-    with st.expander("🔍 Filtros", expanded=True):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            status_filter = st.selectbox("Status", ["Todos", "Pendente", "Em Andamento", "Finalizado", "Fechado"])
-        with col2:
-            difficulty_filter = st.selectbox("Dificuldade", ["Todos", "Baixa", "Média", "Alta"])
-        with col3:
-            orgao_options = ["Todos"] + list(st.session_state.df_atividades['OrgaoResponsavel'].unique())
-            orgao_filter = st.selectbox("Órgão Responsável", orgao_options)
-
-    try:
-        filtered_df = st.session_state.df_atividades.copy()
-        
-        if status_filter != "Todos":
-            filtered_df = filtered_df[filtered_df['Status'] == status_filter]
-        if difficulty_filter != "Todos":
-            filtered_df = filtered_df[filtered_df['Dificuldade'] == difficulty_filter]
-        if orgao_filter != "Todos":
-            filtered_df = filtered_df[filtered_df['OrgaoResponsavel'] == orgao_filter]
-        
-        filtered_df['Dias Restantes'] = filtered_df.apply(calculate_days_remaining, axis=1)
-
-        display_df = filtered_df.copy()
-        display_df['Status'] = display_df['Status'].apply(apply_status_style)
-        display_df['Dificuldade'] = display_df['Dificuldade'].apply(apply_difficulty_style)
-        
-        for col in ['Prazo', 'DataInicio', 'DataConclusao']:
-            display_df[col] = display_df[col].dt.strftime('%d/%m/%Y').replace({pd.NaT: ''})
-
-        cols_to_display = [
-            'Obrigacao', 'Descricao', 'Periodicidade', 'OrgaoResponsavel',
-            'DataLimite', 'Status', 'Dificuldade', 'Prazo', 'Dias Restantes'
-        ]
-        
-        st.write(display_df[cols_to_display].to_html(escape=False, index=False), unsafe_allow_html=True)
-    except Exception as e:
-        st.error(f"Erro ao exibir tabela de atividades: {e}")
-
-def show_add_activity_form():
-    """Mostra o formulário para adicionar nova atividade."""
-    st.markdown("---")
-    with st.expander("➕ Adicionar Nova Atividade", expanded=False):
-        with st.form("nova_atividade_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                obrigacao = st.text_input("Obrigação*", placeholder="Nome da obrigação fiscal")
-                descricao = st.text_area("Descrição*", placeholder="Descrição detalhada da atividade")
-                periodicidade = st.selectbox("Periodicidade*", ["Mensal", "Trimestral", "Anual", "Eventual", "Extinta"])
-            with col2:
-                orgao = st.text_input("Órgão Responsável*", placeholder="Órgão responsável")
-                data_limite = st.text_input("Data Limite de Entrega*", placeholder="Ex: Até o dia 10 do mês subsequente")
-                status = st.selectbox("Status*", ["Pendente", "Em Andamento", "Finalizado", "Fechado"])
-                dificuldade = st.selectbox("Dificuldade*", ["Baixa", "Média", "Alta"])
-                prazo = st.date_input("Prazo Final*")
-
-            if st.form_submit_button("Adicionar Atividade"):
-                if obrigacao and descricao and orgao and data_limite and prazo:
-                    nova_atividade = {
-                        "Obrigação": obrigacao,
-                        "Descrição": descricao,
-                        "Periodicidade": periodicidade,
-                        "Órgão Responsável": orgao,
-                        "Data Limite": data_limite,
-                        "Status": status,
-                        "Dificuldade": dificuldade,
-                        "Prazo": datetime.combine(prazo, datetime.min.time()).strftime('%Y-%m-%d %H:%M:%S'),
-                        "Data Início": datetime.now().strftime('%Y-%m-%d %H:%M:%S') if status == "Em Andamento" else None,
-                        "Data Conclusão": datetime.now().strftime('%Y-%m-%d %H:%M:%S') if status == "Finalizado" else None,
-                        "MesAnoReferencia": st.session_state.mes_ano_referencia
-                    }
-
-                    if add_activity_to_db(nova_atividade):
-                        st.success("✅ Atividade adicionada com sucesso!")
-                        refresh_data()
-                else:
-                    st.error("⚠️ Preencha todos os campos obrigatórios (marcados com *)")
-
-def show_edit_activity_form():
-    """Mostra o formulário para editar atividades existentes."""
-    st.markdown("---")
-    with st.expander("✏️ Editar Atividades", expanded=False):
-        if st.session_state.df_atividades.empty:
-            st.info("Nenhuma atividade para editar. Adicione atividades ou habilite um novo mês.")
-            return
-
-        try:
-            atividade_selecionada = st.selectbox(
-                "Selecione a atividade para editar",
-                st.session_state.df_atividades['Obrigacao'].unique()
-            )
-
-            atividade = st.session_state.df_atividades[
-                st.session_state.df_atividades['Obrigacao'] == atividade_selecionada
-            ].iloc[0]
-
-            col1, col2 = st.columns(2)
-            with col1:
-                novo_status = st.selectbox(
-                    "Novo Status",
-                    ["Pendente", "Em Andamento", "Finalizado", "Fechado"],
-                    index=["Pendente", "Em Andamento", "Finalizado", "Fechado"].index(atividade['Status'])
-                )
-            with col2:
-                novo_prazo = st.date_input(
-                    "Novo Prazo Final",
-                    value=atividade['Prazo'].date() if pd.notna(atividade['Prazo']) else datetime.now().date()
-                )
-
-            if st.button("Atualizar Atividade"):
-                updates = {}
-                
-                if novo_status != atividade['Status']:
-                    updates['Status'] = novo_status
-                    
-                    if novo_status == "Em Andamento" and pd.isna(atividade['DataInicio']):
-                        updates['DataInicio'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    elif novo_status != "Em Andamento" and pd.notna(atividade['DataInicio']):
-                        updates['DataInicio'] = None
-                    
-                    if novo_status == "Finalizado":
-                        updates['DataConclusao'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    elif novo_status != "Finalizado" and pd.notna(atividade['DataConclusao']):
-                        updates['DataConclusao'] = None
-                
-                novo_prazo_dt = datetime.combine(novo_prazo, datetime.min.time())
-                if pd.isna(atividade['Prazo']) or novo_prazo_dt != atividade['Prazo']:
-                    updates['Prazo'] = novo_prazo_dt.strftime('%Y-%m-%d %H:%M:%S')
-                
-                if updates:
-                    if update_activity_in_db(atividade['id'], updates):
-                        st.success("✅ Atividade atualizada com sucesso!")
-                        refresh_data()
-                else:
-                    st.info("Nenhuma alteração detectada para atualizar.")
-        except Exception as e:
-            st.error(f"Erro ao editar atividade: {e}")
-
-def show_close_period_section():
-    """Mostra a seção para fechar o período atual."""
-    st.markdown("---")
-    st.markdown('<div class="card animate-fadeIn"><h3>🗓️ Fechamento e Habilitação de Período</h3></div>', unsafe_allow_html=True)
-
-    if st.session_state.df_atividades.empty:
-        st.info("Nenhuma atividade para fechar. Habilite um mês primeiro.")
-        return
-
-    try:
-        todas_finalizadas = all(st.session_state.df_atividades['Status'].isin(["Finalizado", "Fechado"]))
-
-        if todas_finalizadas:
-            st.success(f"🎉 Todas as atividades para {st.session_state.mes_ano_referencia} estão finalizadas ou fechadas!")
-            
-            if st.button("Fechar Período e Habilitar Próximo Mês"):
-                conn = create_connection()
-                if conn:
-                    try:
-                        cursor = conn.cursor()
-                        cursor.execute("""
-                            UPDATE atividades
-                            SET Status = 'Fechado'
-                            WHERE MesAnoReferencia = ? AND Status = 'Finalizado'
-                        """, (st.session_state.mes_ano_referencia,))
-                        conn.commit()
-                    except sqlite3.Error as e:
-                        st.error(f"Erro ao fechar período: {e}")
-                    finally:
-                        conn.close()
-
-                st.session_state.mes_ano_referencia = get_next_month_year(st.session_state.mes_ano_referencia)
-                refresh_data()
-
-                if st.session_state.df_atividades.empty:
-                    atividades = load_initial_data_template()
-                    for atividade in atividades:
-                        prazo = calculate_deadline(atividade['Data Limite'], st.session_state.mes_ano_referencia)
-                        atividade.update({
-                            'Prazo': prazo.strftime('%Y-%m-%d %H:%M:%S') if prazo else None,
-                            'MesAnoReferencia': st.session_state.mes_ano_referencia,
-                            'Data Início': None,
-                            'Data Conclusão': None
-                        })
-                    
-                    for atividade in atividades:
-                        add_activity_to_db(atividade)
-                    
-                    refresh_data()
-                    st.success("Atividades padrão habilitadas para o novo mês!")
-        else:
-            st.warning(f"Ainda há atividades pendentes ou em andamento para {st.session_state.mes_ano_referencia}. Finalize-as para fechar o período.")
-    except Exception as e:
-        st.error(f"Erro ao fechar período: {e}")
-
-def show_atividades_fiscais():
-    """Mostra a interface de controle de atividades fiscais."""
-    st.markdown('<div class="header animate-fadeIn"><h1>📊 Controle de Atividades Fiscais</h1></div>', unsafe_allow_html=True)
-
-    # Inicialização
-    create_table()
-    initialize_session_state()
-
-    # Habilitar mês se não houver dados
-    if st.session_state.df_atividades.empty:
-        st.warning(f"Não há atividades cadastradas para {st.session_state.mes_ano_referencia}.")
-        if st.button(f"Habilitar Mês {st.session_state.mes_ano_referencia}"):
-            try:
-                atividades = load_initial_data_template()
-                for atividade in atividades:
-                    prazo = calculate_deadline(atividade['Data Limite'], st.session_state.mes_ano_referencia)
-                    atividade.update({
-                        'Prazo': prazo.strftime('%Y-%m-%d %H:%M:%S') if prazo else None,
-                        'MesAnoReferencia': st.session_state.mes_ano_referencia,
-                        'Data Início': None,
-                        'Data Conclusão': None
-                    })
-                
-                for atividade in atividades:
-                    add_activity_to_db(atividade)
-                
-                refresh_data()
-                st.success("Atividades padrão habilitadas com sucesso!")
-            except Exception as e:
-                st.error(f"Erro ao habilitar mês: {e}")
-
-    # Botão para forçar atualização
-    if st.button("🔄 Atualizar Dados"):
-        refresh_data()
-        st.success("Dados atualizados com sucesso!")
-
-    # Componentes da interface
-    show_navigation()
-    show_metrics()
-    show_charts()
-    show_activities_table()
-    show_add_activity_form()
-    show_edit_activity_form()
-    show_close_period_section()
-    
-    if st.button("Voltar ao Menu"):
-        st.session_state.current_page = 'menu'
-
-def main():
-    """Função principal que orquestra a aplicação."""
-    try:
-        initialize_session_state()
-        
-        if st.session_state.current_page == 'menu':
-            show_menu()
-        elif st.session_state.current_page == 'atividades':
-            show_atividades_fiscais()
-        elif st.session_state.current_page == 'conversor':
-            show_conversor_efd()
-    except Exception as e:
-        st.error(f"Erro crítico na aplicação: {e}")
-        st.write("Reiniciando o sistema...")
-        st.session_state.clear()
-        initialize_session_state()
-        st.experimental_rerun()
-
-if __name__ == "__main__":
-    main()
+# Rodapé
+st.markdown("---")
+st.markdown("""
+<div class="footer">
+    <p>PerformanceFit © 2023 - Plano personalizado para {nome}</p>
+    <p>Atualizado em: {date}</p>
+</div>
+""".format(nome=user_data["nome"], date=datetime.now().strftime("%d/%m/%Y")), unsafe_allow_html=True)
