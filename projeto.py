@@ -179,7 +179,7 @@ user_data = {
     "nome": "Usuário",
     "idade": 28,
     "altura": 1.87,
-    "peso": 108,
+    "peso": 108.0,  # Alterado para float para evitar erro de tipo
     "v02max": 183,
     "objetivo": "Emagrecimento e Performance no Ciclismo",
     "nivel": "Iniciante",
@@ -240,8 +240,8 @@ if 'tracking_data' not in st.session_state:
 def add_tracking_data(date, weight, heart_rate):
     new_data = pd.DataFrame({
         'Data': [date],
-        'Peso': [weight],
-        'Frequencia_Cardiaca': [heart_rate]
+        'Peso': [float(weight)],  # Garantindo que seja float
+        'Frequencia_Cardiaca': [int(heart_rate)]  # Garantindo que seja inteiro
     })
     st.session_state.tracking_data = pd.concat([st.session_state.tracking_data, new_data]).sort_values('Data').drop_duplicates('Data', keep='last')
 
@@ -366,7 +366,7 @@ with st.sidebar:
             <p><strong>Nome:</strong> {nome}</p>
             <p><strong>Idade:</strong> {idade} anos</p>
             <p><strong>Altura:</strong> {altura}m</p>
-            <p><strong>Peso:</strong> {peso}kg</p>
+            <p><strong>Peso:</strong> {peso} kg</p>
             <p><strong>VO2 Máx:</strong> {v02max} bpm</p>
             <p><strong>Objetivo:</strong> {objetivo}</p>
             <p><strong>Nível:</strong> {nivel}</p>
@@ -517,14 +517,15 @@ with tab3:
         with col1:
             tracking_date = st.date_input("Data", value=today)
         with col2:
-            weight = st.number_input("Peso (kg)", min_value=30.0, max_value=200.0, value=user_data["peso"], step=0.1)
+            # Corrigido: Garantindo que todos os valores sejam do mesmo tipo (float)
+            weight = st.number_input("Peso (kg)", min_value=30.0, max_value=200.0, value=float(user_data["peso"]), step=0.1)
         with col3:
             heart_rate = st.number_input("Frequência Cardíaca em Repouso (bpm)", min_value=40, max_value=120, value=65)
         
         if st.button("Salvar Dados"):
             add_tracking_data(tracking_date, weight, heart_rate)
             st.success("Dados salvos com sucesso!")
-            user_data["peso"] = weight  # Atualiza o peso no perfil
+            user_data["peso"] = float(weight)  # Atualiza o peso no perfil como float
     
     # Seção de gráficos
     if not st.session_state.tracking_data.empty:
@@ -535,6 +536,10 @@ with tab3:
         tracking_df = st.session_state.tracking_data.sort_values('Data')
         tracking_df['Data'] = pd.to_datetime(tracking_df['Data'])
         tracking_df = tracking_df.set_index('Data').resample('D').mean().interpolate().reset_index()
+        
+        # Garantir tipos numéricos
+        tracking_df['Peso'] = tracking_df['Peso'].astype(float)
+        tracking_df['Frequencia_Cardiaca'] = tracking_df['Frequencia_Cardiaca'].astype(int)
         
         # Gráfico de peso
         st.markdown("#### Evolução do Peso")
