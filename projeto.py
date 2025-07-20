@@ -6,7 +6,6 @@ import sqlite3
 import numpy as np
 
 # Configuração para evitar erros de inotify
-st.runtime.legacy_caching.clear_cache()
 st.set_option('deprecation.showfileUploaderEncoding', False)
 
 # Configuração inicial da página
@@ -145,35 +144,6 @@ def create_table():
         finally:
             conn.close()
 
-def insert_initial_data(data):
-    """Insere dados iniciais no banco de dados."""
-    conn = create_connection()
-    if conn is not None:
-        try:
-            cursor = conn.cursor()
-            for activity in data:
-                cursor.execute("""
-                    SELECT id FROM atividades
-                    WHERE Obrigacao = ? AND MesAnoReferencia = ?
-                """, (activity['Obrigação'], activity['MesAnoReferencia']))
-                if cursor.fetchone() is None:
-                    cursor.execute("""
-                        INSERT INTO atividades (
-                            Obrigacao, Descricao, Periodicidade, OrgaoResponsavel, DataLimite,
-                            Status, Dificuldade, Prazo, DataInicio, DataConclusao, MesAnoReferencia
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        activity['Obrigação'], activity['Descrição'], activity['Periodicidade'],
-                        activity['Órgão Responsável'], activity['Data Limite'], activity['Status'],
-                        activity['Dificuldade'], activity['Prazo'], activity['Data Início'],
-                        activity['Data Conclusão'], activity['MesAnoReferencia']
-                    ))
-            conn.commit()
-        except sqlite3.Error as e:
-            st.error(f"Erro ao inserir dados iniciais: {e}")
-        finally:
-            conn.close()
-
 def load_data_from_db(mes_ano_referencia):
     """Carrega dados do banco de dados para um DataFrame."""
     conn = create_connection()
@@ -187,7 +157,7 @@ def load_data_from_db(mes_ano_referencia):
             date_columns = ['Prazo', 'DataInicio', 'DataConclusao']
             for col in date_columns:
                 if col in df.columns:
-                    df[col] = pd.to_datetime(df[col], errors='coerce')
+                    df[col] = pd.to_datetime(df[col], format='%Y-%m-%d %H:%M:%S', errors='coerce')
                 else:
                     df[col] = pd.NaT
         except sqlite3.Error as e:
@@ -235,13 +205,13 @@ def add_activity_to_db(activity):
                 activity['Data Conclusão'], activity['MesAnoReferencia']
             ))
             conn.commit()
-            return True
+            return cursor.lastrowid
         except sqlite3.Error as e:
             st.error(f"Erro ao adicionar atividade: {e}")
-            return False
+            return None
         finally:
             conn.close()
-    return False
+    return None
 
 def load_initial_data_template():
     """Retorna o template de dados iniciais."""
@@ -348,6 +318,14 @@ def initialize_session_state():
     
     if 'df_atividades' not in st.session_state:
         st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
+    
+    if 'force_refresh' not in st.session_state:
+        st.session_state.force_refresh = False
+
+def refresh_data():
+    """Força o recarregamento dos dados do banco."""
+    st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
+    st.session_state.force_refresh = False
 
 def show_navigation():
     """Mostra a navegação entre meses."""
@@ -355,8 +333,7 @@ def show_navigation():
     with col1:
         if st.button("◀️ Mês Anterior"):
             st.session_state.mes_ano_referencia = get_previous_month_year(st.session_state.mes_ano_referencia)
-            st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
-            st.rerun()
+            refresh_data()
     
     with col2:
         st.markdown(f"<h2 style='text-align: center;'>Mês/Ano de Referência: {st.session_state.mes_ano_referencia}</h2>", unsafe_allow_html=True)
@@ -364,8 +341,7 @@ def show_navigation():
     with col3:
         if st.button("Próximo Mês ▶️"):
             st.session_state.mes_ano_referencia = get_next_month_year(st.session_state.mes_ano_referencia)
-            st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
-            st.rerun()
+            refresh_data()
 
 def show_metrics():
     """Mostra as métricas de status."""
@@ -413,8 +389,6 @@ def show_charts():
                 }
             )
             st.plotly_chart(fig_status, use_container_width=True)
-        else:
-            st.info("Não há dados de status para exibir.")
 
     with tab2:
         if not st.session_state.df_atividades.empty and 'Dificuldade' in st.session_state.df_atividades.columns:
@@ -432,8 +406,6 @@ def show_charts():
                 }
             )
             st.plotly_chart(fig_dificuldade, use_container_width=True)
-        else:
-            st.info("Não há dados de dificuldade para exibir.")
 
     with tab3:
         if not st.session_state.df_atividades.empty and 'Prazo' in st.session_state.df_atividades.columns:
@@ -467,10 +439,6 @@ def show_charts():
                 )
                 fig_prazo.update_yaxes(autorange="reversed")
                 st.plotly_chart(fig_prazo, use_container_width=True)
-            else:
-                st.info("Não há atividades com prazo definido para exibir na linha do tempo.")
-        else:
-            st.info("Não há dados de prazos para exibir.")
 
 def show_activities_table():
     """Mostra a tabela de atividades com filtros."""
@@ -550,9 +518,8 @@ def show_add_activity_form():
                     }
 
                     if add_activity_to_db(nova_atividade):
-                        st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
                         st.success("✅ Atividade adicionada com sucesso!")
-                        st.rerun()
+                        refresh_data()
                 else:
                     st.error("⚠️ Preencha todos os campos obrigatórios (marcados com *)")
 
@@ -608,9 +575,8 @@ def show_edit_activity_form():
             
             if updates:
                 if update_activity_in_db(atividade['id'], updates):
-                    st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
                     st.success("✅ Atividade atualizada com sucesso!")
-                    st.rerun()
+                    refresh_data()
             else:
                 st.info("Nenhuma alteração detectada para atualizar.")
 
@@ -636,7 +602,7 @@ def show_close_period_section():
                     cursor.execute("""
                         UPDATE atividades
                         SET Status = 'Fechado'
-                        WHERE MesAnoReferencia = ?
+                        WHERE MesAnoReferencia = ? AND Status = 'Finalizado'
                     """, (st.session_state.mes_ano_referencia,))
                     conn.commit()
                 except sqlite3.Error as e:
@@ -645,7 +611,7 @@ def show_close_period_section():
                     conn.close()
 
             st.session_state.mes_ano_referencia = get_next_month_year(st.session_state.mes_ano_referencia)
-            st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
+            refresh_data()
 
             if st.session_state.df_atividades.empty:
                 atividades = load_initial_data_template()
@@ -657,11 +623,12 @@ def show_close_period_section():
                         'Data Início': None,
                         'Data Conclusão': None
                     })
-                insert_initial_data(atividades)
-                st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
+                
+                for atividade in atividades:
+                    add_activity_to_db(atividade)
+                
+                refresh_data()
                 st.success("Atividades padrão habilitadas para o novo mês!")
-            
-            st.rerun()
     else:
         st.warning(f"Ainda há atividades pendentes ou em andamento para {st.session_state.mes_ano_referencia}. Finalize-as para fechar o período.")
 
@@ -686,10 +653,17 @@ def main():
                     'Data Início': None,
                     'Data Conclusão': None
                 })
-            insert_initial_data(atividades)
-            st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
+            
+            for atividade in atividades:
+                add_activity_to_db(atividade)
+            
+            refresh_data()
             st.success("Atividades padrão habilitadas com sucesso!")
-            st.rerun()
+
+    # Botão para forçar atualização
+    if st.button("🔄 Atualizar Dados"):
+        refresh_data()
+        st.success("Dados atualizados com sucesso!")
 
     # Componentes da interface
     show_navigation()
