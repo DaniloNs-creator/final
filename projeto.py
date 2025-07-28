@@ -1,375 +1,257 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.express as px
 from io import StringIO
-import re
 
-# Configuração da página
-st.set_page_config(page_title="Análise Contábil - ECD", layout="wide")
+# Configuração inicial
+st.set_page_config(layout="wide", page_title="Análise ECD Contábil")
+
+# Funções de processamento
+def processar_ecd(arquivo):
+    # Ler o arquivo
+    content = arquivo.getvalue().decode("utf-8")
+    linhas = content.split("\n")
+    
+    # Processar blocos
+    plano_contas = []
+    saldos = []
+    
+    for linha in linhas:
+        if linha.startswith("|I050|"):
+            partes = linha.split("|")
+            if len(partes) >= 10:
+                plano_contas.append({
+                    'codigo': partes[3],
+                    'nivel': partes[6],
+                    'tipo': partes[7],
+                    'descricao': partes[9],
+                    'conta_pai': partes[8] if partes[8] else None
+                })
+        elif linha.startswith("|I155|"):
+            partes = linha.split("|")
+            if len(partes) >= 10:
+                saldos.append({
+                    'conta': partes[2],
+                    'saldo_inicial': float(partes[3].replace(".", "").replace(",", ".")) if partes[3] else 0,
+                    'natureza_saldo_inicial': partes[4],
+                    'debitos': float(partes[5].replace(".", "").replace(",", ".")) if partes[5] else 0,
+                    'creditos': float(partes[6].replace(".", "").replace(",", ".")) if partes[6] else 0,
+                    'saldo_final': float(partes[7].replace(".", "").replace(",", ".")) if partes[7] else 0,
+                    'natureza_saldo_final': partes[8]
+                })
+    
+    # Criar DataFrames
+    df_plano = pd.DataFrame(plano_contas)
+    df_saldos = pd.DataFrame(saldos)
+    
+    # Juntar com o plano de contas para obter descrições
+    df_final = pd.merge(df_saldos, df_plano, left_on='conta', right_on='codigo', how='left')
+    
+    # Ajustar saldo final conforme natureza
+    df_final['saldo_final_ajustado'] = df_final.apply(
+        lambda x: x['saldo_final'] if x['natureza_saldo_final'] == 'D' else -x['saldo_final'], axis=1)
+    
+    return df_final, df_plano
+
+def gerar_balancete(df):
+    # Filtrar contas relevantes e ordenar
+    balancete = df[['codigo', 'descricao', 'nivel', 'saldo_final_ajustado']].copy()
+    balancete = balancete.sort_values('codigo')
+    return balancete
+
+def gerar_balanco(df):
+    # Separar Ativo e Passivo/PL
+    ativo = df[df['codigo'].str.startswith('1')].copy()
+    passivo = df[df['codigo'].str.startswith('2')].copy()
+    pl = df[df['codigo'].str.startswith('2.3')].copy()
+    
+    # Agrupar por níveis superiores
+    ativo_agrupado = ativo.groupby(ativo['codigo'].str[:4])['saldo_final_ajustado'].sum().reset_index()
+    passivo_agrupado = passivo.groupby(passivo['codigo'].str[:4])['saldo_final_ajustado'].sum().reset_index()
+    
+    # Adicionar descrições
+    ativo_agrupado = pd.merge(ativo_agrupado, df[['codigo', 'descricao']].drop_duplicates(), 
+                             left_on='codigo', right_on='codigo', how='left')
+    passivo_agrupado = pd.merge(passivo_agrupado, df[['codigo', 'descricao']].drop_duplicates(), 
+                               left_on='codigo', right_on='codigo', how='left')
+    
+    return ativo_agrupado, passivo_agrupado
+
+def gerar_dre(df):
+    # Filtrar contas de receita e despesa
+    receitas = df[df['codigo'].str.startswith('3')].copy()
+    despesas = df[df['codigo'].str.startswith('4')].copy()
+    custos = df[df['codigo'].str.startswith('5')].copy()
+    
+    # Agrupar por níveis superiores
+    receitas_agrupadas = receitas.groupby(receitas['codigo'].str[:4])['saldo_final_ajustado'].sum().reset_index()
+    despesas_agrupadas = despesas.groupby(despesas['codigo'].str[:4])['saldo_final_ajustado'].sum().reset_index()
+    custos_agrupados = custos.groupby(custos['codigo'].str[:4])['saldo_final_ajustado'].sum().reset_index()
+    
+    # Adicionar descrições
+    receitas_agrupadas = pd.merge(receitas_agrupadas, df[['codigo', 'descricao']].drop_duplicates(), 
+                                 left_on='codigo', right_on='codigo', how='left')
+    despesas_agrupadas = pd.merge(despesas_agrupadas, df[['codigo', 'descricao']].drop_duplicates(), 
+                                 left_on='codigo', right_on='codigo', how='left')
+    custos_agrupados = pd.merge(custos_agrupados, df[['codigo', 'descricao']].drop_duplicates(), 
+                               left_on='codigo', right_on='codigo', how='left')
+    
+    return receitas_agrupadas, despesas_agrupadas, custos_agrupados
+
+def calcular_kpis(df):
+    # Encontrar contas relevantes
+    receita_bruta = df[df['codigo'] == '3.1']['saldo_final_ajustado'].sum()
+    deducoes = df[df['codigo'] == '3.2']['saldo_final_ajustado'].sum()
+    custos = df[df['codigo'] == '5.1']['saldo_final_ajustado'].sum()
+    despesas = df[df['codigo'].str.startswith('4')]['saldo_final_ajustado'].sum()
+    lucro_liquido = df[df['codigo'] == '2.3.03.01.0002']['saldo_final_ajustado'].sum()
+    ativo_total = df[df['codigo'].str.startswith('1')]['saldo_final_ajustado'].sum()
+    patrimonio_liquido = df[df['codigo'].str.startswith('2.3')]['saldo_final_ajustado'].sum()
+    
+    # Calcular KPIs
+    margem_bruta = (receita_bruta + deducoes - custos) / (receita_bruta + deducoes) * 100 if (receita_bruta + deducoes) != 0 else 0
+    margem_liquida = lucro_liquido / (receita_bruta + deducoes) * 100 if (receita_bruta + deducoes) != 0 else 0
+    roe = lucro_liquido / patrimonio_liquido * 100 if patrimonio_liquido != 0 else 0
+    roa = lucro_liquido / ativo_total * 100 if ativo_total != 0 else 0
+    
+    return {
+        'Receita Bruta': receita_bruta,
+        'Deduções': deducoes,
+        'Receita Líquida': receita_bruta + deducoes,
+        'Custos': custos,
+        'Lucro Bruto': receita_bruta + deducoes - custos,
+        'Despesas': despesas,
+        'Lucro Líquido': lucro_liquido,
+        'Margem Bruta (%)': margem_bruta,
+        'Margem Líquida (%)': margem_liquida,
+        'ROE (%)': roe,
+        'ROA (%)': roa,
+        'Ativo Total': ativo_total,
+        'Patrimônio Líquido': patrimonio_liquido
+    }
+
+# Interface Streamlit
 st.title("Análise de Demonstrações Contábeis via ECD")
 
-# Função segura para conversão de valores
-def safe_float_conversion(value, default=0.0):
-    try:
-        # Remove caracteres não numéricos exceto ponto e sinal negativo
-        cleaned_value = re.sub(r'[^\d.-]', '', str(value))
-        return float(cleaned_value) if cleaned_value else default
-    except (ValueError, TypeError):
-        return default
+# Upload do arquivo
+arquivo = st.file_uploader("Carregar arquivo ECD", type=["txt"])
 
-# Funções para processar o arquivo ECD
-def parse_ecd_file(uploaded_file):
-    try:
-        content = uploaded_file.getvalue().decode("utf-8")
-        lines = content.split('\n')
+if arquivo is not None:
+    # Processar arquivo
+    df, df_plano = processar_ecd(arquivo)
+    
+    # Calcular KPIs
+    kpis = calcular_kpis(df)
+    
+    # Layout
+    tab1, tab2, tab3, tab4 = st.tabs(["KPIs", "Balanço Patrimonial", "DRE", "Balancete"])
+    
+    with tab1:
+        st.header("Indicadores Financeiros")
         
-        # Extrair dados do bloco I155 (Saldos das contas)
-        i155_data = []
-        for line in lines:
-            if line.startswith('|I155|'):
-                parts = line.split('|')
-                if len(parts) >= 11:
-                    try:
-                        conta = parts[2].strip() if len(parts) > 2 else ""
-                        saldo_anterior = safe_float_conversion(parts[3].strip() if len(parts) > 3 else 0)
-                        natureza_saldo_anterior = parts[4].strip() if len(parts) > 4 else "D"
-                        debitos = safe_float_conversion(parts[5].strip() if len(parts) > 5 else 0)
-                        creditos = safe_float_conversion(parts[6].strip() if len(parts) > 6 else 0)
-                        saldo_final = safe_float_conversion(parts[7].strip() if len(parts) > 7 else 0)
-                        natureza_saldo_final = parts[8].strip() if len(parts) > 8 else "D"
-                        
-                        # Ajustar sinais conforme natureza do saldo
-                        saldo_anterior = saldo_anterior if natureza_saldo_anterior == 'D' else -saldo_anterior
-                        saldo_final = saldo_final if natureza_saldo_final == 'D' else -saldo_final
-                        
-                        i155_data.append({
-                            'Conta': conta,
-                            'Saldo Anterior': saldo_anterior,
-                            'Débitos': debitos,
-                            'Créditos': creditos,
-                            'Saldo Final': saldo_final
-                        })
-                    except Exception as e:
-                        st.warning(f"Erro ao processar linha: {line}. Erro: {str(e)}")
-                        continue
+        # Métricas principais
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Lucro Líquido", f"R$ {kpis['Lucro Líquido']:,.2f}")
+        col2.metric("Margem Líquida", f"{kpis['Margem Líquida (%)']:.2f}%")
+        col3.metric("ROE", f"{kpis['ROE (%)']:.2f}%")
+        col4.metric("ROA", f"{kpis['ROA (%)']:.2f}%")
         
-        df_i155 = pd.DataFrame(i155_data)
-        
-        # Extrair dados do bloco I050 (Plano de contas)
-        i050_data = []
-        for line in lines:
-            if line.startswith('|I050|'):
-                parts = line.split('|')
-                if len(parts) >= 10:
-                    try:
-                        codigo = parts[5].strip() if len(parts) > 5 else ""
-                        descricao = parts[9].strip() if len(parts) > 9 else ""
-                        if codigo:  # Só adiciona se tiver código
-                            i050_data.append({'Código': codigo, 'Descrição': descricao})
-                    except Exception as e:
-                        st.warning(f"Erro ao processar linha I050: {line}. Erro: {str(e)}")
-                        continue
-        
-        df_i050 = pd.DataFrame(i050_data).drop_duplicates()
-        
-        # Juntar os dados de saldos com as descrições das contas
-        if not df_i155.empty and not df_i050.empty:
-            df_final = pd.merge(df_i155, df_i050, left_on='Conta', right_on='Código', how='left')
-            df_final['Descrição'] = df_final['Descrição'].fillna(df_final['Conta'])
-        else:
-            df_final = df_i155.copy()
-            df_final['Descrição'] = df_final['Conta']
-        
-        return df_final
-    
-    except Exception as e:
-        st.error(f"Erro ao processar arquivo ECD: {str(e)}")
-        return pd.DataFrame()
-
-def classify_account(conta):
-    """Classifica as contas com base no código para agrupamento"""
-    if not conta or not isinstance(conta, str):
-        return 'Outros'
-    
-    # Ativo
-    if conta.startswith('1.1'):
-        return 'Ativo Circulante'
-    elif conta.startswith('1.2'):
-        return 'Ativo Não Circulante'
-    
-    # Passivo
-    elif conta.startswith('2.1'):
-        return 'Passivo Circulante'
-    elif conta.startswith('2.2'):
-        return 'Passivo Não Circulante'
-    elif conta.startswith('2.3'):
-        return 'Patrimônio Líquido'
-    
-    # Receitas
-    elif conta.startswith('3.'):
-        return 'Receitas'
-    
-    # Despesas
-    elif conta.startswith('4.'):
-        return 'Despesas'
-    
-    # Custos
-    elif conta.startswith('5.'):
-        return 'Custos'
-    
-    else:
-        return 'Outros'
-
-def generate_balance_sheet(df):
-    """Gera o Balanço Patrimonial"""
-    if df.empty:
-        return pd.DataFrame(), pd.DataFrame()
-    
-    df['Classificação'] = df['Conta'].apply(classify_account)
-    
-    # Agrupar por classificação
-    grouped = df.groupby('Classificação')['Saldo Final'].sum().reset_index()
-    
-    # Separar Ativo e Passivo+PL
-    ativo = grouped[grouped['Classificação'].isin(['Ativo Circulante', 'Ativo Não Circulante'])]
-    passivo_pl = grouped[grouped['Classificação'].isin(['Passivo Circulante', 'Passivo Não Circulante', 'Patrimônio Líquido'])]
-    
-    return ativo, passivo_pl
-
-def generate_income_statement(df):
-    """Gera a Demonstração do Resultado do Exercício (DRE)"""
-    if df.empty:
-        return pd.DataFrame(), 0, 0, 0, 0, 0
-    
-    df['Classificação'] = df['Conta'].apply(classify_account)
-    
-    # Filtra apenas contas de receitas, despesas e custos
-    dre_df = df[df['Classificação'].isin(['Receitas', 'Despesas', 'Custos'])]
-    
-    # Agrupa por classificação
-    dre_grouped = dre_df.groupby('Classificação')['Saldo Final'].sum().reset_index()
-    
-    # Calcula indicadores
-    receita_total = dre_grouped[dre_grouped['Classificação'] == 'Receitas']['Saldo Final'].sum()
-    custos_total = abs(dre_grouped[dre_grouped['Classificação'] == 'Custos']['Saldo Final'].sum())
-    despesas_total = abs(dre_grouped[dre_grouped['Classificação'] == 'Despesas']['Saldo Final'].sum())
-    
-    lucro_bruto = receita_total - custos_total
-    lucro_liquido = lucro_bruto - despesas_total
-    
-    return dre_grouped, receita_total, custos_total, despesas_total, lucro_bruto, lucro_liquido
-
-def generate_trial_balance(df):
-    """Gera o Balancete"""
-    if df.empty:
-        return pd.DataFrame()
-    
-    df['Classificação'] = df['Conta'].apply(classify_account)
-    return df[['Conta', 'Descrição', 'Saldo Anterior', 'Débitos', 'Créditos', 'Saldo Final', 'Classificação']]
-
-# Interface do usuário
-uploaded_file = st.file_uploader("Importe o arquivo ECD (TXT)", type="txt")
-
-if uploaded_file is not None:
-    try:
-        df = parse_ecd_file(uploaded_file)
-        
-        if df.empty:
-            st.error("Nenhum dado válido foi encontrado no arquivo ECD.")
-            st.stop()
-        
-        # Adicionar classificação das contas
-        df['Classificação'] = df['Conta'].apply(classify_account)
-        
-        # Sidebar com filtros
-        st.sidebar.header("Filtros")
-        selected_class = st.sidebar.multiselect(
-            "Classificação Contábil",
-            options=df['Classificação'].unique(),
-            default=df['Classificação'].unique()
+        # Gráficos
+        st.subheader("Análise de Rentabilidade")
+        fig = px.bar(
+            x=['Margem Bruta', 'Margem Líquida', 'ROE', 'ROA'],
+            y=[kpis['Margem Bruta (%)'], kpis['Margem Líquida (%)'], kpis['ROE (%)'], kpis['ROA (%)']],
+            labels={'x': 'Indicador', 'y': 'Percentual (%)'},
+            title='Indicadores de Rentabilidade'
         )
+        st.plotly_chart(fig, use_container_width=True)
         
-        # Aplicar filtros
-        filtered_df = df[df['Classificação'].isin(selected_class)]
-        
-        # Layout principal
-        tab1, tab2, tab3, tab4 = st.tabs(["Visão Geral", "Balanço Patrimonial", "DRE", "Balancete"])
-        
-        with tab1:
-            st.header("Indicadores Financeiros")
-            
-            # Calcular KPIs
-            ativo, passivo_pl = generate_balance_sheet(df)
-            dre_grouped, receita_total, custos_total, despesas_total, lucro_bruto, lucro_liquido = generate_income_statement(df)
-            
-            # KPIs
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Receita Total", f"R$ {receita_total:,.2f}" if receita_total else "R$ 0,00")
-            
-            margem_bruta = (lucro_bruto/receita_total*100) if receita_total != 0 else 0
-            col2.metric("Lucro Bruto", f"R$ {lucro_bruto:,.2f}", f"{margem_bruta:.1f}%")
-            
-            margem_liquida = (lucro_liquido/receita_total*100) if receita_total != 0 else 0
-            col3.metric("Lucro Líquido", f"R$ {lucro_liquido:,.2f}", f"{margem_liquida:.1f}%")
-            
-            # Calcular ROE (Return on Equity)
-            pl = df[df['Classificação'] == 'Patrimônio Líquido']['Saldo Final'].sum()
-            roe = (lucro_liquido / abs(pl)) * 100 if pl != 0 else 0
-            col4.metric("ROE", f"{roe:.1f}%")
-            
-            # Gráficos
-            st.subheader("Composição do Balanço")
-            if not ativo.empty:
-                fig = px.pie(ativo, values='Saldo Final', names='Classificação', title='Ativo')
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("Nenhum dado de Ativo encontrado.")
-            
-            if not passivo_pl.empty:
-                fig = px.pie(passivo_pl, values='Saldo Final', names='Classificação', title='Passivo + Patrimônio Líquido')
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("Nenhum dado de Passivo/PL encontrado.")
-            
-            st.subheader("Margens")
-            fig = px.bar(
-                x=['Margem Bruta', 'Margem Líquida', 'ROE'],
-                y=[margem_bruta, margem_liquida, roe],
-                labels={'x': 'Indicador', 'y': 'Percentual (%)'},
-                title='Indicadores de Rentabilidade'
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with tab2:
-            st.header("Balanço Patrimonial")
-            
-            ativo, passivo_pl = generate_balance_sheet(df)
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("Ativo")
-                if not ativo.empty:
-                    st.dataframe(
-                        ativo.assign(**{'Saldo Final': ativo['Saldo Final'].apply(lambda x: f"R$ {x:,.2f}")}),
-                        hide_index=True,
-                        use_container_width=True
-                    )
-                    
-                    fig = px.bar(
-                        ativo,
-                        x='Classificação',
-                        y='Saldo Final',
-                        title='Composição do Ativo'
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning("Nenhum dado de Ativo encontrado.")
-            
-            with col2:
-                st.subheader("Passivo + Patrimônio Líquido")
-                if not passivo_pl.empty:
-                    st.dataframe(
-                        passivo_pl.assign(**{'Saldo Final': passivo_pl['Saldo Final'].apply(lambda x: f"R$ {x:,.2f}")}),
-                        hide_index=True,
-                        use_container_width=True
-                    )
-                    
-                    fig = px.bar(
-                        passivo_pl,
-                        x='Classificação',
-                        y='Saldo Final',
-                        title='Composição do Passivo + PL'
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning("Nenhum dado de Passivo/PL encontrado.")
-        
-        with tab3:
-            st.header("Demonstração do Resultado do Exercício (DRE)")
-            
-            dre_grouped, receita_total, custos_total, despesas_total, lucro_bruto, lucro_liquido = generate_income_statement(df)
-            
-            # Criar DRE formatada
-            dre_data = [
-                {"Descrição": "Receita Operacional Bruta", "Valor": receita_total},
-                {"Descrição": "(-) Custos", "Valor": -custos_total},
-                {"Descrição": "= Lucro Bruto", "Valor": lucro_bruto},
-                {"Descrição": "(-) Despesas Operacionais", "Valor": -despesas_total},
-                {"Descrição": "= Lucro Líquido", "Valor": lucro_liquido}
-            ]
-            
-            dre_df = pd.DataFrame(dre_data)
-            dre_df['Valor'] = dre_df['Valor'].apply(lambda x: f"R$ {x:,.2f}")
-            
-            st.dataframe(
-                dre_df,
-                hide_index=True,
-                use_container_width=True
-            )
-            
-            # Gráfico da DRE
-            if not dre_grouped.empty:
-                fig = px.bar(
-                    dre_grouped,
-                    x='Classificação',
-                    y='Saldo Final',
-                    title='Composição do Resultado'
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("Nenhum dado de Receitas/Despesas encontrado.")
-            
-            # Margens
-            st.subheader("Análise de Margens")
-            
-            margem_data = {
-                "Margem": ["Margem Bruta", "Margem Líquida"],
-                "Valor (%)": [
-                    (lucro_bruto / receita_total * 100) if receita_total != 0 else 0,
-                    (lucro_liquido / receita_total * 100) if receita_total != 0 else 0
-                ]
-            }
-            
-            fig = px.bar(
-                pd.DataFrame(margem_data),
-                x='Margem',
-                y='Valor (%)',
-                title='Margens (%)'
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with tab4:
-            st.header("Balancete")
-            
-            balancete = generate_trial_balance(df)
-            
-            if not balancete.empty:
-                # Formatar valores monetários
-                formatted_balancete = balancete.copy()
-                for col in ['Saldo Anterior', 'Débitos', 'Créditos', 'Saldo Final']:
-                    formatted_balancete[col] = formatted_balancete[col].apply(lambda x: f"R$ {x:,.2f}")
-                
-                st.dataframe(
-                    formatted_balancete,
-                    hide_index=True,
-                    use_container_width=True,
-                    height=600
-                )
-                
-                # Opção para download
-                csv = balancete.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="Download Balancete (CSV)",
-                    data=csv,
-                    file_name="balancete.csv",
-                    mime="text/csv"
-                )
-            else:
-                st.warning("Nenhum dado para exibir no balancete.")
+        # Tabela de KPIs
+        st.subheader("Resumo Financeiro")
+        kpis_df = pd.DataFrame.from_dict(kpis, orient='index', columns=['Valor'])
+        st.dataframe(kpis_df.style.format("{:,.2f}"), use_container_width=True)
     
-    except Exception as e:
-        st.error(f"Ocorreu um erro ao processar o arquivo: {str(e)}")
+    with tab2:
+        st.header("Balanço Patrimonial")
+        
+        # Gerar balanço
+        ativo, passivo = gerar_balanco(df)
+        
+        # Layout em colunas
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Ativo")
+            st.dataframe(ativo[['descricao', 'saldo_final_ajustado']]
+                        .rename(columns={'descricao': 'Conta', 'saldo_final_ajustado': 'Valor'})
+                        .style.format({"Valor": "R$ {:,.2f}"}), 
+                        use_container_width=True)
+            
+            # Gráfico do Ativo
+            fig = px.pie(ativo, names='descricao', values='saldo_final_ajustado', 
+                         title='Composição do Ativo')
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.subheader("Passivo e Patrimônio Líquido")
+            st.dataframe(passivo[['descricao', 'saldo_final_ajustado']]
+                        .rename(columns={'descricao': 'Conta', 'saldo_final_ajustado': 'Valor'})
+                        .style.format({"Valor": "R$ {:,.2f}"}), 
+                        use_container_width=True)
+            
+            # Gráfico do Passivo
+            fig = px.pie(passivo, names='descricao', values='saldo_final_ajustado', 
+                         title='Composição do Passivo e PL')
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with tab3:
+        st.header("Demonstração do Resultado do Exercício (DRE)")
+        
+        # Gerar DRE
+        receitas, despesas, custos = gerar_dre(df)
+        
+        # Formatar DRE completa
+        dre_data = [
+            {"Item": "Receita Bruta", "Valor": kpis['Receita Bruta']},
+            {"Item": "(-) Deduções", "Valor": kpis['Deduções']},
+            {"Item": "Receita Líquida", "Valor": kpis['Receita Líquida']},
+            {"Item": "(-) Custos", "Valor": kpis['Custos']},
+            {"Item": "Lucro Bruto", "Valor": kpis['Lucro Bruto']},
+            {"Item": "(-) Despesas Operacionais", "Valor": despesas[despesas['codigo'].str.startswith('4.1')]['saldo_final_ajustado'].sum()},
+            {"Item": "(-) Despesas Financeiras", "Valor": despesas[despesas['codigo'].str.startswith('4.2')]['saldo_final_ajustado'].sum()},
+            {"Item": "Resultado Antes IR/CSLL", "Valor": kpis['Lucro Bruto'] - despesas['saldo_final_ajustado'].sum()},
+            {"Item": "(-) Provisão para IR/CSLL", "Valor": despesas[despesas['codigo'].str.startswith('4.4')]['saldo_final_ajustado'].sum()},
+            {"Item": "Lucro Líquido", "Valor": kpis['Lucro Líquido']}
+        ]
+        
+        dre_df = pd.DataFrame(dre_data)
+        st.dataframe(dre_df.style.format({"Valor": "R$ {:,.2f}"}), use_container_width=True)
+        
+        # Gráfico da DRE
+        fig = px.bar(dre_df, x='Item', y='Valor', title='Evolução da DRE')
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with tab4:
+        st.header("Balancete Contábil")
+        
+        # Gerar balancete
+        balancete = gerar_balancete(df)
+        
+        # Mostrar tabela
+        st.dataframe(balancete[['codigo', 'descricao', 'saldo_final_ajustado']]
+                    .rename(columns={'codigo': 'Conta', 'descricao': 'Descrição', 'saldo_final_ajustado': 'Saldo'})
+                    .style.format({"Saldo": "R$ {:,.2f}"}), 
+                    use_container_width=True, height=600)
+        
+        # Opção de download
+        csv = balancete.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            "Baixar Balancete (CSV)",
+            csv,
+            "balancete.csv",
+            "text/csv",
+            key='download-balancete'
+        )
+
 else:
-    st.info("Por favor, importe um arquivo ECD no formato TXT para começar a análise.")
+    st.info("Por favor, carregue um arquivo ECD no formato TXT para iniciar a análise.")
