@@ -1,101 +1,101 @@
 import streamlit as st
 import chardet
+from io import BytesIO
 
-def detectar_encoding(arquivo):
-    """Detecta o encoding do arquivo"""
-    rawdata = arquivo.read()
-    resultado = chardet.detect(rawdata)
-    arquivo.seek(0)  # Volta ao início do arquivo para leitura posterior
+def detectar_encoding(conteudo):
+    """Detecta o encoding do conteúdo do arquivo"""
+    resultado = chardet.detect(conteudo)
     return resultado['encoding']
 
-def processar_arquivo(arquivo, padroes):
+def processar_arquivo(conteudo, padroes):
     """
-    Processa o arquivo TXT removendo linhas que contêm os padrões especificados
+    Processa o conteúdo do arquivo removendo linhas indesejadas
     """
-    linhas_processadas = []
     try:
-        # Detecta o encoding do arquivo
-        encoding = detectar_encoding(arquivo)
+        # Detecta o encoding
+        encoding = detectar_encoding(conteudo)
         
-        # Lê o arquivo linha por linha
-        for linha in arquivo:
-            try:
-                linha_decodificada = linha.decode(encoding).strip()
-            except UnicodeDecodeError:
-                # Se falhar, tenta com encoding alternativo
-                linha_decodificada = linha.decode('latin-1').strip()
-            
-            # Verifica se a linha contém algum dos padrões indesejados
-            if not any(padrao in linha_decodificada for padrao in padroes):
-                linhas_processadas.append(linha_decodificada)
+        # Decodifica o conteúdo
+        try:
+            texto = conteudo.decode(encoding)
+        except UnicodeDecodeError:
+            texto = conteudo.decode('latin-1')
         
-        return "\n".join(linhas_processadas)
+        # Processa as linhas
+        linhas = texto.splitlines()
+        linhas_processadas = [
+            linha.strip() for linha in linhas
+            if not any(padrao in linha for padrao in padroes)
+        ]
+        
+        return "\n".join(linhas_processadas), len(linhas)
+    
     except Exception as e:
-        st.error(f"Erro ao processar o arquivo: {e}")
-        return None
+        st.error(f"Erro ao processar o arquivo: {str(e)}")
+        return None, 0
 
 def main():
-    st.title("📝 Processador de Arquivos TXT")
+    st.set_page_config(page_title="Processador TXT", page_icon="📄")
+    st.title("📄 Processador de Arquivos TXT")
     st.markdown("""
-    Este aplicativo permite importar um arquivo TXT e remover linhas indesejadas.
+    Remova linhas indesejadas de arquivos TXT. Carregue seu arquivo e defina os padrões a serem removidos.
     """)
-    
+
     # Padrões padrão para remoção
     padroes_default = ["-------", "SPED EFD-ICMS/IPI"]
     
     # Upload do arquivo
-    arquivo = st.file_uploader("Carregue seu arquivo TXT", type=['txt'], key="file_uploader")
+    arquivo = st.file_uploader("Selecione o arquivo TXT", type=['txt'])
     
-    # Opção para adicionar mais padrões
-    with st.expander("⚙️ Opções avançadas"):
+    # Opções avançadas
+    with st.expander("⚙️ Configurações avançadas"):
         padroes_adicionais = st.text_input(
-            "Adicionar mais padrões para remoção (separados por vírgula)",
-            help="Exemplo: padrão1, padrão2, padrão3",
-            key="padroes_adicionais"
+            "Padrões adicionais para remoção (separados por vírgula)",
+            help="Exemplo: padrão1, padrão2, padrão3"
         )
         
-        if padroes_adicionais:
-            padroes = padroes_default + [p.strip() for p in padroes_adicionais.split(",") if p.strip()]
-        else:
-            padroes = padroes_default
-    
+        padroes = padroes_default + [
+            p.strip() for p in padroes_adicionais.split(",") 
+            if p.strip()
+        ] if padroes_adicionais else padroes_default
+
     if arquivo is not None:
-        st.success("✅ Arquivo carregado com sucesso!")
-        
-        # Mostra o nome do arquivo
-        st.write(f"Arquivo: **{arquivo.name}**")
-        
-        # Processa o arquivo
-        resultado = processar_arquivo(arquivo, padroes)
-        
-        if resultado:
-            # Mostra prévia do resultado
-            st.subheader("🔍 Prévia do Resultado")
-            st.text_area("Conteúdo processado", resultado, height=300, key="previa_resultado")
+        try:
+            # Lê o conteúdo do arquivo
+            conteudo = arquivo.read()
             
-            # Cria um botão para download
-            st.download_button(
-                label="⬇️ Baixar arquivo processado",
-                data=resultado,
-                file_name=f"processado_{arquivo.name}",
-                mime="text/plain",
-                key="download_button"
-            )
+            # Processa o arquivo
+            resultado, total_linhas = processar_arquivo(conteudo, padroes)
             
-            # Mostra estatísticas
-            arquivo.seek(0)  # Volta ao início para contar as linhas
-            conteudo_original = arquivo.read().decode(detectar_encoding(arquivo))
-            linhas_originais = len(conteudo_original.split('\n'))
-            linhas_processadas = len(resultado.split('\n'))
-            linhas_removidas = linhas_originais - linhas_processadas
-            
-            st.info(f"""
-            **📊 Estatísticas:**
-            - Linhas originais: {linhas_originais}
-            - Linhas processadas: {linhas_processadas}
-            - Linhas removidas: {linhas_removidas}
-            - Padrões removidos: {', '.join(padroes)}
-            """)
+            if resultado is not None:
+                # Mostra estatísticas
+                linhas_processadas = len(resultado.splitlines())
+                st.success(f"""
+                **Processamento concluído!**  
+                ✔️ Linhas originais: {total_linhas}  
+                ✔️ Linhas processadas: {linhas_processadas}  
+                ✔️ Linhas removidas: {total_linhas - linhas_processadas}
+                """)
+
+                # Prévia do resultado
+                st.subheader("Prévia do resultado")
+                st.text_area("Conteúdo processado", resultado, height=300)
+
+                # Botão de download
+                buffer = BytesIO()
+                buffer.write(resultado.encode('utf-8'))
+                buffer.seek(0)
+                
+                st.download_button(
+                    label="⬇️ Baixar arquivo processado",
+                    data=buffer,
+                    file_name=f"processado_{arquivo.name}",
+                    mime="text/plain"
+                )
+        
+        except Exception as e:
+            st.error(f"Erro inesperado: {str(e)}")
+            st.info("Tente novamente ou verifique o arquivo.")
 
 if __name__ == "__main__":
     main()
