@@ -16,7 +16,7 @@ def processar_ecd(arquivo):
         linhas = conteudo.readlines()
         
         # Filtrando apenas o bloco L155
-        l155 = [linha for linha in linhas if linha.startswith("|L155|")]
+        l155 = [linha for linha in linhas if linha.startswith("|l155|")]
         
         if not l155:
             st.error("Nenhum registro do bloco L155 encontrado no arquivo.")
