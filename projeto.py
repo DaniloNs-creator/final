@@ -9,9 +9,17 @@ def detectar_encoding(conteudo):
 
 def processar_arquivo(conteudo, padroes):
     """
-    Processa o conteúdo do arquivo removendo linhas indesejadas
+    Processa o conteúdo do arquivo removendo linhas indesejadas e realizando substituições
     """
     try:
+        # Dicionário de substituições
+        substituicoes = {
+            "IMPOSTO IMPORTACAO": "IMP IMPORT",
+            "TAXA SICOMEX": "TX SISCOMEX",
+            "FRETE INTERNACIONAL": "FRET INTER",
+            "SEGURO INTERNACIONAL": "SEG INTERN"
+        }
+        
         # Detecta o encoding
         encoding = detectar_encoding(conteudo)
         
@@ -23,10 +31,16 @@ def processar_arquivo(conteudo, padroes):
         
         # Processa as linhas
         linhas = texto.splitlines()
-        linhas_processadas = [
-            linha.strip() for linha in linhas
-            if not any(padrao in linha for padrao in padroes)
-        ]
+        linhas_processadas = []
+        
+        for linha in linhas:
+            linha = linha.strip()
+            # Verifica se a linha contém algum padrão a ser removido
+            if not any(padrao in linha for padrao in padroes):
+                # Aplica as substituições
+                for original, substituto in substituicoes.items():
+                    linha = linha.replace(original, substituto)
+                linhas_processadas.append(linha)
         
         return "\n".join(linhas_processadas), len(linhas)
     
