@@ -30,6 +30,29 @@ st.markdown("""
         --light-color: #f8f9fa;
     }
     
+    /* Estilos para abas */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        padding: 0 25px;
+        background-color: #f0f2f6;
+        border-radius: 8px 8px 0 0;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #e1e5eb;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: var(--primary-color) !important;
+        color: white !important;
+    }
+    
     .header {
         background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
         color: white;
@@ -952,7 +975,7 @@ def atividades_fiscais():
                 st.info("Não há atividades com prazo definido para exibir na linha do tempo.")
 
     def show_activities_table():
-        """Mostra a tabela de atividades com filtros."""
+        """Mostra la tabela de atividades com filtros."""
         st.markdown("---")
         st.markdown('<div class="card"><h3>📋 Lista de Atividades</h3></div>', unsafe_allow_html=True)
 
@@ -1222,37 +1245,49 @@ def atividades_fiscais():
     show_close_period_section()
 
 # =============================================
-# FUNÇÃO PRINCIPAL
+# PÁGINA INICIAL
+# =============================================
+
+def pagina_inicial():
+    st.markdown("""
+    <div class="welcome-container">
+        <div class="welcome-message">
+            Bem vindo ao sistema fiscal
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="card">
+        <h2>📌 Sistema Fiscal HÄFELE</h2>
+        <p>Este sistema foi desenvolvido para auxiliar nas atividades fiscais da empresa HÄFELE Brasil, incluindo:</p>
+        <ul>
+            <li>Processamento de arquivos TXT</li>
+            <li>Lançamentos EFD REINF</li>
+            <li>Controle de atividades fiscais</li>
+        </ul>
+        <p>Selecione uma das abas acima para acessar os módulos disponíveis.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# =============================================
+# FUNÇÃO PRINCIPAL COM MENU EM ABAS
 # =============================================
 
 def main():
-    # Mostrar tela inicial se nenhum módulo foi selecionado
-    if 'modulo_selecionado' not in st.session_state:
-        st.session_state.modulo_selecionado = None
+    # Configuração das abas
+    tab1, tab2, tab3, tab4 = st.tabs(["🏠 Início", "📄 Processador TXT", "📊 EFD REINF", "📅 Atividades Fiscais"])
     
-    if st.session_state.modulo_selecionado is None:
-        st.markdown("""
-        <div class="welcome-container">
-            <div class="welcome-message">
-                Bem vindo ao sistema fiscal
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    with tab1:
+        pagina_inicial()
     
-    # Menu de navegação
-    st.sidebar.title("Menu de Navegação")
-    opcao = st.sidebar.radio("Selecione o módulo:", 
-                            ["Início", "Processador de arquivos TXT", "Lançamentos EFD REINF", "Atividades Fiscais"])
-    
-    if opcao != "Início":
-        st.session_state.modulo_selecionado = opcao
-    
-    # Mostrar o módulo selecionado
-    if st.session_state.modulo_selecionado == "Processador de arquivos TXT":
+    with tab2:
         processador_txt()
-    elif st.session_state.modulo_selecionado == "Lançamentos EFD REINF":
+    
+    with tab3:
         lancamentos_efd_reinf()
-    elif st.session_state.modulo_selecionado == "Atividades Fiscais":
+    
+    with tab4:
         atividades_fiscais()
 
 if __name__ == "__main__":
