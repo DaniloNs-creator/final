@@ -7,6 +7,7 @@ import sqlite3
 import numpy as np
 import plotly.express as px
 import base64
+import time
 
 # Configuração inicial da página
 st.set_page_config(
@@ -16,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS personalizado
+# CSS personalizado com animações profissionais
 st.markdown("""
 <style>
     :root {
@@ -30,33 +31,56 @@ st.markdown("""
     }
     
     .header {
-        background-color: var(--primary-color);
+        background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
         color: white;
-        padding: 1rem;
+        padding: 2rem;
         border-radius: 0.5rem;
-        margin-bottom: 1rem;
+        margin-bottom: 2rem;
         text-align: center;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        animation: fadeInDown 0.8s ease-out;
+    }
+    
+    .welcome-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 70vh;
+        animation: fadeIn 1.5s ease-in;
     }
     
     .welcome-message {
+        font-size: 3rem;
+        font-weight: 700;
+        color: var(--primary-color);
         text-align: center;
-        font-size: 24px;
-        padding: 50px 0;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+        background: linear-gradient(to right, #1e3a8a, #3b82f6);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        animation: pulse 2s infinite;
     }
     
     .card {
         background-color: white;
         border-radius: 0.5rem;
-        padding: 1rem;
-        margin-bottom: 1rem;
-        box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    
+    .card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
     }
     
     .status-badge {
-        padding: 0.25rem 0.5rem;
-        border-radius: 0.25rem;
+        padding: 0.35rem 0.7rem;
+        border-radius: 0.5rem;
         font-size: 0.875rem;
         font-weight: 600;
+        display: inline-block;
     }
     
     .status-pendente {
@@ -80,10 +104,11 @@ st.markdown("""
     }
     
     .dificuldade-badge {
-        padding: 0.25rem 0.5rem;
-        border-radius: 0.25rem;
+        padding: 0.35rem 0.7rem;
+        border-radius: 0.5rem;
         font-size: 0.875rem;
         font-weight: 600;
+        display: inline-block;
     }
     
     .dificuldade-baixa {
@@ -101,13 +126,71 @@ st.markdown("""
         color: white;
     }
     
-    .animate-fadeIn {
-        animation: fadeIn 0.5s ease-in-out;
-    }
-    
     @keyframes fadeIn {
         from { opacity: 0; }
         to { opacity: 1; }
+    }
+    
+    @keyframes fadeInDown {
+        from {
+            opacity: 0;
+            transform: translateY(-20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    @keyframes pulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+        100% { transform: scale(1); }
+    }
+    
+    @keyframes slideInRight {
+        from {
+            opacity: 0;
+            transform: translateX(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+    
+    .sidebar .sidebar-content {
+        background-color: #f8f9fa;
+    }
+    
+    .stButton>button {
+        background-color: var(--primary-color);
+        color: white;
+        border-radius: 0.5rem;
+        padding: 0.5rem 1rem;
+        transition: all 0.3s ease;
+    }
+    
+    .stButton>button:hover {
+        background-color: #1d4ed8;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    .stTextInput>div>div>input {
+        border-radius: 0.5rem !important;
+    }
+    
+    .stSelectbox>div>div>select {
+        border-radius: 0.5rem !important;
+    }
+    
+    .stDateInput>div>div>input {
+        border-radius: 0.5rem !important;
+    }
+    
+    .stTextArea>div>div>textarea {
+        border-radius: 0.5rem !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -119,8 +202,10 @@ st.markdown("""
 def processador_txt():
     st.title("📄 Processador de Arquivos TXT")
     st.markdown("""
-    Remova linhas indesejadas de arquivos TXT. Carregue seu arquivo e defina os padrões a serem removidos.
-    """)
+    <div class="card">
+        Remova linhas indesejadas de arquivos TXT. Carregue seu arquivo e defina os padrões a serem removidos.
+    </div>
+    """, unsafe_allow_html=True)
 
     def detectar_encoding(conteudo):
         """Detecta o encoding do conteúdo do arquivo"""
@@ -175,7 +260,7 @@ def processador_txt():
     arquivo = st.file_uploader("Selecione o arquivo TXT", type=['txt'])
     
     # Opções avançadas
-    with st.expander("⚙️ Configurações avançadas"):
+    with st.expander("⚙️ Configurações avançadas", expanded=False):
         padroes_adicionais = st.text_input(
             "Padrões adicionais para remoção (separados por vírgula)",
             help="Exemplo: padrão1, padrão2, padrão3"
@@ -231,8 +316,10 @@ def processador_txt():
 def lancamentos_efd_reinf():
     st.title("📊 Lançamentos EFD REINF")
     st.markdown("""
-    Sistema para lançamento de notas fiscais de serviço tomados e geração de arquivos R2010 e R4020 (com IRRF, PIS, COFINS e CSLL).
-    """)
+    <div class="card">
+        Sistema para lançamento de notas fiscais de serviço tomados e geração de arquivos R2010 e R4020 (com IRRF, PIS, COFINS e CSLL).
+    </div>
+    """, unsafe_allow_html=True)
     
     # Conexão com o banco de dados SQLite
     conn = sqlite3.connect('fiscal_hefele.db')
@@ -508,7 +595,7 @@ def lancamentos_efd_reinf():
 # =============================================
 
 def atividades_fiscais():
-    st.markdown('<div class="header animate-fadeIn"><h1>📊 Controle de Atividades Fiscais - HÄFELE BRASIL</h1></div>', unsafe_allow_html=True)
+    st.markdown('<div class="header"><h1>📊 Controle de Atividades Fiscais - HÄFELE BRASIL</h1></div>', unsafe_allow_html=True)
 
     # Conexão com o banco de dados SQLite
     DATABASE = 'atividades_fiscais.db'
@@ -632,7 +719,8 @@ def atividades_fiscais():
                 "Dificuldade": "Média",
                 "Prazo": None,
                 "Data Início": None,
-                "Data Conclusão": None
+                "Data Conclusão": None,
+                "MesAnoReferencia": None
             },
             {
                 "Obrigação": "DCTF",
@@ -644,7 +732,8 @@ def atividades_fiscais():
                 "Dificuldade": "Alta",
                 "Prazo": None,
                 "Data Início": None,
-                "Data Conclusão": None
+                "Data Conclusão": None,
+                "MesAnoReferencia": None
             },
             {
                 "Obrigação": "EFD Contribuições",
@@ -656,7 +745,8 @@ def atividades_fiscais():
                 "Dificuldade": "Média",
                 "Prazo": None,
                 "Data Início": None,
-                "Data Conclusão": None
+                "Data Conclusão": None,
+                "MesAnoReferencia": None
             }
         ]
 
@@ -764,7 +854,7 @@ def atividades_fiscais():
     def show_charts():
         """Mostra os gráficos de análise."""
         st.markdown("---")
-        st.markdown('<div class="card animate-fadeIn"><h3>📈 Análise Gráfica</h3></div>', unsafe_allow_html=True)
+        st.markdown('<div class="card"><h3>📈 Análise Gráfica</h3></div>', unsafe_allow_html=True)
         
         if st.session_state.df_atividades.empty:
             st.info("Adicione atividades ou habilite um mês para ver as análises gráficas.")
@@ -842,7 +932,7 @@ def atividades_fiscais():
     def show_activities_table():
         """Mostra a tabela de atividades com filtros."""
         st.markdown("---")
-        st.markdown('<div class="card animate-fadeIn"><h3>📋 Lista de Atividades</h3></div>', unsafe_allow_html=True)
+        st.markdown('<div class="card"><h3>📋 Lista de Atividades</h3></div>', unsafe_allow_html=True)
 
         if st.session_state.df_atividades.empty:
             st.info("Nenhuma atividade encontrada para o mês selecionado.")
@@ -902,6 +992,8 @@ def atividades_fiscais():
 
                 if st.form_submit_button("Adicionar Atividade"):
                     if obrigacao and descricao and orgao and data_limite and prazo:
+                        prazo_calculado = calculate_deadline(data_limite, st.session_state.mes_ano_referencia)
+                        
                         nova_atividade = {
                             "Obrigação": obrigacao,
                             "Descrição": descricao,
@@ -910,7 +1002,7 @@ def atividades_fiscais():
                             "Data Limite": data_limite,
                             "Status": status,
                             "Dificuldade": dificuldade,
-                            "Prazo": datetime.combine(prazo, datetime.min.time()).strftime('%Y-%m-%d %H:%M:%S'),
+                            "Prazo": prazo_calculado.strftime('%Y-%m-%d %H:%M:%S') if prazo_calculado else None,
                             "Data Início": datetime.now().strftime('%Y-%m-%d %H:%M:%S') if status == "Em Andamento" else None,
                             "Data Conclusão": datetime.now().strftime('%Y-%m-%d %H:%M:%S') if status == "Finalizado" else None,
                             "MesAnoReferencia": st.session_state.mes_ano_referencia
@@ -984,7 +1076,7 @@ def atividades_fiscais():
     def show_close_period_section():
         """Mostra a seção para fechar o período atual."""
         st.markdown("---")
-        st.markdown('<div class="card animate-fadeIn"><h3>🗓️ Fechamento e Habilitação de Período</h3></div>', unsafe_allow_html=True)
+        st.markdown('<div class="card"><h3>🗓️ Fechamento e Habilitação de Período</h3></div>', unsafe_allow_html=True)
 
         if st.session_state.df_atividades.empty:
             st.info("Nenhuma atividade para fechar. Habilite um mês primeiro.")
@@ -1024,7 +1116,29 @@ def atividades_fiscais():
                             'Data Início': None,
                             'Data Conclusão': None
                         })
-                    insert_initial_data(atividades)
+                    
+                    conn = create_connection()
+                    if conn:
+                        try:
+                            cursor = conn.cursor()
+                            for atividade in atividades:
+                                cursor.execute("""
+                                    INSERT INTO atividades (
+                                        Obrigacao, Descricao, Periodicidade, OrgaoResponsavel, DataLimite,
+                                        Status, Dificuldade, Prazo, DataInicio, DataConclusao, MesAnoReferencia
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """, (
+                                    atividade['Obrigação'], atividade['Descrição'], atividade['Periodicidade'],
+                                    atividade['Órgão Responsável'], atividade['Data Limite'], atividade['Status'],
+                                    atividade['Dificuldade'], atividade['Prazo'], atividade['Data Início'],
+                                    atividade['Data Conclusão'], atividade['MesAnoReferencia']
+                                ))
+                            conn.commit()
+                        except sqlite3.Error as e:
+                            st.error(f"Erro ao inserir atividades iniciais: {e}")
+                        finally:
+                            conn.close()
+                    
                     st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
                     st.success("Atividades padrão habilitadas para o novo mês!")
                 
@@ -1049,7 +1163,29 @@ def atividades_fiscais():
                     'Data Início': None,
                     'Data Conclusão': None
                 })
-            insert_initial_data(atividades)
+            
+            conn = create_connection()
+            if conn:
+                try:
+                    cursor = conn.cursor()
+                    for atividade in atividades:
+                        cursor.execute("""
+                            INSERT INTO atividades (
+                                Obrigacao, Descricao, Periodicidade, OrgaoResponsavel, DataLimite,
+                                Status, Dificuldade, Prazo, DataInicio, DataConclusao, MesAnoReferencia
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            atividade['Obrigação'], atividade['Descrição'], atividade['Periodicidade'],
+                            atividade['Órgão Responsável'], atividade['Data Limite'], atividade['Status'],
+                            atividade['Dificuldade'], atividade['Prazo'], atividade['Data Início'],
+                            atividade['Data Conclusão'], atividade['MesAnoReferencia']
+                        ))
+                    conn.commit()
+                except sqlite3.Error as e:
+                    st.error(f"Erro ao inserir atividades iniciais: {e}")
+                finally:
+                    conn.close()
+            
             st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
             st.success("Atividades padrão habilitadas com sucesso!")
             st.rerun()
@@ -1073,7 +1209,13 @@ def main():
         st.session_state.modulo_selecionado = None
     
     if st.session_state.modulo_selecionado is None:
-        st.markdown('<div class="welcome-message">Bem vindo ao sistema fiscal</div>', unsafe_allow_html=True)
+        st.markdown("""
+        <div class="welcome-container">
+            <div class="welcome-message">
+                Bem vindo ao sistema fiscal
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     # Menu de navegação
     st.sidebar.title("Menu de Navegação")
