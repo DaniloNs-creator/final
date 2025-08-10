@@ -41,6 +41,28 @@ st.markdown("""
         animation: fadeInDown 0.8s ease-out;
     }
     
+    .header-txt {
+        background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+        color: white;
+        padding: 2rem;
+        border-radius: 0.5rem;
+        margin-bottom: 2rem;
+        text-align: center;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        animation: fadeInDown 0.8s ease-out;
+    }
+    
+    .header-reinf {
+        background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+        color: white;
+        padding: 2rem;
+        border-radius: 0.5rem;
+        margin-bottom: 2rem;
+        text-align: center;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        animation: fadeInDown 0.8s ease-out;
+    }
+    
     .welcome-container {
         display: flex;
         justify-content: center;
@@ -200,7 +222,7 @@ st.markdown("""
 # =============================================
 
 def processador_txt():
-    st.title("📄 Processador de Arquivos TXT")
+    st.markdown('<div class="header-txt"><h1>📄 Processador de Arquivos TXT</h1></div>', unsafe_allow_html=True)
     st.markdown("""
     <div class="card">
         Remova linhas indesejadas de arquivos TXT. Carregue seu arquivo e defina os padrões a serem removidos.
@@ -314,7 +336,7 @@ def processador_txt():
 # =============================================
 
 def lancamentos_efd_reinf():
-    st.title("📊 Lançamentos EFD REINF")
+    st.markdown('<div class="header-reinf"><h1>📊 Lançamentos EFD REINF</h1></div>', unsafe_allow_html=True)
     st.markdown("""
     <div class="card">
         Sistema para lançamento de notas fiscais de serviço tomados e geração de arquivos R2010 e R4020 (com IRRF, PIS, COFINS e CSLL).
