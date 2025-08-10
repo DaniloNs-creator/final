@@ -7,17 +7,17 @@ import base64
 
 # Configuração da página
 st.set_page_config(
-    page_title="FISCAL HÄFALE",
+    page_title="Sistema Fiscal",
     page_icon="📊",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# Função para criar a capa
-def mostrar_capa():
+# Função para mostrar a tela inicial
+def mostrar_tela_inicial():
     st.markdown("""
-    <div style="background-color:#1e3a8a;padding:20px;border-radius:10px;margin-bottom:30px">
-        <h1 style="color:white;text-align:center;font-size:48px">FISCAL HÄFALE</h1>
-        <p style="color:white;text-align:center;font-size:18px">Sistema Completo de Processamento Fiscal</p>
+    <div style="text-align:center; padding:50px">
+        <h1 style="font-size:48px">Bem vindo ao sistema fiscal</h1>
     </div>
     """, unsafe_allow_html=True)
 
@@ -198,7 +198,7 @@ def lancamentos_efd_reinf():
             st.info(f"Valor CSLL: R$ {valor_csll:.2f}")
         
         if st.button("Adicionar Nota Fiscal"):
-            nova_nota = pd.DataFrame([{
+            nova_nota = {
                 'Data': data.strftime('%d/%m/%Y'),
                 'CNPJ Tomador': cnpj_tomador,
                 'CNPJ Prestador': cnpj_prestador,
@@ -219,11 +219,12 @@ def lancamentos_efd_reinf():
                 'Retém CSLL': retem_csll,
                 'Alíquota CSLL': aliquota_csll,
                 'Valor CSLL': valor_csll
-            }])
+            }
             
-            st.session_state.notas_fiscais = pd.concat([st.session_state.notas_fiscais, nova_nota], ignore_index=True)
+            # Convertendo o dicionário para DataFrame e concatenando
+            df_nova_nota = pd.DataFrame([nova_nota])
+            st.session_state.notas_fiscais = pd.concat([st.session_state.notas_fiscais, df_nova_nota], ignore_index=True)
             st.success("Nota fiscal adicionada com sucesso!")
-            st.experimental_rerun()
     
     # Visualização das notas fiscais cadastradas
     st.subheader("Notas Fiscais Cadastradas")
@@ -244,7 +245,6 @@ def lancamentos_efd_reinf():
             if st.button("Excluir Linha"):
                 st.session_state.notas_fiscais = st.session_state.notas_fiscais.drop(index=linha_excluir).reset_index(drop=True)
                 st.success("Linha excluída com sucesso!")
-                st.experimental_rerun()
         
         # Formulário de edição
         if 'editando' in st.session_state:
@@ -326,7 +326,6 @@ def lancamentos_efd_reinf():
                     
                     del st.session_state.editando
                     st.success("Alterações salvas com sucesso!")
-                    st.experimental_rerun()
     else:
         st.warning("Nenhuma nota fiscal cadastrada ainda.")
     
@@ -390,15 +389,23 @@ def lancamentos_efd_reinf():
 
 # Navegação principal
 def main():
-    mostrar_capa()
+    # Mostra a tela inicial apenas se nenhum módulo foi selecionado
+    if 'modulo_selecionado' not in st.session_state:
+        st.session_state.modulo_selecionado = None
+    
+    if st.session_state.modulo_selecionado is None:
+        mostrar_tela_inicial()
     
     st.sidebar.title("Menu de Navegação")
-    app_mode = st.sidebar.radio("Selecione o módulo:",
-        ["Processador de arquivos TXT", "Lançamentos EFD REINF"])
+    opcao = st.sidebar.radio("Selecione o módulo:", 
+                            ["Início", "Processador de arquivos TXT", "Lançamentos EFD REINF"])
     
-    if app_mode == "Processador de arquivos TXT":
+    if opcao != "Início":
+        st.session_state.modulo_selecionado = opcao
+    
+    if st.session_state.modulo_selecionado == "Processador de arquivos TXT":
         processador_txt()
-    elif app_mode == "Lançamentos EFD REINF":
+    elif st.session_state.modulo_selecionado == "Lançamentos EFD REINF":
         lancamentos_efd_reinf()
 
 if __name__ == "__main__":
