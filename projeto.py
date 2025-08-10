@@ -61,6 +61,7 @@ def gerar_arquivo_reinf(notas_fiscais, competencia):
     linhas_reinf = []
 
     # Exemplo de Bloco de Abertura (simplificado)
+    # Estrutura: |TipoRegistro|IndicadorAbertura|Competência|...outros campos...|
     linhas_reinf.append(f"|R-1000|1|{competencia_fmt}|||||||||||||||")
     
     for nota in notas_fiscais:
@@ -74,16 +75,14 @@ def gerar_arquivo_reinf(notas_fiscais, competencia):
         data_emissao_fmt = nota['data_emissao'].strftime('%d%m%Y')
         
         # === Registro R-2010 (Serviços Tomados) ===
-        # Leiaute simplificado: |ID|CNPJ Prestador|Valor Bruto|Base INSS|Valor Retido INSS|Tipo de Serviço|
-        # O '1' no final indica o tipo de serviço (ex: 1 - Limpeza) - simplificação
+        # Leiaute simplificado: |ID|CNPJ Prestador|Num Nota|Data Emissão|Valor Bruto|Base INSS|Valor Retido INSS|Tipo de Serviço|...|
         linhas_reinf.append(
             f"|R-2010|{nota['cnpj_prestador']}|{nota['num_nota']}|{data_emissao_fmt}|{valor_bruto_fmt}|"
             f"{base_ret_fmt}|{valor_ret_fmt}|1|||"
         )
         
         # === Registro R-4020 (Pagamentos a Pessoa Jurídica) ===
-        # Leiaute simplificado: |ID|CNPJ Beneficiário|Valor Bruto|Valor Retido IRRF|Natureza Rendimento|
-        # 15051 é um código comum de natureza de rendimento - simplificação
+        # Leiaute simplificado: |ID|CNPJ Beneficiário|Valor Bruto|Valor Retido IRRF|...|Natureza Rendimento|...|
         linhas_reinf.append(
             f"|R-4020|{nota['cnpj_prestador']}|{valor_bruto_fmt}|0,00|{valor_irrf_fmt}|0,00|0,00|15051||"
         )
@@ -161,12 +160,13 @@ def main():
         with col1:
             st.subheader("📝 Lançar Nova Nota Fiscal")
             with st.form("form_nota_fiscal", clear_on_submit=True):
+                # --- LINHA CORRIGIDA ---
                 competencia = st.date_input(
-                    "Competência (Mês/Ano)", 
-                    value=datetime.now(),
-                    format="MM/YYYY",
-                    help="Mês e ano de referência para a apuração."
+                    "Competência", 
+                    value=datetime.now().replace(day=1), # Sugere o primeiro dia do mês atual
+                    help="Selecione qualquer dia dentro do mês de competência desejado. O sistema usará apenas o mês e o ano."
                 )
+                
                 cnpj_prestador = st.text_input("CNPJ do Prestador de Serviço", "00.000.000/0000-00")
                 num_nota = st.text_input("Número da Nota Fiscal")
                 data_emissao = st.date_input("Data de Emissão da Nota")
@@ -212,7 +212,7 @@ def main():
 
                 st.subheader("⬇️ Gerar Arquivo EFD-Reinf")
                 # Usa a competência da primeira nota lançada como referência para o arquivo
-                competencia_geracao = st.session_state.notas_fiscais[0]['data_emissao']
+                competencia_geracao = datetime.strptime(st.session_state.notas_fiscais[0]['Competência'], '%m/%Y')
                 
                 conteudo_reinf = gerar_arquivo_reinf(st.session_state.notas_fiscais, competencia_geracao)
                 
@@ -225,7 +225,8 @@ def main():
                 )
                 
                 with st.expander("👁️ Ver prévia do arquivo gerado"):
-                    st.text(conteudo_reinf)
+                    st.text(conteudo_reинf)
 
 if __name__ == "__main__":
     main()
+
