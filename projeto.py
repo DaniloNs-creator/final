@@ -172,49 +172,33 @@ def lancamentos_efd_reinf():
             # IRRF
             st.markdown("**IRRF**")
             retem_irrf = st.checkbox("Retém IRRF?", value=False, key='retem_irrf')
-            if retem_irrf:
-                aliquota_irrf = st.slider("Alíquota IRRF (%)", min_value=0.0, max_value=100.0, step=0.01, value=1.5, key='aliquota_irrf')
-                valor_irrf = valor_servico * (aliquota_irrf / 100)
-                st.info(f"Valor IRRF: R$ {valor_irrf:.2f}")
-            else:
-                aliquota_irrf = 0.0
-                valor_irrf = 0.0
+            aliquota_irrf = st.slider("Alíquota IRRF (%)", min_value=0.0, max_value=100.0, step=0.01, value=1.5, key='aliquota_irrf', disabled=not retem_irrf)
+            valor_irrf = valor_servico * (aliquota_irrf / 100) if retem_irrf else 0.0
+            st.info(f"Valor IRRF: R$ {valor_irrf:.2f}")
             
             # PIS
             st.markdown("**PIS**")
             retem_pis = st.checkbox("Retém PIS?", value=False, key='retem_pis')
-            if retem_pis:
-                aliquota_pis = st.slider("Alíquota PIS (%)", min_value=0.0, max_value=100.0, step=0.01, value=0.65, key='aliquota_pis')
-                valor_pis = valor_servico * (aliquota_pis / 100)
-                st.info(f"Valor PIS: R$ {valor_pis:.2f}")
-            else:
-                aliquota_pis = 0.0
-                valor_pis = 0.0
+            aliquota_pis = st.slider("Alíquota PIS (%)", min_value=0.0, max_value=100.0, step=0.01, value=0.65, key='aliquota_pis', disabled=not retem_pis)
+            valor_pis = valor_servico * (aliquota_pis / 100) if retem_pis else 0.0
+            st.info(f"Valor PIS: R$ {valor_pis:.2f}")
             
             # COFINS
             st.markdown("**COFINS**")
             retem_cofins = st.checkbox("Retém COFINS?", value=False, key='retem_cofins')
-            if retem_cofins:
-                aliquota_cofins = st.slider("Alíquota COFINS (%)", min_value=0.0, max_value=100.0, step=0.01, value=3.0, key='aliquota_cofins')
-                valor_cofins = valor_servico * (aliquota_cofins / 100)
-                st.info(f"Valor COFINS: R$ {valor_cofins:.2f}")
-            else:
-                aliquota_cofins = 0.0
-                valor_cofins = 0.0
+            aliquota_cofins = st.slider("Alíquota COFINS (%)", min_value=0.0, max_value=100.0, step=0.01, value=3.0, key='aliquota_cofins', disabled=not retem_cofins)
+            valor_cofins = valor_servico * (aliquota_cofins / 100) if retem_cofins else 0.0
+            st.info(f"Valor COFINS: R$ {valor_cofins:.2f}")
             
             # CSLL
             st.markdown("**CSLL**")
             retem_csll = st.checkbox("Retém CSLL?", value=False, key='retem_csll')
-            if retem_csll:
-                aliquota_csll = st.slider("Alíquota CSLL (%)", min_value=0.0, max_value=100.0, step=0.01, value=1.0, key='aliquota_csll')
-                valor_csll = valor_servico * (aliquota_csll / 100)
-                st.info(f"Valor CSLL: R$ {valor_csll:.2f}")
-            else:
-                aliquota_csll = 0.0
-                valor_csll = 0.0
+            aliquota_csll = st.slider("Alíquota CSLL (%)", min_value=0.0, max_value=100.0, step=0.01, value=1.0, key='aliquota_csll', disabled=not retem_csll)
+            valor_csll = valor_servico * (aliquota_csll / 100) if retem_csll else 0.0
+            st.info(f"Valor CSLL: R$ {valor_csll:.2f}")
         
         if st.button("Adicionar Nota Fiscal"):
-            nova_nota = {
+            nova_nota = pd.DataFrame([{
                 'Data': data.strftime('%d/%m/%Y'),
                 'CNPJ Tomador': cnpj_tomador,
                 'CNPJ Prestador': cnpj_prestador,
@@ -235,10 +219,11 @@ def lancamentos_efd_reinf():
                 'Retém CSLL': retem_csll,
                 'Alíquota CSLL': aliquota_csll,
                 'Valor CSLL': valor_csll
-            }
+            }])
             
-            st.session_state.notas_fiscais = st.session_state.notas_fiscais.append(nova_nota, ignore_index=True)
+            st.session_state.notas_fiscais = pd.concat([st.session_state.notas_fiscais, nova_nota], ignore_index=True)
             st.success("Nota fiscal adicionada com sucesso!")
+            st.experimental_rerun()
     
     # Visualização das notas fiscais cadastradas
     st.subheader("Notas Fiscais Cadastradas")
@@ -259,6 +244,7 @@ def lancamentos_efd_reinf():
             if st.button("Excluir Linha"):
                 st.session_state.notas_fiscais = st.session_state.notas_fiscais.drop(index=linha_excluir).reset_index(drop=True)
                 st.success("Linha excluída com sucesso!")
+                st.experimental_rerun()
         
         # Formulário de edição
         if 'editando' in st.session_state:
@@ -267,7 +253,7 @@ def lancamentos_efd_reinf():
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    data_edit = st.text_input("Data", value=nota_editar['Data'], key='data_edit')
+                    data_edit = st.date_input("Data", value=datetime.strptime(nota_editar['Data'], '%d/%m/%Y'), key='data_edit')
                     cnpj_tomador_edit = st.text_input("CNPJ Tomador", value=nota_editar['CNPJ Tomador'], key='cnpj_tomador_edit')
                     cnpj_prestador_edit = st.text_input("CNPJ Prestador", value=nota_editar['CNPJ Prestador'], key='cnpj_prestador_edit')
                     valor_servico_edit = st.number_input("Valor do Serviço (R$)", value=float(nota_editar['Valor Serviço']), key='valor_servico_edit')
@@ -287,53 +273,37 @@ def lancamentos_efd_reinf():
                     # IRRF
                     st.markdown("**IRRF**")
                     retem_irrf_edit = st.checkbox("Retém IRRF?", value=bool(nota_editar['Retém IRRF']), key='retem_irrf_edit')
-                    if retem_irrf_edit:
-                        aliquota_irrf_edit = st.slider("Alíquota IRRF (%)", min_value=0.0, max_value=100.0, step=0.01, 
-                                                      value=float(nota_editar['Alíquota IRRF']), key='aliquota_irrf_edit')
-                        valor_irrf_edit = valor_servico_edit * (aliquota_irrf_edit / 100)
-                        st.info(f"Valor IRRF: R$ {valor_irrf_edit:.2f}")
-                    else:
-                        aliquota_irrf_edit = 0.0
-                        valor_irrf_edit = 0.0
+                    aliquota_irrf_edit = st.slider("Alíquota IRRF (%)", min_value=0.0, max_value=100.0, step=0.01, 
+                                                  value=float(nota_editar['Alíquota IRRF']), key='aliquota_irrf_edit', disabled=not retem_irrf_edit)
+                    valor_irrf_edit = valor_servico_edit * (aliquota_irrf_edit / 100) if retem_irrf_edit else 0.0
+                    st.info(f"Valor IRRF: R$ {valor_irrf_edit:.2f}")
                     
                     # PIS
                     st.markdown("**PIS**")
                     retem_pis_edit = st.checkbox("Retém PIS?", value=bool(nota_editar['Retém PIS']), key='retem_pis_edit')
-                    if retem_pis_edit:
-                        aliquota_pis_edit = st.slider("Alíquota PIS (%)", min_value=0.0, max_value=100.0, step=0.01, 
-                                                    value=float(nota_editar['Alíquota PIS']), key='aliquota_pis_edit')
-                        valor_pis_edit = valor_servico_edit * (aliquota_pis_edit / 100)
-                        st.info(f"Valor PIS: R$ {valor_pis_edit:.2f}")
-                    else:
-                        aliquota_pis_edit = 0.0
-                        valor_pis_edit = 0.0
+                    aliquota_pis_edit = st.slider("Alíquota PIS (%)", min_value=0.0, max_value=100.0, step=0.01, 
+                                                value=float(nota_editar['Alíquota PIS']), key='aliquota_pis_edit', disabled=not retem_pis_edit)
+                    valor_pis_edit = valor_servico_edit * (aliquota_pis_edit / 100) if retem_pis_edit else 0.0
+                    st.info(f"Valor PIS: R$ {valor_pis_edit:.2f}")
                     
                     # COFINS
                     st.markdown("**COFINS**")
                     retem_cofins_edit = st.checkbox("Retém COFINS?", value=bool(nota_editar['Retém COFINS']), key='retem_cofins_edit')
-                    if retem_cofins_edit:
-                        aliquota_cofins_edit = st.slider("Alíquota COFINS (%)", min_value=0.0, max_value=100.0, step=0.01, 
-                                                        value=float(nota_editar['Alíquota COFINS']), key='aliquota_cofins_edit')
-                        valor_cofins_edit = valor_servico_edit * (aliquota_cofins_edit / 100)
-                        st.info(f"Valor COFINS: R$ {valor_cofins_edit:.2f}")
-                    else:
-                        aliquota_cofins_edit = 0.0
-                        valor_cofins_edit = 0.0
+                    aliquota_cofins_edit = st.slider("Alíquota COFINS (%)", min_value=0.0, max_value=100.0, step=0.01, 
+                                                    value=float(nota_editar['Alíquota COFINS']), key='aliquota_cofins_edit', disabled=not retem_cofins_edit)
+                    valor_cofins_edit = valor_servico_edit * (aliquota_cofins_edit / 100) if retem_cofins_edit else 0.0
+                    st.info(f"Valor COFINS: R$ {valor_cofins_edit:.2f}")
                     
                     # CSLL
                     st.markdown("**CSLL**")
                     retem_csll_edit = st.checkbox("Retém CSLL?", value=bool(nota_editar['Retém CSLL']), key='retem_csll_edit')
-                    if retem_csll_edit:
-                        aliquota_csll_edit = st.slider("Alíquota CSLL (%)", min_value=0.0, max_value=100.0, step=0.01, 
-                                                      value=float(nota_editar['Alíquota CSLL']), key='aliquota_csll_edit')
-                        valor_csll_edit = valor_servico_edit * (aliquota_csll_edit / 100)
-                        st.info(f"Valor CSLL: R$ {valor_csll_edit:.2f}")
-                    else:
-                        aliquota_csll_edit = 0.0
-                        valor_csll_edit = 0.0
+                    aliquota_csll_edit = st.slider("Alíquota CSLL (%)", min_value=0.0, max_value=100.0, step=0.01, 
+                                                  value=float(nota_editar['Alíquota CSLL']), key='aliquota_csll_edit', disabled=not retem_csll_edit)
+                    valor_csll_edit = valor_servico_edit * (aliquota_csll_edit / 100) if retem_csll_edit else 0.0
+                    st.info(f"Valor CSLL: R$ {valor_csll_edit:.2f}")
                 
                 if st.button("Salvar Alterações"):
-                    st.session_state.notas_fiscais.at[st.session_state.editando, 'Data'] = data_edit
+                    st.session_state.notas_fiscais.at[st.session_state.editando, 'Data'] = data_edit.strftime('%d/%m/%Y')
                     st.session_state.notas_fiscais.at[st.session_state.editando, 'CNPJ Tomador'] = cnpj_tomador_edit
                     st.session_state.notas_fiscais.at[st.session_state.editando, 'CNPJ Prestador'] = cnpj_prestador_edit
                     st.session_state.notas_fiscais.at[st.session_state.editando, 'Valor Serviço'] = valor_servico_edit
@@ -356,6 +326,7 @@ def lancamentos_efd_reinf():
                     
                     del st.session_state.editando
                     st.success("Alterações salvas com sucesso!")
+                    st.experimental_rerun()
     else:
         st.warning("Nenhuma nota fiscal cadastrada ainda.")
     
