@@ -8,6 +8,7 @@ import numpy as np
 import plotly.express as px
 import base64
 import time
+from streamlit.components.v1 import html
 
 # Configuração inicial da página
 st.set_page_config(
@@ -17,50 +18,62 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS personalizado com animações profissionais
+# CSS personalizado com animações profissionais e modernas
 st.markdown("""
 <style>
     :root {
-        --primary-color: #1e3a8a;
+        --primary-color: #2563eb;
+        --primary-dark: #1e40af;
         --secondary-color: #f0f2f6;
-        --success-color: #28a745;
-        --warning-color: #ffc107;
-        --danger-color: #dc3545;
-        --dark-color: #343a40;
-        --light-color: #f8f9fa;
+        --success-color: #10b981;
+        --warning-color: #f59e0b;
+        --danger-color: #ef4444;
+        --dark-color: #1f2937;
+        --light-color: #f9fafb;
+        --accent-color: #8b5cf6;
+        --text-color: #374151;
     }
     
-    .header {
-        background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
-        color: white;
-        padding: 2rem;
-        border-radius: 0.5rem;
-        margin-bottom: 2rem;
-        text-align: center;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        animation: fadeInDown 0.8s ease-out;
+    /* Efeito de gradiente animado */
+    @keyframes gradientBG {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
     }
     
-    .header-txt {
-        background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+    .gradient-header {
+        background: linear-gradient(135deg, #2563eb, #1e40af, #8b5cf6);
+        background-size: 400% 400%;
+        animation: gradientBG 15s ease infinite;
         color: white;
-        padding: 2rem;
-        border-radius: 0.5rem;
+        padding: 2.5rem;
+        border-radius: 0.75rem;
         margin-bottom: 2rem;
         text-align: center;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        animation: fadeInDown 0.8s ease-out;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        position: relative;
+        overflow: hidden;
     }
     
-    .header-reinf {
-        background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
-        color: white;
-        padding: 2rem;
-        border-radius: 0.5rem;
-        margin-bottom: 2rem;
-        text-align: center;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        animation: fadeInDown 0.8s ease-out;
+    .gradient-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, #10b981, #8b5cf6, #3b82f6);
+    }
+    
+    .gradient-header h1 {
+        font-size: 2.5rem;
+        margin-bottom: 0.5rem;
+        text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.2);
+    }
+    
+    .gradient-header p {
+        font-size: 1.1rem;
+        opacity: 0.9;
     }
     
     .welcome-container {
@@ -69,40 +82,65 @@ st.markdown("""
         align-items: center;
         height: 70vh;
         animation: fadeIn 1.5s ease-in;
+        background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), rgba(139, 92, 246, 0.1));
+        border-radius: 1rem;
+        margin: 1rem;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .welcome-container::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(circle, rgba(37, 99, 235, 0.05) 0%, transparent 70%);
+        animation: pulse 8s infinite alternate;
     }
     
     .welcome-message {
-        font-size: 3rem;
-        font-weight: 700;
-        color: var(--primary-color);
+        font-size: 3.5rem;
+        font-weight: 800;
         text-align: center;
-        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
-        background: linear-gradient(to right, #1e3a8a, #3b82f6);
+        background: linear-gradient(to right, #2563eb, #8b5cf6);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        animation: pulse 2s infinite;
+        animation: textPulse 3s infinite;
+        position: relative;
+        z-index: 2;
     }
     
     .card {
         background-color: white;
-        border-radius: 0.5rem;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        border-radius: 0.75rem;
+        padding: 1.75rem;
+        margin-bottom: 1.75rem;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        border-left: 4px solid var(--primary-color);
     }
     
     .card:hover {
         transform: translateY(-5px);
-        box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    }
+    
+    .card h2, .card h3 {
+        color: var(--primary-dark);
+        margin-top: 0;
     }
     
     .status-badge {
-        padding: 0.35rem 0.7rem;
+        padding: 0.4rem 0.8rem;
         border-radius: 0.5rem;
         font-size: 0.875rem;
         font-weight: 600;
         display: inline-block;
+        min-width: 100px;
+        text-align: center;
+        transition: all 0.2s;
     }
     
     .status-pendente {
@@ -121,16 +159,18 @@ st.markdown("""
     }
     
     .status-fechado {
-        background-color: var(--light-color);
+        background-color: #e5e7eb;
         color: var(--dark-color);
     }
     
     .dificuldade-badge {
-        padding: 0.35rem 0.7rem;
+        padding: 0.4rem 0.8rem;
         border-radius: 0.5rem;
         font-size: 0.875rem;
         font-weight: 600;
         display: inline-block;
+        min-width: 70px;
+        text-align: center;
     }
     
     .dificuldade-baixa {
@@ -149,25 +189,32 @@ st.markdown("""
     }
     
     .menu-button {
-        height: 100px;
+        height: 120px;
         display: flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
-        font-size: 1.2rem;
-        font-weight: bold;
-        border-radius: 0.5rem;
-        transition: all 0.3s ease;
+        font-size: 1.3rem;
+        font-weight: 600;
+        border-radius: 0.75rem;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        background-color: white;
+        color: var(--primary-dark);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        border: 1px solid #e5e7eb;
     }
     
     .menu-button:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 5px 10px rgba(0, 0, 0, 0.1);
+        transform: translateY(-5px);
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        border-color: var(--primary-color);
+        color: var(--primary-color);
     }
     
     .menu-button i {
-        font-size: 2rem;
-        margin-bottom: 0.5rem;
+        font-size: 2.5rem;
+        margin-bottom: 0.75rem;
+        color: var(--primary-color);
     }
     
     @keyframes fadeIn {
@@ -187,9 +234,15 @@ st.markdown("""
     }
     
     @keyframes pulse {
-        0% { transform: scale(1); }
-        50% { transform: scale(1.05); }
-        100% { transform: scale(1); }
+        0% { transform: scale(1); opacity: 0.5; }
+        50% { transform: scale(1.05); opacity: 0.8; }
+        100% { transform: scale(1); opacity: 0.5; }
+    }
+    
+    @keyframes textPulse {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
     }
     
     @keyframes slideInRight {
@@ -203,51 +256,187 @@ st.markdown("""
         }
     }
     
-    .sidebar .sidebar-content {
-        background-color: #f8f9fa;
-    }
-    
     .stButton>button {
         background-color: var(--primary-color);
         color: white;
         border-radius: 0.5rem;
-        padding: 0.5rem 1rem;
-        transition: all 0.3s ease;
+        padding: 0.75rem 1.5rem;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        font-weight: 600;
+        border: none;
     }
     
     .stButton>button:hover {
-        background-color: #1d4ed8;
+        background-color: var(--primary-dark);
         transform: translateY(-2px);
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
     }
     
-    .stTextInput>div>div>input {
-        border-radius: 0.5rem !important;
-    }
-    
-    .stSelectbox>div>div>select {
-        border-radius: 0.5rem !important;
-    }
-    
-    .stDateInput>div>div>input {
-        border-radius: 0.5rem !important;
-    }
-    
+    .stTextInput>div>div>input, 
+    .stSelectbox>div>div>select,
+    .stDateInput>div>div>input,
     .stTextArea>div>div>textarea {
         border-radius: 0.5rem !important;
+        border: 1px solid #e5e7eb !important;
+        transition: all 0.3s;
+    }
+    
+    .stTextInput>div>div>input:focus, 
+    .stSelectbox>div>div>select:focus,
+    .stDateInput>div>div>input:focus,
+    .stTextArea>div>div>textarea:focus {
+        border-color: var(--primary-color) !important;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1) !important;
+    }
+    
+    /* Efeito de onda ao clicar em botões */
+    .ripple {
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .ripple:after {
+        content: "";
+        display: block;
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        top: 0;
+        left: 0;
+        pointer-events: none;
+        background-image: radial-gradient(circle, #fff 10%, transparent 10.01%);
+        background-repeat: no-repeat;
+        background-position: 50%;
+        transform: scale(10, 10);
+        opacity: 0;
+        transition: transform .5s, opacity 1s;
+    }
+    
+    .ripple:active:after {
+        transform: scale(0, 0);
+        opacity: 0.3;
+        transition: 0s;
+    }
+    
+    /* Tooltip personalizado */
+    .tooltip {
+        position: relative;
+        display: inline-block;
+    }
+    
+    .tooltip .tooltiptext {
+        visibility: hidden;
+        width: 200px;
+        background-color: var(--dark-color);
+        color: #fff;
+        text-align: center;
+        border-radius: 6px;
+        padding: 5px;
+        position: absolute;
+        z-index: 1;
+        bottom: 125%;
+        left: 50%;
+        margin-left: -100px;
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+    
+    .tooltip:hover .tooltiptext {
+        visibility: visible;
+        opacity: 1;
+    }
+    
+    /* Barra de progresso animada */
+    .progress-container {
+        width: 100%;
+        background-color: #e5e7eb;
+        border-radius: 0.5rem;
+        margin: 1rem 0;
+    }
+    
+    .progress-bar {
+        height: 10px;
+        border-radius: 0.5rem;
+        background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+        width: 0;
+        transition: width 1s ease-in-out;
+    }
+    
+    /* Efeito de skeleton loading */
+    .skeleton {
+        animation: skeleton-loading 1s linear infinite alternate;
+    }
+    
+    @keyframes skeleton-loading {
+        0% { background-color: hsl(200, 20%, 80%); }
+        100% { background-color: hsl(200, 20%, 95%); }
+    }
+    
+    /* Notificações flutuantes */
+    .notification {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        color: white;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        z-index: 1000;
+        animation: slideInRight 0.5s, fadeOut 0.5s 2.5s forwards;
+    }
+    
+    .notification.success {
+        background-color: var(--success-color);
+    }
+    
+    .notification.error {
+        background-color: var(--danger-color);
+    }
+    
+    .notification.warning {
+        background-color: var(--warning-color);
+    }
+    
+    @keyframes fadeOut {
+        to { opacity: 0; }
     }
 </style>
 """, unsafe_allow_html=True)
+
+# Função para mostrar notificação
+def show_notification(message, type="success"):
+    html_str = f"""
+    <div class="notification {type}">
+        {message}
+    </div>
+    <script>
+        setTimeout(function() {{
+            var element = document.querySelector('.notification');
+            element.parentNode.removeChild(element);
+        }}, 3000);
+    </script>
+    """
+    html(html_str, width=0, height=0)
 
 # =============================================
 # FUNÇÕES DO PROCESSADOR DE ARQUIVOS TXT
 # =============================================
 
 def processador_txt():
-    st.markdown('<div class="header-txt"><h1>📄 Processador de Arquivos TXT</h1></div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class="gradient-header">
+        <h1>📄 Processador de Arquivos TXT</h1>
+        <p>Remova linhas indesejadas e processe arquivos TXT de forma eficiente</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
     st.markdown("""
     <div class="card">
-        Remova linhas indesejadas de arquivos TXT. Carregue seu arquivo e defina os padrões a serem removidos.
+        <h3>Como usar</h3>
+        <p>Carregue seu arquivo TXT e defina os padrões de linhas que deseja remover. O sistema também realiza substituições automáticas de termos comuns.</p>
+        <div class="progress-container">
+            <div id="progress-bar" class="progress-bar"></div>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -301,13 +490,14 @@ def processador_txt():
     padroes_default = ["-------", "SPED EFD-ICMS/IPI"]
     
     # Upload do arquivo
-    arquivo = st.file_uploader("Selecione o arquivo TXT", type=['txt'])
+    arquivo = st.file_uploader("Selecione o arquivo TXT", type=['txt'], key="txt_uploader")
     
     # Opções avançadas
     with st.expander("⚙️ Configurações avançadas", expanded=False):
         padroes_adicionais = st.text_input(
             "Padrões adicionais para remoção (separados por vírgula)",
-            help="Exemplo: padrão1, padrão2, padrão3"
+            help="Exemplo: padrão1, padrão2, padrão3",
+            key="padroes_adicionais"
         )
         
         padroes = padroes_default + [
@@ -317,11 +507,20 @@ def processador_txt():
 
     if arquivo is not None:
         try:
+            # Mostrar animação de progresso
+            progress_html = """
+            <script>
+                document.getElementById('progress-bar').style.width = '100%';
+            </script>
+            """
+            html(progress_html, width=0, height=0)
+            
             # Lê o conteúdo do arquivo
             conteudo = arquivo.read()
             
             # Processa o arquivo
-            resultado, total_linhas = processar_arquivo(conteudo, padroes)
+            with st.spinner('Processando arquivo...'):
+                resultado, total_linhas = processar_arquivo(conteudo, padroes)
             
             if resultado is not None:
                 # Mostra estatísticas
@@ -335,7 +534,7 @@ def processador_txt():
 
                 # Prévia do resultado
                 st.subheader("Prévia do resultado")
-                st.text_area("Conteúdo processado", resultado, height=300)
+                st.text_area("Conteúdo processado", resultado, height=300, key="previa_txt")
 
                 # Botão de download
                 buffer = BytesIO()
@@ -346,22 +545,43 @@ def processador_txt():
                     label="⬇️ Baixar arquivo processado",
                     data=buffer,
                     file_name=f"processado_{arquivo.name}",
-                    mime="text/plain"
+                    mime="text/plain",
+                    key="download_txt"
                 )
         
         except Exception as e:
             st.error(f"Erro inesperado: {str(e)}")
             st.info("Tente novamente ou verifique o arquivo.")
+            
+            # Resetar barra de progresso
+            progress_html = """
+            <script>
+                document.getElementById('progress-bar').style.width = '0%';
+            </script>
+            """
+            html(progress_html, width=0, height=0)
 
 # =============================================
 # FUNÇÕES DE LANÇAMENTOS EFD REINF
 # =============================================
 
 def lancamentos_efd_reinf():
-    st.markdown('<div class="header-reinf"><h1>📊 Lançamentos EFD REINF</h1></div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class="gradient-header">
+        <h1>📊 Lançamentos EFD REINF</h1>
+        <p>Sistema para lançamento de notas fiscais de serviço tomados e geração de arquivos R2010 e R4020</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
     st.markdown("""
     <div class="card">
-        Sistema para lançamento de notas fiscais de serviço tomados e geração de arquivos R2010 e R4020 (com IRRF, PIS, COFINS e CSLL).
+        <h3>Funcionalidades</h3>
+        <ul>
+            <li>Cadastro de notas fiscais de serviços tomados</li>
+            <li>Cálculo automático de tributos (IRRF, PIS, COFINS e CSLL)</li>
+            <li>Geração de arquivos R2010 e R4020 para entrega</li>
+            <li>Banco de dados integrado para armazenamento</li>
+        </ul>
     </div>
     """, unsafe_allow_html=True)
     
@@ -404,12 +624,12 @@ def lancamentos_efd_reinf():
     with st.expander("➕ Adicionar Nova Nota Fiscal", expanded=True):
         col1, col2 = st.columns(2)
         with col1:
-            data = st.date_input("Data da Nota Fiscal")
-            cnpj_tomador = st.text_input("CNPJ Tomador (14 dígitos)", max_chars=14)
-            cnpj_prestador = st.text_input("CNPJ Prestador (14 dígitos)", max_chars=14)
-            valor_servico = st.number_input("Valor do Serviço (R$)", min_value=0.0, format="%.2f")
-            descricao_servico = st.text_input("Descrição do Serviço")
-            codigo_servico = st.text_input("Código do Serviço (LC 116)")
+            data = st.date_input("Data da Nota Fiscal", key="data_nf")
+            cnpj_tomador = st.text_input("CNPJ Tomador (14 dígitos)", max_chars=14, key="cnpj_tomador")
+            cnpj_prestador = st.text_input("CNPJ Prestador (14 dígitos)", max_chars=14, key="cnpj_prestador")
+            valor_servico = st.number_input("Valor do Serviço (R$)", min_value=0.0, format="%.2f", key="valor_servico")
+            descricao_servico = st.text_input("Descrição do Serviço", key="descricao_servico")
+            codigo_servico = st.text_input("Código do Serviço (LC 116)", key="codigo_servico")
         
         with col2:
             st.subheader("Tributos")
@@ -448,7 +668,16 @@ def lancamentos_efd_reinf():
             valor_csll = valor_servico * (aliquota_csll / 100) if retem_csll else 0.0
             st.info(f"Valor CSLL: R$ {valor_csll:.2f}")
         
-        if st.button("Adicionar Nota Fiscal"):
+        if st.button("Adicionar Nota Fiscal", key="btn_add_nf"):
+            # Validar CNPJ
+            if len(cnpj_tomador) != 14 or not cnpj_tomador.isdigit():
+                st.error("CNPJ do Tomador inválido. Deve conter 14 dígitos.")
+                return
+                
+            if len(cnpj_prestador) != 14 or not cnpj_prestador.isdigit():
+                st.error("CNPJ do Prestador inválido. Deve conter 14 dígitos.")
+                return
+            
             # Inserir no banco de dados
             c.execute('''
                 INSERT INTO notas_fiscais (
@@ -464,7 +693,7 @@ def lancamentos_efd_reinf():
                 int(retem_csll), aliquota_csll, valor_csll
             ))
             conn.commit()
-            st.success("Nota fiscal adicionada com sucesso!")
+            show_notification("Nota fiscal adicionada com sucesso!")
             st.experimental_rerun()
     
     # Visualização das notas fiscais cadastradas
@@ -480,16 +709,16 @@ def lancamentos_efd_reinf():
         col1, col2 = st.columns(2)
         with col1:
             linha_editar = st.number_input("Número da linha para editar", min_value=0, max_value=len(df_notas)-1, key='linha_editar')
-            if st.button("Editar Linha"):
+            if st.button("Editar Linha", key="btn_editar"):
                 st.session_state.editando = linha_editar
                 
         with col2:
             linha_excluir = st.number_input("Número da linha para excluir", min_value=0, max_value=len(df_notas)-1, key='linha_excluir')
-            if st.button("Excluir Linha"):
+            if st.button("Excluir Linha", key="btn_excluir"):
                 id_excluir = df_notas.iloc[linha_excluir]['id']
                 c.execute("DELETE FROM notas_fiscais WHERE id = ?", (id_excluir,))
                 conn.commit()
-                st.success("Linha excluída com sucesso!")
+                show_notification("Linha excluída com sucesso!")
                 st.experimental_rerun()
         
         # Formulário de edição
@@ -548,7 +777,16 @@ def lancamentos_efd_reinf():
                     valor_csll_edit = valor_servico_edit * (aliquota_csll_edit / 100) if retem_csll_edit else 0.0
                     st.info(f"Valor CSLL: R$ {valor_csll_edit:.2f}")
                 
-                if st.button("Salvar Alterações"):
+                if st.button("Salvar Alterações", key="btn_salvar_edit"):
+                    # Validar CNPJ
+                    if len(cnpj_tomador_edit) != 14 or not cnpj_tomador_edit.isdigit():
+                        st.error("CNPJ do Tomador inválido. Deve conter 14 dígitos.")
+                        return
+                        
+                    if len(cnpj_prestador_edit) != 14 or not cnpj_prestador_edit.isdigit():
+                        st.error("CNPJ do Prestador inválido. Deve conter 14 dígitos.")
+                        return
+                    
                     # Atualizar no banco de dados
                     c.execute('''
                         UPDATE notas_fiscais SET
@@ -569,7 +807,7 @@ def lancamentos_efd_reinf():
                     ))
                     conn.commit()
                     del st.session_state.editando
-                    st.success("Alterações salvas com sucesso!")
+                    show_notification("Alterações salvas com sucesso!")
                     st.experimental_rerun()
     else:
         st.warning("Nenhuma nota fiscal cadastrada ainda.")
@@ -577,60 +815,61 @@ def lancamentos_efd_reinf():
     # Geração do arquivo EFD REINF
     st.subheader("Gerar Arquivo EFD REINF")
     
-    if st.button("🔄 Gerar Arquivo para Entrega (R2010 e R4020)"):
+    if st.button("🔄 Gerar Arquivo para Entrega (R2010 e R4020)", key="btn_gerar_reinf"):
         if df_notas.empty:
             st.error("Nenhuma nota fiscal cadastrada para gerar o arquivo.")
         else:
-            # Simulação da geração do arquivo
-            data_geracao = datetime.now().strftime('%Y%m%d%H%M%S')
-            nome_arquivo = f"EFD_REINF_{data_geracao}.txt"
-            
-            # Cabeçalho do arquivo
-            conteudo = [
-                "|EFDREINF|0100|1|",
-                "|0001|1|12345678901234|Empresa Teste|12345678|||A|12345678901|email@empresa.com|",
-                "|0100|Fulano de Tal|12345678901|Rua Teste, 123|3100000||99999999|email@contador.com|"
-            ]
-            
-            # Adiciona registros R2010 para cada nota
-            for idx, nota in df_notas.iterrows():
-                conteudo.append(f"|2010|{idx+1}|{nota['cnpj_tomador']}|{nota['cnpj_prestador']}|{nota['data'].replace('-', '')}|{nota['codigo_servico']}|{nota['valor_servico']:.2f}|{nota['aliquota_inss']:.2f}|{nota['valor_inss']:.2f}|")
-            
-            # Adiciona registros R4020 com todos os tributos
-            total_inss = df_notas['valor_inss'].sum()
-            total_irrf = df_notas['valor_irrf'].sum()
-            total_pis = df_notas['valor_pis'].sum()
-            total_cofins = df_notas['valor_cofins'].sum()
-            total_csll = df_notas['valor_csll'].sum()
-            
-            conteudo.append(f"|4020|1|{datetime.now().strftime('%Y%m')}|{total_inss:.2f}|{total_irrf:.2f}|{total_pis:.2f}|{total_cofins:.2f}|{total_csll:.2f}|1|")
-            
-            # Rodapé do arquivo
-            conteudo.append("|9001|1|")
-            conteudo.append(f"|9900|EFDREINF|{len(conteudo) - 3}|")
-            conteudo.append("|9999|7|")
-            
-            arquivo_final = "\n".join(conteudo)
-            
-            # Cria o botão de download
-            b64 = base64.b64encode(arquivo_final.encode('utf-8')).decode()
-            href = f'<a href="data:file/txt;base64,{b64}" download="{nome_arquivo}">⬇️ Baixar Arquivo EFD REINF</a>'
-            st.markdown(href, unsafe_allow_html=True)
-            
-            st.success("Arquivo gerado com sucesso!")
-            
-            # Resumo dos totais
-            st.subheader("Resumo dos Tributos")
-            col1, col2, col3, col4, col5 = st.columns(5)
-            col1.metric("Total INSS", f"R$ {total_inss:.2f}")
-            col2.metric("Total IRRF", f"R$ {total_irrf:.2f}")
-            col3.metric("Total PIS", f"R$ {total_pis:.2f}")
-            col4.metric("Total COFINS", f"R$ {total_cofins:.2f}")
-            col5.metric("Total CSLL", f"R$ {total_csll:.2f}")
-            
-            # Prévia do arquivo
-            st.subheader("Prévia do Arquivo")
-            st.text_area("Conteúdo do Arquivo", arquivo_final, height=300)
+            with st.spinner('Gerando arquivo EFD REINF...'):
+                # Simulação da geração do arquivo
+                data_geracao = datetime.now().strftime('%Y%m%d%H%M%S')
+                nome_arquivo = f"EFD_REINF_{data_geracao}.txt"
+                
+                # Cabeçalho do arquivo
+                conteudo = [
+                    "|EFDREINF|0100|1|",
+                    "|0001|1|12345678901234|Empresa Teste|12345678|||A|12345678901|email@empresa.com|",
+                    "|0100|Fulano de Tal|12345678901|Rua Teste, 123|3100000||99999999|email@contador.com|"
+                ]
+                
+                # Adiciona registros R2010 para cada nota
+                for idx, nota in df_notas.iterrows():
+                    conteudo.append(f"|2010|{idx+1}|{nota['cnpj_tomador']}|{nota['cnpj_prestador']}|{nota['data'].replace('-', '')}|{nota['codigo_servico']}|{nota['valor_servico']:.2f}|{nota['aliquota_inss']:.2f}|{nota['valor_inss']:.2f}|")
+                
+                # Adiciona registros R4020 com todos os tributos
+                total_inss = df_notas['valor_inss'].sum()
+                total_irrf = df_notas['valor_irrf'].sum()
+                total_pis = df_notas['valor_pis'].sum()
+                total_cofins = df_notas['valor_cofins'].sum()
+                total_csll = df_notas['valor_csll'].sum()
+                
+                conteudo.append(f"|4020|1|{datetime.now().strftime('%Y%m')}|{total_inss:.2f}|{total_irrf:.2f}|{total_pis:.2f}|{total_cofins:.2f}|{total_csll:.2f}|1|")
+                
+                # Rodapé do arquivo
+                conteudo.append("|9001|1|")
+                conteudo.append(f"|9900|EFDREINF|{len(conteudo) - 3}|")
+                conteudo.append("|9999|7|")
+                
+                arquivo_final = "\n".join(conteudo)
+                
+                # Cria o botão de download
+                b64 = base64.b64encode(arquivo_final.encode('utf-8')).decode()
+                href = f'<a href="data:file/txt;base64,{b64}" download="{nome_arquivo}" class="ripple">⬇️ Baixar Arquivo EFD REINF</a>'
+                st.markdown(href, unsafe_allow_html=True)
+                
+                show_notification("Arquivo gerado com sucesso!")
+                
+                # Resumo dos totais
+                st.subheader("Resumo dos Tributos")
+                col1, col2, col3, col4, col5 = st.columns(5)
+                col1.metric("Total INSS", f"R$ {total_inss:.2f}")
+                col2.metric("Total IRRF", f"R$ {total_irrf:.2f}")
+                col3.metric("Total PIS", f"R$ {total_pis:.2f}")
+                col4.metric("Total COFINS", f"R$ {total_cofins:.2f}")
+                col5.metric("Total CSLL", f"R$ {total_csll:.2f}")
+                
+                # Prévia do arquivo
+                st.subheader("Prévia do Arquivo")
+                st.text_area("Conteúdo do Arquivo", arquivo_final, height=300, key="previa_reinf")
     
     conn.close()
 
@@ -639,7 +878,12 @@ def lancamentos_efd_reinf():
 # =============================================
 
 def atividades_fiscais():
-    st.markdown('<div class="header"><h1>📊 Controle de Atividades Fiscais - HÄFELE BRASIL</h1></div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class="gradient-header">
+        <h1>📊 Controle de Atividades Fiscais</h1>
+        <p>Gerencie todas as obrigações fiscais da HÄFELE Brasil em um único lugar</p>
+    </div>
+    """, unsafe_allow_html=True)
 
     # Conexão com o banco de dados SQLite
     DATABASE = 'atividades_fiscais.db'
@@ -863,7 +1107,7 @@ def atividades_fiscais():
         """Mostra a navegação entre meses."""
         col1, col2, col3 = st.columns([1, 2, 1])
         with col1:
-            if st.button("◀️ Mês Anterior"):
+            if st.button("◀️ Mês Anterior", key="btn_mes_anterior"):
                 st.session_state.mes_ano_referencia = get_previous_month_year(st.session_state.mes_ano_referencia)
                 st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
                 st.rerun()
@@ -872,7 +1116,7 @@ def atividades_fiscais():
             st.markdown(f"<h2 style='text-align: center;'>Mês/Ano de Referência: {st.session_state.mes_ano_referencia}</h2>", unsafe_allow_html=True)
         
         with col3:
-            if st.button("Próximo Mês ▶️"):
+            if st.button("Próximo Mês ▶️", key="btn_prox_mes"):
                 st.session_state.mes_ano_referencia = get_next_month_year(st.session_state.mes_ano_referencia)
                 st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
                 st.rerun()
@@ -915,10 +1159,10 @@ def atividades_fiscais():
                 title='Distribuição por Status',
                 color='Status',
                 color_discrete_map={
-                    'Pendente': '#ffc107',
-                    'Em Andamento': '#007bff',
-                    'Finalizado': '#28a745',
-                    'Fechado': '#6c757d'
+                    'Pendente': '#f59e0b',
+                    'Em Andamento': '#3b82f6',
+                    'Finalizado': '#10b981',
+                    'Fechado': '#6b7280'
                 }
             )
             st.plotly_chart(fig_status, use_container_width=True)
@@ -932,9 +1176,9 @@ def atividades_fiscais():
                 title='Distribuição por Nível de Dificuldade',
                 color='Dificuldade',
                 color_discrete_map={
-                    'Baixa': '#28a745',
-                    'Média': '#ffc107',
-                    'Alta': '#dc3545'
+                    'Baixa': '#10b981',
+                    'Média': '#f59e0b',
+                    'Alta': '#ef4444'
                 }
             )
             st.plotly_chart(fig_dificuldade, use_container_width=True)
@@ -955,10 +1199,10 @@ def atividades_fiscais():
                     color="Status",
                     title='Linha do Tempo das Atividades',
                     color_discrete_map={
-                        'Pendente': '#ffc107',
-                        'Em Andamento': '#007bff',
-                        'Finalizado': '#28a745',
-                        'Fechado': '#6c757d'
+                        'Pendente': '#f59e0b',
+                        'Em Andamento': '#3b82f6',
+                        'Finalizado': '#10b981',
+                        'Fechado': '#6b7280'
                     },
                     hover_name="Obrigacao",
                     hover_data={
@@ -985,12 +1229,12 @@ def atividades_fiscais():
         with st.expander("🔍 Filtros", expanded=True):
             col1, col2, col3 = st.columns(3)
             with col1:
-                status_filter = st.selectbox("Status", ["Todos", "Pendente", "Em Andamento", "Finalizado", "Fechado"])
+                status_filter = st.selectbox("Status", ["Todos", "Pendente", "Em Andamento", "Finalizado", "Fechado"], key="filtro_status")
             with col2:
-                difficulty_filter = st.selectbox("Dificuldade", ["Todos", "Baixa", "Média", "Alta"])
+                difficulty_filter = st.selectbox("Dificuldade", ["Todos", "Baixa", "Média", "Alta"], key="filtro_dificuldade")
             with col3:
                 orgao_options = ["Todos"] + list(st.session_state.df_atividades['OrgaoResponsavel'].unique())
-                orgao_filter = st.selectbox("Órgão Responsável", orgao_options)
+                orgao_filter = st.selectbox("Órgão Responsável", orgao_options, key="filtro_orgao")
 
         filtered_df = st.session_state.df_atividades.copy()
         
@@ -1024,17 +1268,17 @@ def atividades_fiscais():
             with st.form("nova_atividade_form", clear_on_submit=True):
                 col1, col2 = st.columns(2)
                 with col1:
-                    obrigacao = st.text_input("Obrigação*", placeholder="Nome da obrigação fiscal")
-                    descricao = st.text_area("Descrição*", placeholder="Descrição detalhada da atividade")
-                    periodicidade = st.selectbox("Periodicidade*", ["Mensal", "Trimestral", "Anual", "Eventual", "Extinta"])
+                    obrigacao = st.text_input("Obrigação*", placeholder="Nome da obrigação fiscal", key="nova_obrigacao")
+                    descricao = st.text_area("Descrição*", placeholder="Descrição detalhada da atividade", key="nova_descricao")
+                    periodicidade = st.selectbox("Periodicidade*", ["Mensal", "Trimestral", "Anual", "Eventual", "Extinta"], key="nova_periodicidade")
                 with col2:
-                    orgao = st.text_input("Órgão Responsável*", placeholder="Órgão responsável")
-                    data_limite = st.text_input("Data Limite de Entrega*", placeholder="Ex: Até o dia 10 do mês subsequente")
-                    status = st.selectbox("Status*", ["Pendente", "Em Andamento", "Finalizado", "Fechado"])
-                    dificuldade = st.selectbox("Dificuldade*", ["Baixa", "Média", "Alta"])
-                    prazo = st.date_input("Prazo Final*")
+                    orgao = st.text_input("Órgão Responsável*", placeholder="Órgão responsável", key="nova_orgao")
+                    data_limite = st.text_input("Data Limite de Entrega*", placeholder="Ex: Até o dia 10 do mês subsequente", key="nova_data_limite")
+                    status = st.selectbox("Status*", ["Pendente", "Em Andamento", "Finalizado", "Fechado"], key="novo_status")
+                    dificuldade = st.selectbox("Dificuldade*", ["Baixa", "Média", "Alta"], key="nova_dificuldade")
+                    prazo = st.date_input("Prazo Final*", key="novo_prazo")
 
-                if st.form_submit_button("Adicionar Atividade"):
+                if st.form_submit_button("Adicionar Atividade", key="btn_add_atividade"):
                     if obrigacao and descricao and orgao and data_limite and prazo:
                         prazo_calculado = calculate_deadline(data_limite, st.session_state.mes_ano_referencia)
                         
@@ -1054,7 +1298,7 @@ def atividades_fiscais():
 
                         if add_activity_to_db(nova_atividade):
                             st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
-                            st.success("✅ Atividade adicionada com sucesso!")
+                            show_notification("Atividade adicionada com sucesso!")
                             st.rerun()
                     else:
                         st.error("⚠️ Preencha todos os campos obrigatórios (marcados com *)")
@@ -1069,7 +1313,8 @@ def atividades_fiscais():
 
             atividade_selecionada = st.selectbox(
                 "Selecione a atividade para editar",
-                st.session_state.df_atividades['Obrigacao'].unique()
+                st.session_state.df_atividades['Obrigacao'].unique(),
+                key="select_editar"
             )
 
             atividade = st.session_state.df_atividades[
@@ -1081,15 +1326,17 @@ def atividades_fiscais():
                 novo_status = st.selectbox(
                     "Novo Status",
                     ["Pendente", "Em Andamento", "Finalizado", "Fechado"],
-                    index=["Pendente", "Em Andamento", "Finalizado", "Fechado"].index(atividade['Status'])
+                    index=["Pendente", "Em Andamento", "Finalizado", "Fechado"].index(atividade['Status']),
+                    key="edit_status"
                 )
             with col2:
                 novo_prazo = st.date_input(
                     "Novo Prazo Final",
-                    value=atividade['Prazo'].date() if pd.notna(atividade['Prazo']) else datetime.now().date()
+                    value=atividade['Prazo'].date() if pd.notna(atividade['Prazo']) else datetime.now().date(),
+                    key="edit_prazo"
                 )
 
-            if st.button("Atualizar Atividade"):
+            if st.button("Atualizar Atividade", key="btn_update_atividade"):
                 updates = {}
                 
                 if novo_status != atividade['Status']:
@@ -1112,7 +1359,7 @@ def atividades_fiscais():
                 if updates:
                     if update_activity_in_db(atividade['id'], updates):
                         st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
-                        st.success("✅ Atividade atualizada com sucesso!")
+                        show_notification("Atividade atualizada com sucesso!")
                         st.rerun()
                 else:
                     st.info("Nenhuma alteração detectada para atualizar.")
@@ -1131,7 +1378,7 @@ def atividades_fiscais():
         if todas_finalizadas:
             st.success(f"🎉 Todas as atividades para {st.session_state.mes_ano_referencia} estão finalizadas ou fechadas!")
             
-            if st.button("Fechar Período e Habilitar Próximo Mês"):
+            if st.button("Fechar Período e Habilitar Próximo Mês", key="btn_fechar_periodo"):
                 conn = create_connection()
                 if conn:
                     try:
@@ -1184,7 +1431,7 @@ def atividades_fiscais():
                             conn.close()
                     
                     st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
-                    st.success("Atividades padrão habilitadas para o novo mês!")
+                    show_notification("Atividades padrão habilitadas para o novo mês!")
                 
                 st.rerun()
         else:
@@ -1197,7 +1444,7 @@ def atividades_fiscais():
     # Habilitar mês se não houver dados
     if st.session_state.df_atividades.empty:
         st.warning(f"Não há atividades cadastradas para {st.session_state.mes_ano_referencia}.")
-        if st.button(f"Habilitar Mês {st.session_state.mes_ano_referencia}"):
+        if st.button(f"Habilitar Mês {st.session_state.mes_ano_referencia}", key="btn_habilitar_mes"):
             atividades = load_initial_data_template()
             for atividade in atividades:
                 prazo = calculate_deadline(atividade['Data Limite'], st.session_state.mes_ano_referencia)
@@ -1231,7 +1478,7 @@ def atividades_fiscais():
                     conn.close()
             
             st.session_state.df_atividades = load_data_from_db(st.session_state.mes_ano_referencia)
-            st.success("Atividades padrão habilitadas com sucesso!")
+            show_notification("Atividades padrão habilitadas com sucesso!")
             st.rerun()
 
     # Componentes da interface
@@ -1261,10 +1508,14 @@ def pagina_inicial():
         <h2>📌 Sistema Fiscal HÄFELE</h2>
         <p>Este sistema foi desenvolvido para auxiliar nas atividades fiscais da empresa HÄFELE Brasil, incluindo:</p>
         <ul>
-            <li>Processamento de arquivos TXT</li>
-            <li>Lançamentos EFD REINF</li>
-            <li>Controle de atividades fiscais</li>
+            <li>Processamento de arquivos TXT com remoção de linhas indesejadas</li>
+            <li>Lançamentos EFD REINF para notas fiscais de serviços tomados</li>
+            <li>Controle completo de atividades fiscais com prazos e status</li>
+            <li>Geração de relatórios e gráficos para análise</li>
         </ul>
+        <p style="margin-top: 1rem; font-style: italic; color: var(--primary-dark);">
+            Selecione um módulo abaixo para começar
+        </p>
     </div>
     """, unsafe_allow_html=True)
     
