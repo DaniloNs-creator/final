@@ -30,29 +30,6 @@ st.markdown("""
         --light-color: #f8f9fa;
     }
     
-    /* Estilos para abas */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        padding: 0 25px;
-        background-color: #f0f2f6;
-        border-radius: 8px 8px 0 0;
-        font-weight: 600;
-        transition: all 0.3s ease;
-    }
-    
-    .stTabs [data-baseweb="tab"]:hover {
-        background-color: #e1e5eb;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background-color: var(--primary-color) !important;
-        color: white !important;
-    }
-    
     .header {
         background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
         color: white;
@@ -169,6 +146,28 @@ st.markdown("""
     .dificuldade-alta {
         background-color: var(--danger-color);
         color: white;
+    }
+    
+    .menu-button {
+        height: 100px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        font-size: 1.2rem;
+        font-weight: bold;
+        border-radius: 0.5rem;
+        transition: all 0.3s ease;
+    }
+    
+    .menu-button:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 5px 10px rgba(0, 0, 0, 0.1);
+    }
+    
+    .menu-button i {
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
     }
     
     @keyframes fadeIn {
@@ -975,7 +974,7 @@ def atividades_fiscais():
                 st.info("Não há atividades com prazo definido para exibir na linha do tempo.")
 
     def show_activities_table():
-        """Mostra la tabela de atividades com filtros."""
+        """Mostra a tabela de atividades com filtros."""
         st.markdown("---")
         st.markdown('<div class="card"><h3>📋 Lista de Atividades</h3></div>', unsafe_allow_html=True)
 
@@ -1266,29 +1265,52 @@ def pagina_inicial():
             <li>Lançamentos EFD REINF</li>
             <li>Controle de atividades fiscais</li>
         </ul>
-        <p>Selecione uma das abas acima para acessar os módulos disponíveis.</p>
     </div>
     """, unsafe_allow_html=True)
+    
+    # Container para os botões do menu
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("📄 Processador TXT", use_container_width=True, key="btn_txt"):
+            st.session_state.modulo_selecionado = "Processador TXT"
+            st.rerun()
+    
+    with col2:
+        if st.button("📊 EFD REINF", use_container_width=True, key="btn_reinf"):
+            st.session_state.modulo_selecionado = "EFD REINF"
+            st.rerun()
+    
+    with col3:
+        if st.button("📅 Atividades Fiscais", use_container_width=True, key="btn_atividades"):
+            st.session_state.modulo_selecionado = "Atividades Fiscais"
+            st.rerun()
 
 # =============================================
-# FUNÇÃO PRINCIPAL COM MENU EM ABAS
+# FUNÇÃO PRINCIPAL
 # =============================================
 
 def main():
-    # Configuração das abas
-    tab1, tab2, tab3, tab4 = st.tabs(["🏠 Início", "📄 Processador TXT", "📊 EFD REINF", "📅 Atividades Fiscais"])
+    # Inicializa o estado da sessão se não existir
+    if 'modulo_selecionado' not in st.session_state:
+        st.session_state.modulo_selecionado = None
     
-    with tab1:
+    # Mostra a página inicial ou o módulo selecionado
+    if st.session_state.modulo_selecionado is None:
         pagina_inicial()
-    
-    with tab2:
-        processador_txt()
-    
-    with tab3:
-        lancamentos_efd_reinf()
-    
-    with tab4:
-        atividades_fiscais()
+    else:
+        # Botão para voltar à página inicial
+        if st.button("🏠 Voltar ao Início", key="btn_voltar"):
+            st.session_state.modulo_selecionado = None
+            st.rerun()
+        
+        # Mostra o módulo selecionado
+        if st.session_state.modulo_selecionado == "Processador TXT":
+            processador_txt()
+        elif st.session_state.modulo_selecionado == "EFD REINF":
+            lancamentos_efd_reinf()
+        elif st.session_state.modulo_selecionado == "Atividades Fiscais":
+            atividades_fiscais()
 
 if __name__ == "__main__":
     main()
