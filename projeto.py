@@ -176,18 +176,19 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
         mes_ref = hoje.strftime("%m/%Y")
         for cliente in clientes:
             atividade = random.choice(atividades)
+            feito = random.choice([0, 1])  # Adiciona aleatoriamente atividades concluídas
             campos = (
                 cliente[0], cliente[1], cliente[2], cliente[3], cliente[4], atividade,
                 "Grupo 1", "São Paulo", "01/2020", "Ativo", "email@cliente.com", "(11) 99999-9999", "Contato Financeiro",
-                "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), mes_ref
+                "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), feito, mes_ref
             )
             
             c.execute('''
                 INSERT INTO atividades (
                     cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
                     grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                    financeiro, contas_bancarias, forma_entrega, data_entrega, data_criacao, mes_referencia
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    financeiro, contas_bancarias, forma_entrega, data_entrega, feito, data_criacao, mes_referencia
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),))
         
         hoje += timedelta(days=30)  # Aproximadamente 1 mês
@@ -264,6 +265,24 @@ def get_dados_indicadores(conn: sqlite3.Connection) -> pd.DataFrame:
         return pd.read_sql(query, conn)
     except Exception as e:
         st.error(f"Erro ao gerar indicadores: {e}")
+        return pd.DataFrame()
+
+def get_dados_responsaveis(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Retorna dados para análise por responsável."""
+    try:
+        query = '''
+            SELECT 
+                responsavel,
+                SUM(feito) as concluidas,
+                COUNT(*) as total,
+                (SUM(feito) * 100.0 / COUNT(*)) as percentual
+            FROM atividades
+            GROUP BY responsavel
+            ORDER BY percentual DESC
+        '''
+        return pd.read_sql(query, conn)
+    except Exception as e:
+        st.error(f"Erro ao gerar dados por responsável: {e}")
         return pd.DataFrame()
 
 # --- COMPONENTES DA INTERFACE ---
@@ -417,50 +436,114 @@ def mostrar_indicadores(conn: sqlite3.Connection):
     """Exibe os indicadores de entrega."""
     st.markdown('<div class="header">📊 Indicadores de Entrega</div>', unsafe_allow_html=True)
     
-    dados = get_dados_indicadores(conn)
+    # Abas para diferentes visualizações
+    tab1, tab2 = st.tabs(["📅 Por Mês", "👤 Por Responsável"])
     
-    if dados.empty:
-        st.warning("Não há dados suficientes para exibir os indicadores.")
-        return
+    with tab1:
+        dados_mes = get_dados_indicadores(conn)
+        
+        if dados_mes.empty:
+            st.warning("Não há dados suficientes para exibir os indicadores por mês.")
+        else:
+            # Gráfico de barras - Entregas por mês
+            st.subheader("Entregas por Mês")
+            fig_bar = px.bar(
+                dados_mes,
+                x='mes_referencia',
+                y=['concluidas', 'total'],
+                barmode='group',
+                labels={'value': 'Quantidade', 'mes_referencia': 'Mês de Referência'},
+                color_discrete_map={'concluidas': '#2ecc71', 'total': '#3498db'}
+            )
+            fig_bar.update_layout(showlegend=True, legend_title_text='')
+            st.plotly_chart(fig_bar, use_container_width=True)
+            
+            # Gráfico de rosca - Percentual de conclusão
+            st.subheader("Percentual de Conclusão")
+            fig_pie = px.pie(
+                dados_mes,
+                values='percentual',
+                names='mes_referencia',
+                hole=0.4,
+                color_discrete_sequence=px.colors.sequential.Greens
+            )
+            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig_pie, use_container_width=True)
+            
+            # Tabela com os dados detalhados
+            st.subheader("Detalhamento por Mês")
+            dados_mes['percentual'] = dados_mes['percentual'].round(2)
+            st.dataframe(
+                dados_mes[['mes_referencia', 'concluidas', 'total', 'percentual']]
+                .rename(columns={
+                    'mes_referencia': 'Mês',
+                    'concluidas': 'Concluídas',
+                    'total': 'Total',
+                    'percentual': '% Conclusão'
+                }),
+                use_container_width=True
+            )
     
-    # Gráfico de barras - Entregas por mês
-    st.subheader("Entregas por Mês")
-    fig_bar = px.bar(
-        dados,
-        x='mes_referencia',
-        y=['concluidas', 'total'],
-        barmode='group',
-        labels={'value': 'Quantidade', 'mes_referencia': 'Mês de Referência'},
-        color_discrete_map={'concluidas': '#2ecc71', 'total': '#3498db'}
-    )
-    fig_bar.update_layout(showlegend=True, legend_title_text='')
-    st.plotly_chart(fig_bar, use_container_width=True)
-    
-    # Gráfico de rosca - Percentual de conclusão
-    st.subheader("Percentual de Conclusão")
-    fig_pie = px.pie(
-        dados,
-        values='percentual',
-        names='mes_referencia',
-        hole=0.4,
-        color_discrete_sequence=px.colors.sequential.Greens
-    )
-    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-    st.plotly_chart(fig_pie, use_container_width=True)
-    
-    # Tabela com os dados detalhados
-    st.subheader("Detalhamento por Mês")
-    dados['percentual'] = dados['percentual'].round(2)
-    st.dataframe(
-        dados[['mes_referencia', 'concluidas', 'total', 'percentual']]
-        .rename(columns={
-            'mes_referencia': 'Mês',
-            'concluidas': 'Concluídas',
-            'total': 'Total',
-            'percentual': '% Conclusão'
-        }),
-        use_container_width=True
-    )
+    with tab2:
+        dados_responsaveis = get_dados_responsaveis(conn)
+        
+        if dados_responsaveis.empty:
+            st.warning("Não há dados suficientes para exibir os indicadores por responsável.")
+        else:
+            # Gráfico de barras - Entregas por responsável
+            st.subheader("Entregas por Responsável")
+            fig_bar_resp = px.bar(
+                dados_responsaveis,
+                x='responsavel',
+                y=['concluidas', 'total'],
+                barmode='group',
+                labels={'value': 'Quantidade', 'responsavel': 'Responsável'},
+                color_discrete_map={'concluidas': '#2ecc71', 'total': '#3498db'}
+            )
+            fig_bar_resp.update_layout(showlegend=True, legend_title_text='')
+            st.plotly_chart(fig_bar_resp, use_container_width=True)
+            
+            # Gráfico de pizza - Distribuição por responsável
+            st.subheader("Distribuição de Atividades")
+            fig_pie_resp = px.pie(
+                dados_responsaveis,
+                values='total',
+                names='responsavel',
+                hole=0.3,
+                color_discrete_sequence=px.colors.qualitative.Pastel
+            )
+            fig_pie_resp.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig_pie_resp, use_container_width=True)
+            
+            # Gráfico de barras horizontais - Performance por responsável
+            st.subheader("Performance por Responsável")
+            fig_hbar = px.bar(
+                dados_responsaveis,
+                x='percentual',
+                y='responsavel',
+                orientation='h',
+                text='percentual',
+                labels={'percentual': '% Conclusão', 'responsavel': 'Responsável'},
+                color='percentual',
+                color_continuous_scale='Greens'
+            )
+            fig_hbar.update_traces(texttemplate='%{x:.1f}%', textposition='outside')
+            fig_hbar.update_layout(showlegend=False)
+            st.plotly_chart(fig_hbar, use_container_width=True)
+            
+            # Tabela com os dados detalhados
+            st.subheader("Detalhamento por Responsável")
+            dados_responsaveis['percentual'] = dados_responsaveis['percentual'].round(2)
+            st.dataframe(
+                dados_responsaveis[['responsavel', 'concluidas', 'total', 'percentual']]
+                .rename(columns={
+                    'responsavel': 'Responsável',
+                    'concluidas': 'Concluídas',
+                    'total': 'Total',
+                    'percentual': '% Conclusão'
+                }),
+                use_container_width=True
+            )
 
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
