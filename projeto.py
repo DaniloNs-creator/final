@@ -152,7 +152,7 @@ def init_db():
             forma_entrega TEXT,
             data_entrega TEXT,
             feito INTEGER DEFAULT 0,
-            data_criacao TEXT DEFAULT CURRENT_TIMESTAMP
+            data_criacao TEXT
         )
     ''')
     conn.commit()
@@ -165,9 +165,9 @@ def adicionar_atividade(conn, campos):
         INSERT INTO atividades (
             cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
             grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-            financeiro, contas_bancarias, forma_entrega, data_entrega
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', campos)
+            financeiro, contas_bancarias, forma_entrega, data_entrega, data_criacao
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),))
     conn.commit()
 
 def excluir_atividade(conn, id):
@@ -282,6 +282,7 @@ def lista_atividades(conn):
                     st.markdown(f"**Contato:** {contato} ({telefone} - {email})")
                     st.markdown(f"**Financeiro:** {financeiro} | Folha: {possui_folha} | Contas: {contas_bancarias}")
                     st.markdown(f"**Entrega:** {forma_entrega} em {data_entrega}")
+                    st.markdown(f"**Data de Criação:** {data_criacao}")
                     
                 with col2:
                     feito_atual = st.checkbox(
@@ -295,8 +296,6 @@ def lista_atividades(conn):
                     if st.button("Excluir", key=f"del_{id}", use_container_width=True):
                         excluir_atividade(conn, id)
                         st.rerun()
-                
-                st.markdown(f"<small>Criado em: {data_criacao}</small>", unsafe_allow_html=True)
 
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
