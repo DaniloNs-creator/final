@@ -130,59 +130,94 @@ def load_css():
 def init_db():
     conn = sqlite3.connect('atividades.db', check_same_thread=False)
     c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS atividades (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente TEXT,
-            razao_social TEXT,
-            classificacao TEXT,
-            tributacao TEXT,
-            responsavel TEXT,
-            atividade TEXT,
-            grupo TEXT,
-            cidade TEXT,
-            desde TEXT,
-            status TEXT,
-            email TEXT,
-            telefone TEXT,
-            contato TEXT,
-            possui_folha TEXT,
-            financeiro TEXT,
-            contas_bancarias INTEGER,
-            forma_entrega TEXT,
-            data_entrega TEXT,
-            feito INTEGER DEFAULT 0,
-            data_criacao TEXT
-        )
-    ''')
-    conn.commit()
+    
+    # Verifica se a tabela existe
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='atividades'")
+    table_exists = c.fetchone()
+    
+    if not table_exists:
+        # Cria a tabela se não existir
+        c.execute('''
+            CREATE TABLE atividades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cliente TEXT,
+                razao_social TEXT,
+                classificacao TEXT,
+                tributacao TEXT,
+                responsavel TEXT,
+                atividade TEXT,
+                grupo TEXT,
+                cidade TEXT,
+                desde TEXT,
+                status TEXT,
+                email TEXT,
+                telefone TEXT,
+                contato TEXT,
+                possui_folha TEXT,
+                financeiro TEXT,
+                contas_bancarias INTEGER,
+                forma_entrega TEXT,
+                data_entrega TEXT,
+                feito INTEGER DEFAULT 0,
+                data_criacao TEXT
+            )
+        ''')
+        conn.commit()
+    else:
+        # Verifica se a coluna data_criacao existe
+        c.execute("PRAGMA table_info(atividades)")
+        columns = [column[1] for column in c.fetchall()]
+        if 'data_criacao' not in columns:
+            c.execute("ALTER TABLE atividades ADD COLUMN data_criacao TEXT")
+            conn.commit()
+    
     return conn
 
 # --- FUNÇÕES DO SISTEMA ---
 def adicionar_atividade(conn, campos):
     c = conn.cursor()
-    c.execute('''
-        INSERT INTO atividades (
-            cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
-            grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-            financeiro, contas_bancarias, forma_entrega, data_entrega, data_criacao
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),))
-    conn.commit()
+    try:
+        c.execute('''
+            INSERT INTO atividades (
+                cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
+                grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
+                financeiro, contas_bancarias, forma_entrega, data_entrega, data_criacao
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),))
+        conn.commit()
+        return True
+    except sqlite3.Error as e:
+        st.error(f"Erro ao adicionar atividade: {str(e)}")
+        return False
 
 def excluir_atividade(conn, id):
     c = conn.cursor()
-    c.execute('DELETE FROM atividades WHERE id = ?', (id,))
-    conn.commit()
+    try:
+        c.execute('DELETE FROM atividades WHERE id = ?', (id,))
+        conn.commit()
+        return True
+    except sqlite3.Error as e:
+        st.error(f"Erro ao excluir atividade: {str(e)}")
+        return False
 
 def marcar_feito(conn, id, feito):
     c = conn.cursor()
-    c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (feito, id))
-    conn.commit()
+    try:
+        c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (feito, id))
+        conn.commit()
+        return True
+    except sqlite3.Error as e:
+        st.error(f"Erro ao atualizar status: {str(e)}")
+        return False
 
 def get_atividades(conn):
     c = conn.cursor()
-    return c.execute('SELECT * FROM atividades ORDER BY data_criacao DESC').fetchall()
+    try:
+        c.execute('SELECT * FROM atividades ORDER BY data_criacao DESC')
+        return c.fetchall()
+    except sqlite3.Error as e:
+        st.error(f"Erro ao recuperar atividades: {str(e)}")
+        return []
 
 # --- COMPONENTES DA INTERFACE ---
 def login_section():
@@ -248,8 +283,8 @@ def cadastro_atividade(conn):
                     grupo, cidade, desde.strftime('%Y-%m-%d'), status, email, telefone, contato,
                     possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega.strftime('%Y-%m-%d')
                 )
-                adicionar_atividade(conn, campos)
-                st.success("Atividade cadastrada com sucesso!", icon="✅")
+                if adicionar_atividade(conn, campos):
+                    st.success("Atividade cadastrada com sucesso!", icon="✅")
             else:
                 st.error("Preencha os campos obrigatórios!", icon="❌")
 
@@ -294,8 +329,8 @@ def lista_atividades(conn):
                     )
                     
                     if st.button("Excluir", key=f"del_{id}", use_container_width=True):
-                        excluir_atividade(conn, id)
-                        st.rerun()
+                        if excluir_atividade(conn, id):
+                            st.rerun()
 
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
