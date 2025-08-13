@@ -236,18 +236,41 @@ def marcar_feito(conn: sqlite3.Connection, id: int, feito: bool) -> bool:
         st.error(f"Erro ao atualizar status: {e}")
         return False
 
-def get_atividades(conn: sqlite3.Connection, filtro_mes: str = None) -> List[Tuple]:
-    """Retorna todas as atividades ordenadas por data de criação."""
+def get_atividades(conn: sqlite3.Connection, filtro_mes: str = None, filtro_responsavel: str = None) -> List[Tuple]:
+    """Retorna todas as atividades ordenadas por data de criação com filtros opcionais."""
     try:
         c = conn.cursor()
-        if filtro_mes:
-            c.execute('SELECT * FROM atividades WHERE mes_referencia = ? ORDER BY data_criacao DESC', (filtro_mes,))
-        else:
-            c.execute('SELECT * FROM atividades ORDER BY data_criacao DESC')
+        query = 'SELECT * FROM atividades'
+        params = []
+        
+        conditions = []
+        if filtro_mes and filtro_mes != "Todos":
+            conditions.append('mes_referencia = ?')
+            params.append(filtro_mes)
+        if filtro_responsavel and filtro_responsavel != "Todos":
+            conditions.append('responsavel = ?')
+            params.append(filtro_responsavel)
+        
+        if conditions:
+            query += ' WHERE ' + ' AND '.join(conditions)
+        
+        query += ' ORDER BY data_criacao DESC'
+        
+        c.execute(query, tuple(params))
         return c.fetchall()
     except sqlite3.Error as e:
         st.error(f"Erro ao recuperar atividades: {e}")
         return []
+
+def get_responsaveis(conn: sqlite3.Connection) -> List[str]:
+    """Retorna a lista de responsáveis únicos."""
+    try:
+        c = conn.cursor()
+        c.execute('SELECT DISTINCT responsavel FROM atividades ORDER BY responsavel')
+        return ["Todos"] + [row[0] for row in c.fetchall()]
+    except sqlite3.Error as e:
+        st.error(f"Erro ao recuperar responsáveis: {e}")
+        return ["Todos"]
 
 def get_dados_indicadores(conn: sqlite3.Connection) -> pd.DataFrame:
     """Retorna dados para os indicadores de entrega."""
@@ -363,25 +386,32 @@ def cadastro_atividade(conn: sqlite3.Connection):
                 st.error("Preencha os campos obrigatórios!", icon="❌")
 
 def lista_atividades(conn: sqlite3.Connection):
-    """Exibe a lista de atividades cadastradas."""
+    """Exibe a lista de atividades cadastradas com filtros."""
     st.markdown('<div class="header">📋 Lista de Atividades</div>', unsafe_allow_html=True)
     
-    # Filtro por mês de referência
-    meses = sorted(set(
-        f"{mes:02d}/{ano}" 
-        for ano in range(2023, 2026) 
-        for mes in range(1, 13)
-    ), reverse=True)
+    # Filtros
+    col1, col2 = st.columns(2)
     
-    mes_selecionado = st.selectbox("Filtrar por mês de referência:", ["Todos"] + meses)
+    with col1:
+        # Filtro por mês de referência
+        meses = sorted(set(
+            f"{mes:02d}/{ano}" 
+            for ano in range(2023, 2026) 
+            for mes in range(1, 13)
+        ), reverse=True)
+        mes_selecionado = st.selectbox("Filtrar por mês de referência:", ["Todos"] + meses)
     
-    if mes_selecionado == "Todos":
-        atividades = get_atividades(conn)
-    else:
-        atividades = get_atividades(conn, mes_selecionado)
+    with col2:
+        # Filtro por responsável
+        responsaveis = get_responsaveis(conn)
+        responsavel_selecionado = st.selectbox("Filtrar por responsável:", responsaveis)
+    
+    # Obter atividades com os filtros aplicados
+    atividades = get_atividades(conn, mes_selecionado if mes_selecionado != "Todos" else None,
+                              responsavel_selecionado if responsavel_selecionado != "Todos" else None)
     
     if not atividades:
-        st.info("Nenhuma atividade cadastrada ainda.", icon="ℹ️")
+        st.info("Nenhuma atividade encontrada com os filtros selecionados.", icon="ℹ️")
         return
     
     for row in atividades:
