@@ -1,134 +1,148 @@
 import streamlit as st
 import sqlite3
-import pandas as pd
-from datetime import date
+from datetime import datetime
 
-# --- CONFIGURAÇÕES INICIAIS ---
-st.set_page_config(page_title="Painel de Entregas de Atividades", layout="wide")
+# --- CSS PROFISSIONAL ---
+st.markdown("""
+    <style>
+        .main {background-color: #f0f2f6;}
+        .title {color: #003366; font-size: 32px; font-weight: bold;}
+        .header {color: #003366; font-size: 24px; font-weight: bold;}
+        .form-label {font-weight: bold;}
+        .button {background-color: #003366; color: white; font-weight: bold;}
+        .checkbox-label {font-weight: bold;}
+        .stButton>button {background-color: #003366; color: white; font-weight: bold;}
+        .stTextInput>div>input {background-color: #f8f8f8;}
+        .stDataFrame {background-color: #fff;}
+    </style>
+""", unsafe_allow_html=True)
 
 # --- BANCO DE DADOS ---
-def init_db():
-    conn = sqlite3.connect('atividades.db')
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS atividades (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente TEXT,
-            atividade TEXT,
-            responsavel TEXT,
-            data_entrega DATE,
-            status TEXT,
-            feito INTEGER DEFAULT 0
-        )
-    ''')
-    conn.commit()
-    return conn
-
-conn = init_db()
-
-# --- FUNÇÕES AUXILIARES ---
-def inserir_atividade(cliente, atividade, responsavel, data_entrega, status):
-    conn.execute(
-        'INSERT INTO atividades (cliente, atividade, responsavel, data_entrega, status, feito) VALUES (?, ?, ?, ?, ?, ?)',
-        (cliente, atividade, responsavel, data_entrega, status, 0)
+conn = sqlite3.connect('atividades.db', check_same_thread=False)
+c = conn.cursor()
+c.execute('''
+    CREATE TABLE IF NOT EXISTS atividades (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cliente TEXT,
+        razao_social TEXT,
+        classificacao TEXT,
+        tributacao TEXT,
+        responsavel TEXT,
+        atividade TEXT,
+        grupo TEXT,
+        cidade TEXT,
+        desde TEXT,
+        status TEXT,
+        email TEXT,
+        telefone TEXT,
+        contato TEXT,
+        possui_folha TEXT,
+        financeiro TEXT,
+        contas_bancarias INTEGER,
+        forma_entrega TEXT,
+        data_entrega TEXT,
+        feito INTEGER
     )
-    conn.commit()
+''')
+conn.commit()
 
-def excluir_atividade(id):
-    conn.execute('DELETE FROM atividades WHERE id=?', (id,))
-    conn.commit()
-
-def atualizar_feito(id, feito):
-    conn.execute('UPDATE atividades SET feito=? WHERE id=?', (feito, id))
-    conn.commit()
-
-def atualizar_data_entrega(id, data_entrega):
-    conn.execute('UPDATE atividades SET data_entrega=? WHERE id=?', (data_entrega, id))
-    conn.commit()
-
-def get_atividades():
-    df = pd.read_sql_query('SELECT * FROM atividades', conn)
-    return df
-
-# --- LAYOUT DO PAINEL ---
-st.title("Painel de Entregas de Atividades")
-
-with st.expander("Adicionar nova atividade"):
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        cliente = st.text_input("Cliente")
-    with col2:
-        atividade = st.text_input("Atividade")
-    with col3:
-        responsavel = st.text_input("Responsável")
-    with col4:
-        data_entrega = st.date_input("Data de Entrega", value=date.today())
-    with col5:
-        status = st.selectbox("Status", ["Pendente", "Em andamento", "Concluído"])
-    if st.button("Incluir Atividade"):
-        if cliente and atividade and responsavel:
-            inserir_atividade(cliente, atividade, responsavel, data_entrega.strftime("%Y-%m-%d"), status)
-            st.success("Atividade incluída com sucesso!")
+# --- LOGIN ---
+def login():
+    st.markdown('<p class="title">Carteira de Clientes - Painel de Atividades</p>', unsafe_allow_html=True)
+    username = st.text_input("Usuário")
+    password = st.text_input("Senha", type="password")
+    if st.button("Entrar"):
+        if username == "admin" and password == "reali":
+            st.session_state.logged_in = True
         else:
-            st.warning("Preencha todos os campos obrigatórios.")
+            st.error("Usuário ou senha incorretos")
 
-st.markdown("---")
+# --- ADICIONAR ATIVIDADE ---
+def adicionar_atividade(campos):
+    c.execute('''
+        INSERT INTO atividades (
+            cliente, razao_social, classificacao, tributacao, responsavel, atividade, grupo, cidade, desde, status,
+            email, telefone, contato, possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega, feito
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', campos)
+    conn.commit()
 
-# --- TABELA DE ATIVIDADES ---
-df = get_atividades()
-if df.empty:
-    st.info("Nenhuma atividade cadastrada.")
-else:
-    st.subheader("Lista de Atividades")
-    df['feito'] = df['feito'].astype(bool)
-    df['data_entrega'] = pd.to_datetime(df['data_entrega']).dt.strftime('%d/%m/%Y')
+# --- EXCLUIR ATIVIDADE ---
+def excluir_atividade(id):
+    c.execute('DELETE FROM atividades WHERE id = ?', (id,))
+    conn.commit()
 
-    # Layout igual ao Excel: colunas principais
-    cols = st.columns([2, 3, 2, 2, 2, 1, 1])
-    with cols[0]:
-        st.markdown("**Cliente**")
-    with cols[1]:
-        st.markdown("**Atividade**")
-    with cols[2]:
-        st.markdown("**Responsável**")
-    with cols[3]:
-        st.markdown("**Data de Entrega**")
-    with cols[4]:
-        st.markdown("**Status**")
-    with cols[5]:
-        st.markdown("**Feito**")
-    with cols[6]:
-        st.markdown("**Excluir**")
+# --- MARCAR COMO FEITO ---
+def marcar_feito(id, feito):
+    c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (feito, id))
+    conn.commit()
 
-    for idx, row in df.iterrows():
-        cols = st.columns([2, 3, 2, 2, 2, 1, 1])
-        with cols[0]:
-            st.write(row['cliente'])
-        with cols[1]:
-            st.write(row['atividade'])
-        with cols[2]:
-            st.write(row['responsavel'])
-        with cols[3]:
-            nova_data = st.date_input(
-                f"Data {row['id']}", 
-                value=pd.to_datetime(row['data_entrega'], dayfirst=True), 
-                key=f"data_{row['id']}"
+# --- PAINEL PRINCIPAL ---
+def painel():
+    st.markdown('<p class="header">Cadastro de Atividades</p>', unsafe_allow_html=True)
+    with st.form("nova_atividade"):
+        cliente = st.text_input("Cliente")
+        razao_social = st.text_input("Razão Social")
+        classificacao = st.text_input("Classificação do Cliente")
+        tributacao = st.text_input("Tributação")
+        responsavel = st.text_input("Responsável")
+        atividade = st.text_input("Atividade")
+        grupo = st.text_input("Grupo")
+        cidade = st.text_input("Cidade")
+        desde = st.text_input("Desde")
+        status = st.text_input("Status")
+        email = st.text_input("E-mail")
+        telefone = st.text_input("Telefone")
+        contato = st.text_input("Contato")
+        possui_folha = st.selectbox("Possui Folha?", ["Sim", "Não"])
+        financeiro = st.text_input("Financeiro")
+        contas_bancarias = st.number_input("Qtd. Contas Bancárias", min_value=0, step=1)
+        forma_entrega = st.text_input("Forma de Entrega")
+        data_entrega = st.date_input("Data de Entrega", value=datetime.today())
+        enviado = st.form_submit_button("Adicionar Atividade")
+        if enviado:
+            campos = (
+                cliente, razao_social, classificacao, tributacao, responsavel, atividade, grupo, cidade, desde, status,
+                email, telefone, contato, possui_folha, financeiro, contas_bancarias, forma_entrega,
+                data_entrega.strftime('%Y-%m-%d'), 0
             )
-            if nova_data.strftime('%d/%m/%Y') != row['data_entrega']:
-                atualizar_data_entrega(row['id'], nova_data.strftime('%Y-%m-%d'))
-        with cols[4]:
-            st.write(row['status'])
-        with cols[5]:
-            checked = st.checkbox("", value=row['feito'], key=f"feito_{row['id']}")
-            if checked != row['feito']:
-                atualizar_feito(row['id'], int(checked))
-        with cols[6]:
-            if st.button("Excluir", key=f"excluir_{row['id']}"):
-                excluir_atividade(row['id'])
+            adicionar_atividade(campos)
+            st.success("Atividade adicionada com sucesso!")
+
+    st.markdown('<p class="header">Lista de Atividades</p>', unsafe_allow_html=True)
+    atividades = c.execute('SELECT * FROM atividades').fetchall()
+    if atividades:
+        cols = [
+            "Cliente", "Razão Social", "Classificação", "Tributação", "Responsável", "Atividade", "Grupo", "Cidade",
+            "Desde", "Status", "E-mail", "Telefone", "Contato", "Possui Folha", "Financeiro", "Contas Bancárias",
+            "Forma Entrega", "Data Entrega", "Feito", "Ações"
+        ]
+        for row in atividades:
+            id, cliente, razao_social, classificacao, tributacao, responsavel, atividade, grupo, cidade, desde, status, email, telefone, contato, possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega, feito = row
+            col1, col2, col3, col4, col5, col6, col7, col8, col9, col10 = st.columns([2,2,2,2,2,2,2,2,2,2])
+            col1.write(cliente)
+            col2.write(razao_social)
+            col3.write(classificacao)
+            col4.write(tributacao)
+            col5.write(responsavel)
+            col6.write(atividade)
+            col7.write(grupo)
+            col8.write(cidade)
+            col9.write(data_entrega)
+            feito_checkbox = col10.checkbox("Feito", value=bool(feito), key=f"feito_{id}")
+            if feito_checkbox != bool(feito):
+                marcar_feito(id, int(feito_checkbox))
+            if st.button("Excluir", key=f"del_{id}"):
+                excluir_atividade(id)
                 st.experimental_rerun()
+    else:
+        st.info("Nenhuma atividade cadastrada.")
 
-    st.markdown("---")
-    st.write(f"Total de atividades: {len(df)}")
-    st.write(f"Atividades concluídas: {df['feito'].sum()}")
+# --- CONTROLE DE SESSÃO ---
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
 
-st.caption("Desenvolvido para reproduzir o painel da planilha 'Carteira de Clientes.xlsm' em Streamlit + SQLite.")
+if not st.session_state.logged_in:
+    login()
+else:
+    painel()
