@@ -110,6 +110,46 @@ def load_css():
                 box-shadow: 0 2px 5px rgba(0,0,0,0.2);
             }
             
+            /* Sidebar styling */
+            [data-testid="stSidebar"] {
+                background: linear-gradient(180deg, var(--dark-color), #34495e) !important;
+                color: white !important;
+                padding: 1.5rem !important;
+            }
+            
+            /* Estilo para as métricas na sidebar */
+            .sidebar-metric {
+                color: white !important;
+            }
+            
+            .sidebar-metric-label {
+                color: white !important;
+                font-size: 1rem !important;
+                margin-bottom: 0.5rem !important;
+            }
+            
+            .sidebar-metric-value {
+                color: white !important;
+                font-size: 1.5rem !important;
+                font-weight: bold !important;
+            }
+            
+            /* Estilo específico para as próximas entregas */
+            .proxima-entrega {
+                background: white;
+                padding: 10px;
+                border-radius: 8px;
+                margin-bottom: 10px;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+                color: black !important;
+            }
+            
+            .proxima-entrega strong, 
+            .proxima-entrega small {
+                color: black !important;
+            }
+            
+            /* Restante do CSS permanece igual */
             .form-label {
                 font-weight: 600;
                 margin-bottom: 0.5rem;
@@ -292,13 +332,6 @@ def load_css():
                 transition: 0s;
             }
             
-            /* Sidebar styling */
-            [data-testid="stSidebar"] {
-                background: linear-gradient(180deg, var(--dark-color), #34495e) !important;
-                color: white !important;
-                padding: 1.5rem !important;
-            }
-            
             [data-testid="stSidebar"] .stButton>button {
                 background: linear-gradient(135deg, var(--secondary-color), #27ae60) !important;
             }
@@ -348,21 +381,6 @@ def load_css():
                     font-size: 1.5rem;
                 }
             }
-            
-            /* Estilo específico para as próximas entregas */
-            .proxima-entrega {
-                background: white;
-                padding: 10px;
-                border-radius: 8px;
-                margin-bottom: 10px;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-                color: black !important;
-            }
-            
-            .proxima-entrega strong, 
-            .proxima-entrega small {
-                color: black !important;
-            }
         </style>
     """, unsafe_allow_html=True)
 
@@ -372,7 +390,6 @@ def init_db() -> sqlite3.Connection:
     conn = sqlite3.connect('clientes.db', check_same_thread=False)
     c = conn.cursor()
     
-    # Criação da tabela com todas as colunas necessárias
     c.execute('''
         CREATE TABLE IF NOT EXISTS atividades (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -401,7 +418,6 @@ def init_db() -> sqlite3.Connection:
     ''')
     conn.commit()
     
-    # Gerar atividades mensais até 12/2025 se a tabela estiver vazia
     c.execute("SELECT COUNT(*) FROM atividades")
     if c.fetchone()[0] == 0:
         gerar_atividades_mensais(conn)
@@ -433,7 +449,7 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
         mes_ref = hoje.strftime("%m/%Y")
         for cliente in clientes:
             atividade = random.choice(atividades)
-            feito = random.choice([0, 1])  # Adiciona aleatoriamente atividades concluídas
+            feito = random.choice([0, 1])
             campos = (
                 cliente[0], cliente[1], cliente[2], cliente[3], cliente[4], atividade,
                 "Grupo 1", "São Paulo", "01/2020", "Ativo", "email@cliente.com", "(11) 99999-9999", "Contato Financeiro",
@@ -448,7 +464,7 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', campos)
         
-        hoje += timedelta(days=30)  # Aproximadamente 1 mês
+        hoje += timedelta(days=30)
     
     conn.commit()
 
@@ -457,7 +473,7 @@ def adicionar_atividade(conn: sqlite3.Connection, campos: Tuple) -> bool:
     """Adiciona uma nova atividade ao banco de dados."""
     try:
         c = conn.cursor()
-        campos_completos = campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),)  # Adiciona data_criacao
+        campos_completos = campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),)
         
         c.execute('''
             INSERT INTO atividades (
@@ -648,11 +664,9 @@ def lista_atividades(conn: sqlite3.Connection):
     """Exibe a lista de atividades cadastradas com filtros."""
     st.markdown('<div class="header">📋 Lista de Atividades</div>', unsafe_allow_html=True)
     
-    # Filtros
     col1, col2 = st.columns(2)
     
     with col1:
-        # Filtro por mês de referência
         meses = sorted(set(
             f"{mes:02d}/{ano}" 
             for ano in range(2023, 2026) 
@@ -661,11 +675,9 @@ def lista_atividades(conn: sqlite3.Connection):
         mes_selecionado = st.selectbox("Filtrar por mês de referência:", ["Todos"] + meses)
     
     with col2:
-        # Filtro por responsável
         responsaveis = get_responsaveis(conn)
         responsavel_selecionado = st.selectbox("Filtrar por responsável:", responsaveis)
     
-    # Obter atividades com os filtros aplicados
     atividades = get_atividades(conn, mes_selecionado if mes_selecionado != "Todos" else None,
                               responsavel_selecionado if responsavel_selecionado != "Todos" else None)
     
@@ -674,7 +686,6 @@ def lista_atividades(conn: sqlite3.Connection):
         return
     
     for row in atividades:
-        # Verificação segura dos dados
         try:
             (id, cliente, razao_social, classificacao, tributacao, responsavel, 
              atividade, grupo, cidade, desde, status, email, telefone, contato, 
@@ -684,7 +695,6 @@ def lista_atividades(conn: sqlite3.Connection):
             st.error(f"Erro ao processar atividade: {e}")
             continue
         
-        # Cartão de atividade
         with st.expander(f"{'✅' if feito else '📌'} {cliente} - {atividade} ({status}) - {mes_referencia}", expanded=False):
             st.markdown(f'<div class="card{" completed" if feito else ""}">', unsafe_allow_html=True)
             
@@ -702,7 +712,6 @@ def lista_atividades(conn: sqlite3.Connection):
                 st.markdown(f"**Data de Criação:** {data_criacao}")
                 
             with col2:
-                # Checkbox para marcar como concluído
                 st.checkbox(
                     "Marcar como concluído", 
                     value=bool(feito),
@@ -711,7 +720,6 @@ def lista_atividades(conn: sqlite3.Connection):
                     args=(conn, id, not feito)
                 )
                 
-                # Botão para excluir
                 if st.button("Excluir", key=f"del_{id}", use_container_width=True):
                     if excluir_atividade(conn, id):
                         st.rerun()
@@ -722,7 +730,6 @@ def mostrar_indicadores(conn: sqlite3.Connection):
     """Exibe os indicadores de entrega."""
     st.markdown('<div class="header">📊 Indicadores de Entrega</div>', unsafe_allow_html=True)
     
-    # Abas para diferentes visualizações
     tab1, tab2 = st.tabs(["📅 Por Mês", "👤 Por Responsável"])
     
     with tab1:
@@ -731,7 +738,6 @@ def mostrar_indicadores(conn: sqlite3.Connection):
         if dados_mes.empty:
             st.warning("Não há dados suficientes para exibir os indicadores por mês.")
         else:
-            # Gráfico de barras - Entregas por mês
             st.subheader("Entregas por Mês")
             fig_bar = px.bar(
                 dados_mes,
@@ -751,7 +757,6 @@ def mostrar_indicadores(conn: sqlite3.Connection):
             )
             st.plotly_chart(fig_bar, use_container_width=True)
             
-            # Gráfico de rosca - Percentual de conclusão
             st.subheader("Percentual de Conclusão")
             fig_pie = px.pie(
                 dados_mes,
@@ -771,7 +776,6 @@ def mostrar_indicadores(conn: sqlite3.Connection):
             )
             st.plotly_chart(fig_pie, use_container_width=True)
             
-            # Tabela com os dados detalhados
             st.subheader("Detalhamento por Mês")
             dados_mes['percentual'] = dados_mes['percentual'].round(2)
             st.dataframe(
@@ -792,7 +796,6 @@ def mostrar_indicadores(conn: sqlite3.Connection):
         if dados_responsaveis.empty:
             st.warning("Não há dados suficientes para exibir os indicadores por responsável.")
         else:
-            # Gráfico de barras - Entregas por responsável
             st.subheader("Entregas por Responsável")
             fig_bar_resp = px.bar(
                 dados_responsaveis,
@@ -812,7 +815,6 @@ def mostrar_indicadores(conn: sqlite3.Connection):
             )
             st.plotly_chart(fig_bar_resp, use_container_width=True)
             
-            # Gráfico de pizza - Distribuição por responsável
             st.subheader("Distribuição de Atividades")
             fig_pie_resp = px.pie(
                 dados_responsaveis,
@@ -832,7 +834,6 @@ def mostrar_indicadores(conn: sqlite3.Connection):
             )
             st.plotly_chart(fig_pie_resp, use_container_width=True)
             
-            # Gráfico de barras horizontais - Performance por responsável
             st.subheader("Performance por Responsável")
             fig_hbar = px.bar(
                 dados_responsaveis,
@@ -858,7 +859,6 @@ def mostrar_indicadores(conn: sqlite3.Connection):
             )
             st.plotly_chart(fig_hbar, use_container_width=True)
             
-            # Tabela com os dados detalhados
             st.subheader("Detalhamento por Responsável")
             dados_responsaveis['percentual'] = dados_responsaveis['percentual'].round(2)
             st.dataframe(
@@ -879,14 +879,12 @@ def main():
     load_css()
     conn = init_db()
     
-    # Verifica estado de login
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
     
     if not st.session_state.logged_in:
         login_section()
     else:
-        # Menu principal com abas
         tab1, tab2, tab3 = st.tabs(["📋 Lista de Atividades", "📝 Cadastrar Atividades", "📊 Indicadores de Entrega"])
         
         with tab1:
@@ -898,11 +896,9 @@ def main():
         with tab3:
             mostrar_indicadores(conn)
         
-        # Sidebar com informações adicionais
         with st.sidebar:
             st.markdown("## Configurações")
             
-            # Botão de logout
             if st.button("🚪 Sair", use_container_width=True, type="primary"):
                 st.session_state.logged_in = False
                 st.rerun()
@@ -910,25 +906,26 @@ def main():
             st.markdown("---")
             st.markdown("### Estatísticas Rápidas")
             
-            # Estatísticas resumidas
             try:
                 c = conn.cursor()
                 
-                # Total de atividades
                 c.execute("SELECT COUNT(*) FROM atividades")
                 total = c.fetchone()[0]
                 
-                # Atividades concluídas
                 c.execute("SELECT COUNT(*) FROM atividades WHERE feito = 1")
                 concluidas = c.fetchone()[0]
                 
-                # Percentual de conclusão
                 percentual = (concluidas / total * 100) if total > 0 else 0
                 
-                st.metric("Total de Atividades", total)
-                st.metric("Atividades Concluídas", f"{concluidas} ({percentual:.1f}%)")
+                # Exibindo as métricas com texto branco
+                st.markdown(f"""
+                    <div class="sidebar-metric-label">Total de Atividades</div>
+                    <div class="sidebar-metric-value">{total}</div>
+                    <div class="sidebar-metric-label">Atividades Concluídas</div>
+                    <div class="sidebar-metric-value">{concluidas} ({percentual:.1f}%)</div>
+                """, unsafe_allow_html=True)
                 
-                # Próximas entregas (5 próximas)
+                # Próximas entregas
                 hoje = datetime.now().strftime('%Y-%m-%d')
                 c.execute('''
                     SELECT cliente, atividade, data_entrega 
