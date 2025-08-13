@@ -1,6 +1,9 @@
 import streamlit as st
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
+import pandas as pd
+import plotly.express as px
+import random
 from typing import List, Tuple, Optional
 
 # --- CONFIGURAÇÃO INICIAL ---
@@ -53,6 +56,11 @@ def load_css():
                 margin-bottom: 1.5rem;
             }
             
+            .completed {
+                background-color: #e8f5e9;
+                border-left: 5px solid var(--success-color);
+            }
+            
             .form-label {
                 font-weight: 600;
                 margin-bottom: 0.5rem;
@@ -98,32 +106,6 @@ def load_css():
                 color: var(--secondary-color);
                 font-weight: 600;
             }
-            
-            .dataframe {
-                width: 100%;
-                border-collapse: collapse;
-            }
-            
-            .dataframe th {
-                background-color: var(--primary-color);
-                color: white;
-                font-weight: 600;
-                padding: 0.75rem;
-                text-align: left;
-            }
-            
-            .dataframe td {
-                padding: 0.75rem;
-                border-bottom: 1px solid #ddd;
-            }
-            
-            .dataframe tr:nth-child(even) {
-                background-color: #f2f2f2;
-            }
-            
-            .dataframe tr:hover {
-                background-color: #e9e9e9;
-            }
         </style>
     """, unsafe_allow_html=True)
 
@@ -156,24 +138,74 @@ def init_db() -> sqlite3.Connection:
             forma_entrega TEXT,
             data_entrega TEXT,
             feito INTEGER DEFAULT 0,
-            data_criacao TEXT NOT NULL
+            data_criacao TEXT NOT NULL,
+            mes_referencia TEXT
         )
     ''')
     conn.commit()
+    
+    # Gerar atividades mensais até 12/2025 se a tabela estiver vazia
+    c.execute("SELECT COUNT(*) FROM atividades")
+    if c.fetchone()[0] == 0:
+        gerar_atividades_mensais(conn)
+    
     return conn
+
+def gerar_atividades_mensais(conn: sqlite3.Connection):
+    """Gera atividades mensais para todos os clientes até dezembro de 2025."""
+    clientes = [
+        ("Cliente A", "Razão Social A", "B", "Simples Nacional", "Responsável 1"),
+        ("Cliente B", "Razão Social B", "A", "Lucro Presumido", "Responsável 2"),
+        ("Cliente C", "Razão Social C", "C", "Lucro Real", "Responsável 1"),
+        ("Cliente D", "Razão Social D", "B", "Simples Nacional", "Responsável 3"),
+    ]
+    
+    atividades = [
+        "Fechamento mensal",
+        "Relatório contábil",
+        "Conciliação bancária",
+        "Declarações fiscais"
+    ]
+    
+    hoje = datetime.now()
+    fim = datetime(2025, 12, 1)
+    
+    c = conn.cursor()
+    
+    while hoje <= fim:
+        mes_ref = hoje.strftime("%m/%Y")
+        for cliente in clientes:
+            atividade = random.choice(atividades)
+            campos = (
+                cliente[0], cliente[1], cliente[2], cliente[3], cliente[4], atividade,
+                "Grupo 1", "São Paulo", "01/2020", "Ativo", "email@cliente.com", "(11) 99999-9999", "Contato Financeiro",
+                "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), mes_ref
+            )
+            
+            c.execute('''
+                INSERT INTO atividades (
+                    cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
+                    grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
+                    financeiro, contas_bancarias, forma_entrega, data_entrega, data_criacao, mes_referencia
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),))
+        
+        hoje += timedelta(days=30)  # Aproximadamente 1 mês
+    
+    conn.commit()
 
 # --- FUNÇÕES DO SISTEMA ---
 def adicionar_atividade(conn: sqlite3.Connection, campos: Tuple) -> bool:
     """Adiciona uma nova atividade ao banco de dados."""
     try:
         c = conn.cursor()
-        campos_completos = campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),)
+        campos_completos = campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), campos[8])  # data_criacao e mes_referencia
         c.execute('''
             INSERT INTO atividades (
                 cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
                 grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                financeiro, contas_bancarias, forma_entrega, data_entrega, data_criacao
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                financeiro, contas_bancarias, forma_entrega, data_entrega, data_criacao, mes_referencia
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', campos_completos)
         conn.commit()
         return True
@@ -203,15 +235,36 @@ def marcar_feito(conn: sqlite3.Connection, id: int, feito: bool) -> bool:
         st.error(f"Erro ao atualizar status: {e}")
         return False
 
-def get_atividades(conn: sqlite3.Connection) -> List[Tuple]:
+def get_atividades(conn: sqlite3.Connection, filtro_mes: str = None) -> List[Tuple]:
     """Retorna todas as atividades ordenadas por data de criação."""
     try:
         c = conn.cursor()
-        c.execute('SELECT * FROM atividades ORDER BY data_criacao DESC')
+        if filtro_mes:
+            c.execute('SELECT * FROM atividades WHERE mes_referencia = ? ORDER BY data_criacao DESC', (filtro_mes,))
+        else:
+            c.execute('SELECT * FROM atividades ORDER BY data_criacao DESC')
         return c.fetchall()
     except sqlite3.Error as e:
         st.error(f"Erro ao recuperar atividades: {e}")
         return []
+
+def get_dados_indicadores(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Retorna dados para os indicadores de entrega."""
+    try:
+        query = '''
+            SELECT 
+                mes_referencia,
+                SUM(feito) as concluidas,
+                COUNT(*) as total,
+                (SUM(feito) * 100.0 / COUNT(*)) as percentual
+            FROM atividades
+            GROUP BY mes_referencia
+            ORDER BY SUBSTR(mes_referencia, 4) || SUBSTR(mes_referencia, 1, 2)
+        '''
+        return pd.read_sql(query, conn)
+    except Exception as e:
+        st.error(f"Erro ao gerar indicadores: {e}")
+        return pd.DataFrame()
 
 # --- COMPONENTES DA INTERFACE ---
 def login_section():
@@ -270,6 +323,12 @@ def cadastro_atividade(conn: sqlite3.Connection):
             forma_entrega = st.selectbox("Forma de Entrega", ["E-mail", "Correio", "Pessoalmente", "Outros"])
             data_entrega = st.date_input("Data de Entrega", value=datetime.now())
         
+        mes_referencia = st.selectbox("Mês de Referência", [
+            f"{mes:02d}/{ano}" 
+            for ano in range(2023, 2026) 
+            for mes in range(1, 13)
+        ])
+        
         st.markdown("<small>Campos marcados com * são obrigatórios</small>", unsafe_allow_html=True)
         
         if st.form_submit_button("Adicionar Atividade", use_container_width=True):
@@ -277,7 +336,7 @@ def cadastro_atividade(conn: sqlite3.Connection):
                 campos = (
                     cliente, razao_social, classificacao, tributacao, responsavel, atividade,
                     grupo, cidade, desde.strftime('%Y-%m-%d'), status, email, telefone, contato,
-                    possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega.strftime('%Y-%m-%d')
+                    possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega.strftime('%Y-%m-%d'), mes_referencia
                 )
                 if adicionar_atividade(conn, campos):
                     st.success("Atividade cadastrada com sucesso!", icon="✅")
@@ -288,52 +347,120 @@ def lista_atividades(conn: sqlite3.Connection):
     """Exibe a lista de atividades cadastradas."""
     st.markdown('<div class="header">📋 Lista de Atividades</div>', unsafe_allow_html=True)
     
-    atividades = get_atividades(conn)
+    # Filtro por mês de referência
+    meses = sorted(set(
+        f"{mes:02d}/{ano}" 
+        for ano in range(2023, 2026) 
+        for mes in range(1, 13)
+    ), reverse=True)
+    
+    mes_selecionado = st.selectbox("Filtrar por mês de referência:", ["Todos"] + meses)
+    
+    if mes_selecionado == "Todos":
+        atividades = get_atividades(conn)
+    else:
+        atividades = get_atividades(conn, mes_selecionado)
     
     if not atividades:
         st.info("Nenhuma atividade cadastrada ainda.", icon="ℹ️")
         return
     
     for row in atividades:
-        with st.container():
-            # Verificação segura dos dados
-            try:
-                (id, cliente, razao_social, classificacao, tributacao, responsavel, 
-                 atividade, grupo, cidade, desde, status, email, telefone, contato, 
-                 possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega, 
-                 feito, data_criacao) = row
-            except ValueError as e:
-                st.error(f"Erro ao processar atividade: {e}")
-                continue
+        # Verificação segura dos dados
+        try:
+            (id, cliente, razao_social, classificacao, tributacao, responsavel, 
+             atividade, grupo, cidade, desde, status, email, telefone, contato, 
+             possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega, 
+             feito, data_criacao, mes_referencia) = row
+        except ValueError as e:
+            st.error(f"Erro ao processar atividade: {e}")
+            continue
+        
+        # Determina a classe CSS baseada no status
+        container_class = "completed" if feito else ""
+        
+        # Cartão de atividade
+        with st.expander(f"{'✅' if feito else '📌'} {cliente} - {atividade} ({status}) - {mes_referencia}", expanded=False):
+            st.markdown(f'<div class="{container_class}">', unsafe_allow_html=True)
             
-            # Cartão de atividade
-            with st.expander(f"📌 {cliente} - {atividade} ({status})"):
-                col1, col2 = st.columns([3, 1])
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                st.markdown(f"**Responsável:** {responsavel}")
+                st.markdown(f"**Razão Social:** {razao_social}")
+                st.markdown(f"**Classificação/Tributação:** {classificacao} / {tributacao}")
+                st.markdown(f"**Grupo/Cidade:** {grupo} / {cidade}")
+                st.markdown(f"**Contato:** {contato} ({telefone} - {email})")
+                st.markdown(f"**Financeiro:** {financeiro} | Folha: {possui_folha} | Contas: {contas_bancarias}")
+                st.markdown(f"**Entrega:** {forma_entrega} em {data_entrega}")
+                st.markdown(f"**Mês Referência:** {mes_referencia}")
+                st.markdown(f"**Data de Criação:** {data_criacao}")
                 
-                with col1:
-                    st.markdown(f"**Responsável:** {responsavel}")
-                    st.markdown(f"**Razão Social:** {razao_social}")
-                    st.markdown(f"**Classificação/Tributação:** {classificacao} / {tributacao}")
-                    st.markdown(f"**Grupo/Cidade:** {grupo} / {cidade}")
-                    st.markdown(f"**Contato:** {contato} ({telefone} - {email})")
-                    st.markdown(f"**Financeiro:** {financeiro} | Folha: {possui_folha} | Contas: {contas_bancarias}")
-                    st.markdown(f"**Entrega:** {forma_entrega} em {data_entrega}")
-                    st.markdown(f"**Data de Criação:** {data_criacao}")
-                    
-                with col2:
-                    # Checkbox para marcar como concluído
-                    st.checkbox(
-                        "Marcar como concluído", 
-                        value=bool(feito),
-                        key=f"feito_{id}",
-                        on_change=marcar_feito,
-                        args=(conn, id, not feito)
-                    )
-                    
-                    # Botão para excluir
-                    if st.button("Excluir", key=f"del_{id}", use_container_width=True):
-                        if excluir_atividade(conn, id):
-                            st.rerun()
+            with col2:
+                # Checkbox para marcar como concluído
+                st.checkbox(
+                    "Marcar como concluído", 
+                    value=bool(feito),
+                    key=f"feito_{id}",
+                    on_change=marcar_feito,
+                    args=(conn, id, not feito)
+                )
+                
+                # Botão para excluir
+                if st.button("Excluir", key=f"del_{id}", use_container_width=True):
+                    if excluir_atividade(conn, id):
+                        st.rerun()
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+
+def mostrar_indicadores(conn: sqlite3.Connection):
+    """Exibe os indicadores de entrega."""
+    st.markdown('<div class="header">📊 Indicadores de Entrega</div>', unsafe_allow_html=True)
+    
+    dados = get_dados_indicadores(conn)
+    
+    if dados.empty:
+        st.warning("Não há dados suficientes para exibir os indicadores.")
+        return
+    
+    # Gráfico de barras - Entregas por mês
+    st.subheader("Entregas por Mês")
+    fig_bar = px.bar(
+        dados,
+        x='mes_referencia',
+        y=['concluidas', 'total'],
+        barmode='group',
+        labels={'value': 'Quantidade', 'mes_referencia': 'Mês de Referência'},
+        color_discrete_map={'concluidas': '#2ecc71', 'total': '#3498db'}
+    )
+    fig_bar.update_layout(showlegend=True, legend_title_text='')
+    st.plotly_chart(fig_bar, use_container_width=True)
+    
+    # Gráfico de rosca - Percentual de conclusão
+    st.subheader("Percentual de Conclusão")
+    fig_pie = px.pie(
+        dados,
+        values='percentual',
+        names='mes_referencia',
+        hole=0.4,
+        color_discrete_sequence=px.colors.sequential.Greens
+    )
+    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+    st.plotly_chart(fig_pie, use_container_width=True)
+    
+    # Tabela com os dados detalhados
+    st.subheader("Detalhamento por Mês")
+    dados['percentual'] = dados['percentual'].round(2)
+    st.dataframe(
+        dados[['mes_referencia', 'concluidas', 'total', 'percentual']]
+        .rename(columns={
+            'mes_referencia': 'Mês',
+            'concluidas': 'Concluídas',
+            'total': 'Total',
+            'percentual': '% Conclusão'
+        }),
+        use_container_width=True
+    )
 
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
@@ -348,24 +475,23 @@ def main():
     if not st.session_state.logged_in:
         login_section()
     else:
-        # Menu principal
-        st.sidebar.title("Menu")
-        menu_option = st.sidebar.radio(
-            "Selecione uma opção",
-            ["Cadastrar Atividade", "Visualizar Atividades"],
-            index=1
-        )
+        # Menu principal com abas
+        tab1, tab2, tab3 = st.tabs(["📋 Lista de Atividades", "📝 Cadastrar Atividades", "📊 Indicadores de Entrega"])
         
+        with tab1:
+            lista_atividades(conn)
+        
+        with tab2:
+            cadastro_atividade(conn)
+        
+        with tab3:
+            mostrar_indicadores(conn)
+        
+        # Botão de logout na sidebar
         st.sidebar.markdown("---")
         if st.sidebar.button("Sair", use_container_width=True):
             st.session_state.logged_in = False
             st.rerun()
-        
-        # Navegação entre páginas
-        if menu_option == "Cadastrar Atividade":
-            cadastro_atividade(conn)
-        else:
-            lista_atividades(conn)
 
 if __name__ == "__main__":
     main()
