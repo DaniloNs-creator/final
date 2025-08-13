@@ -180,7 +180,7 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
             campos = (
                 cliente[0], cliente[1], cliente[2], cliente[3], cliente[4], atividade,
                 "Grupo 1", "São Paulo", "01/2020", "Ativo", "email@cliente.com", "(11) 99999-9999", "Contato Financeiro",
-                "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), feito, mes_ref
+                "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), feito, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), mes_ref
             )
             
             c.execute('''
@@ -189,7 +189,7 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
                     grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
                     financeiro, contas_bancarias, forma_entrega, data_entrega, feito, data_criacao, mes_referencia
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),))
+            ''', campos)
         
         hoje += timedelta(days=30)  # Aproximadamente 1 mês
     
@@ -200,12 +200,15 @@ def adicionar_atividade(conn: sqlite3.Connection, campos: Tuple) -> bool:
     """Adiciona uma nova atividade ao banco de dados."""
     try:
         c = conn.cursor()
-        campos_completos = campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), campos[8])  # data_criacao e mes_referencia
+        # Adiciona data_criacao e mes_referencia no final da tupla
+        campos_completos = campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), campos[18])  # 18 é a posição do mes_referencia
+        
         c.execute('''
             INSERT INTO atividades (
                 cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
                 grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                financeiro, contas_bancarias, forma_entrega, data_entrega, data_criacao, mes_referencia
+                financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia,
+                data_criacao
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', campos_completos)
         conn.commit()
