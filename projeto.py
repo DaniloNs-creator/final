@@ -14,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CSS ANIMADO E ESTILIZADO ---
+# --- CSS PROFISSIONAL ANIMADO ---
 def load_css():
     st.markdown("""
         <style>
@@ -23,246 +23,328 @@ def load_css():
                 --secondary-color: #2ecc71;
                 --dark-color: #2c3e50;
                 --light-color: #ecf0f1;
-                --danger-color: #e74c3c;
-                --warning-color: #f39c12;
-                --info-color: #1abc9c;
-                --background-color: #f9f9f9;
-                --card-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
-                --transition-speed: 0.3s;
+                --accent-color: #e74c3c;
+                --background-gradient: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+                --card-shadow: 0 10px 20px rgba(0,0,0,0.1), 0 6px 6px rgba(0,0,0,0.05);
+                --transition: all 0.3s cubic-bezier(.25,.8,.25,1);
             }
             
             .main {
-                background-color: var(--background-color);
+                background: var(--background-gradient);
                 color: var(--dark-color);
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             }
             
-            /* Animação de entrada */
+            .title {
+                color: var(--dark-color);
+                font-size: 2.8rem;
+                font-weight: 800;
+                margin-bottom: 1.5rem;
+                padding-bottom: 0.5rem;
+                background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+                animation: fadeIn 1s ease-in-out;
+            }
+            
             @keyframes fadeIn {
-                from { opacity: 0; transform: translateY(20px); }
+                from { opacity: 0; transform: translateY(-20px); }
                 to { opacity: 1; transform: translateY(0); }
             }
             
-            .animated {
-                animation: fadeIn 0.5s ease-out forwards;
-            }
-            
-            /* Títulos */
-            .main-title {
-                color: var(--dark-color);
-                font-size: 2.8rem;
-                font-weight: 700;
-                margin-bottom: 1.5rem;
-                padding-bottom: 0.8rem;
-                border-bottom: 3px solid var(--primary-color);
-                position: relative;
-                animation-delay: 0.1s;
-            }
-            
-            .main-title::after {
-                content: '';
-                position: absolute;
-                bottom: -3px;
-                left: 0;
-                width: 50%;
-                height: 3px;
-                background: var(--secondary-color);
-                transition: width var(--transition-speed) ease;
-            }
-            
-            .main-title:hover::after {
-                width: 100%;
-            }
-            
-            .section-title {
+            .header {
                 color: var(--dark-color);
                 font-size: 1.8rem;
-                font-weight: 600;
-                margin: 1.8rem 0 1.2rem 0;
-                padding-left: 0.5rem;
-                border-left: 4px solid var(--primary-color);
-                transition: all var(--transition-speed);
+                font-weight: 700;
+                margin: 1.5rem 0 1rem 0;
+                padding-left: 10px;
+                border-left: 5px solid var(--primary-color);
+                animation: slideIn 0.5s ease-out;
             }
             
-            .section-title:hover {
-                border-left: 4px solid var(--secondary-color);
-                padding-left: 1rem;
+            @keyframes slideIn {
+                from { transform: translateX(-20px); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
             }
             
-            /* Cards */
             .card {
                 background: white;
                 border-radius: 12px;
                 box-shadow: var(--card-shadow);
                 padding: 1.8rem;
                 margin-bottom: 1.8rem;
-                transition: all var(--transition-speed);
-                border: 1px solid rgba(0, 0, 0, 0.05);
+                transition: var(--transition);
+                border: none;
+                animation: popIn 0.4s ease-out;
+            }
+            
+            @keyframes popIn {
+                0% { transform: scale(0.95); opacity: 0; }
+                100% { transform: scale(1); opacity: 1; }
             }
             
             .card:hover {
                 transform: translateY(-5px);
-                box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
+                box-shadow: 0 15px 30px rgba(0,0,0,0.15);
             }
             
             .completed {
-                background: linear-gradient(135deg, #f8fff8 0%, #e8f5e9 100%);
+                background-color: rgba(46, 204, 113, 0.1);
                 border-left: 5px solid var(--secondary-color);
+                position: relative;
+                overflow: hidden;
             }
             
-            /* Formulários */
+            .completed::after {
+                content: "✓ CONCLUÍDO";
+                position: absolute;
+                top: 10px;
+                right: -30px;
+                background: var(--secondary-color);
+                color: white;
+                padding: 3px 30px;
+                font-size: 0.7rem;
+                font-weight: bold;
+                transform: rotate(45deg);
+                box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            }
+            
             .form-label {
                 font-weight: 600;
-                margin-bottom: 0.6rem;
+                margin-bottom: 0.5rem;
                 color: var(--dark-color);
                 display: block;
-                transition: all var(--transition-speed);
+                position: relative;
+                padding-left: 15px;
             }
             
-            /* Botões */
+            .form-label::before {
+                content: "";
+                position: absolute;
+                left: 0;
+                top: 50%;
+                transform: translateY(-50%);
+                width: 8px;
+                height: 8px;
+                background: var(--primary-color);
+                border-radius: 50%;
+            }
+            
             .stButton>button {
-                background: linear-gradient(135deg, var(--primary-color) 0%, #2980b9 100%);
+                background: linear-gradient(135deg, var(--primary-color), #2980b9);
                 color: white;
                 font-weight: 600;
                 border: none;
                 border-radius: 8px;
                 padding: 0.7rem 1.5rem;
-                transition: all var(--transition-speed);
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                transition: var(--transition);
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                width: 100%;
             }
             
             .stButton>button:hover {
-                background: linear-gradient(135deg, var(--secondary-color) 0%, #27ae60 100%);
                 transform: translateY(-2px);
-                box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+                box-shadow: 0 7px 14px rgba(0,0,0,0.15);
+                background: linear-gradient(135deg, #2980b9, var(--primary-color));
             }
             
-            .danger-button>button {
-                background: linear-gradient(135deg, var(--danger-color) 0%, #c0392b 100%);
+            .stButton>button:active {
+                transform: translateY(0);
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             }
             
-            .danger-button>button:hover {
-                background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-            }
-            
-            /* Inputs */
             .stTextInput>div>div>input, 
             .stSelectbox>div>div>select,
             .stDateInput>div>div>input,
             .stNumberInput>div>div>input {
                 background-color: white;
-                border: 1px solid #dfe6e9;
+                border: 2px solid #dfe6e9;
                 border-radius: 8px;
                 padding: 0.7rem 1rem;
-                transition: all var(--transition-speed);
-                box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+                transition: var(--transition);
             }
             
             .stTextInput>div>div>input:focus, 
             .stSelectbox>div>div>select:focus,
             .stDateInput>div>div>input:focus {
                 border-color: var(--primary-color);
-                box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+                box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
+                outline: none;
             }
             
-            /* Mensagens */
+            .stCheckbox>div>label {
+                font-weight: 500;
+                color: var(--dark-color);
+            }
+            
+            .stCheckbox>div>div>svg {
+                color: var(--secondary-color) !important;
+            }
+            
             .success-message {
-                background-color: rgba(46, 204, 113, 0.1);
-                color: var(--secondary-color);
-                font-weight: 600;
+                background-color: rgba(46, 204, 113, 0.2);
+                color: var(--dark-color);
                 padding: 1rem;
                 border-radius: 8px;
-                border-left: 4px solid var(--secondary-color);
+                border-left: 5px solid var(--secondary-color);
+                margin: 1rem 0;
+                animation: fadeIn 0.5s ease-in;
             }
             
             .error-message {
-                background-color: rgba(231, 76, 60, 0.1);
-                color: var(--danger-color);
-                font-weight: 600;
+                background-color: rgba(231, 76, 60, 0.2);
+                color: var(--dark-color);
                 padding: 1rem;
                 border-radius: 8px;
-                border-left: 4px solid var(--danger-color);
+                border-left: 5px solid var(--accent-color);
+                margin: 1rem 0;
+                animation: shake 0.5s ease-in;
+            }
+            
+            @keyframes shake {
+                0%, 100% { transform: translateX(0); }
+                20%, 60% { transform: translateX(-5px); }
+                40%, 80% { transform: translateX(5px); }
             }
             
             .info-message {
-                background-color: rgba(52, 152, 219, 0.1);
-                color: var(--primary-color);
-                font-weight: 600;
+                background-color: rgba(52, 152, 219, 0.2);
+                color: var(--dark-color);
                 padding: 1rem;
                 border-radius: 8px;
-                border-left: 4px solid var(--primary-color);
+                border-left: 5px solid var(--primary-color);
+                margin: 1rem 0;
+                animation: fadeIn 0.5s ease-in;
             }
             
-            /* Sidebar */
-            [data-testid="stSidebar"] {
-                background: linear-gradient(180deg, var(--dark-color) 0%, #34495e 100%);
-                color: white;
+            .stTabs [data-baseweb="tab-list"] {
+                gap: 10px;
             }
             
-            .sidebar .sidebar-content {
-                background: transparent;
-            }
-            
-            /* Tabs */
-            .stTabs [role="tablist"] {
-                gap: 0.5rem;
-                margin-bottom: 1.5rem;
-            }
-            
-            .stTabs [role="tab"] {
-                padding: 0.7rem 1.5rem;
-                border-radius: 8px;
-                background-color: #f1f5f9;
-                color: var(--dark-color);
-                transition: all var(--transition-speed);
-                border: none;
+            .stTabs [data-baseweb="tab"] {
+                padding: 0.5rem 1.5rem;
+                border-radius: 8px !important;
+                background-color: white !important;
+                transition: var(--transition);
+                border: 1px solid #dfe6e9 !important;
                 font-weight: 600;
-            }
-            
-            .stTabs [role="tab"]:hover {
-                background-color: #e2e8f0;
-                color: var(--primary-color);
             }
             
             .stTabs [aria-selected="true"] {
-                background: linear-gradient(135deg, var(--primary-color) 0%, #2980b9 100%);
-                color: white;
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                background: linear-gradient(135deg, var(--primary-color), #2980b9) !important;
+                color: white !important;
+                border: none !important;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             }
             
-            /* Progresso */
-            .progress-container {
-                height: 8px;
-                background: #e0e0e0;
-                border-radius: 4px;
-                margin: 0.5rem 0;
+            .stTabs [aria-selected="true"] [data-testid="stMarkdownContainer"] p {
+                color: white !important;
+            }
+            
+            .stExpander [data-testid="stExpander"] {
+                border: none !important;
+                box-shadow: var(--card-shadow);
+                border-radius: 12px !important;
+                margin-bottom: 1rem;
+                transition: var(--transition);
+            }
+            
+            .stExpander [data-testid="stExpander"]:hover {
+                box-shadow: 0 15px 30px rgba(0,0,0,0.15);
+            }
+            
+            .stExpander [data-testid="stExpanderDetails"] {
+                padding: 1.5rem !important;
+            }
+            
+            .stDataFrame {
+                border-radius: 12px !important;
+                box-shadow: var(--card-shadow) !important;
+            }
+            
+            /* Efeito de onda nos botões */
+            .ripple {
+                position: relative;
                 overflow: hidden;
             }
             
-            .progress-bar {
+            .ripple:after {
+                content: "";
+                display: block;
+                position: absolute;
+                width: 100%;
                 height: 100%;
-                background: linear-gradient(90deg, var(--secondary-color) 0%, var(--primary-color) 100%);
-                border-radius: 4px;
-                transition: width 0.6s ease;
+                top: 0;
+                left: 0;
+                pointer-events: none;
+                background-image: radial-gradient(circle, #fff 10%, transparent 10.01%);
+                background-repeat: no-repeat;
+                background-position: 50%;
+                transform: scale(10, 10);
+                opacity: 0;
+                transition: transform .5s, opacity 1s;
             }
             
-            /* Efeito de hover nos cards de atividade */
-            .activity-card {
-                transition: all var(--transition-speed);
-                cursor: pointer;
+            .ripple:active:after {
+                transform: scale(0, 0);
+                opacity: 0.3;
+                transition: 0s;
             }
             
-            .activity-card:hover {
-                transform: scale(1.02);
+            /* Sidebar styling */
+            [data-testid="stSidebar"] {
+                background: linear-gradient(180deg, var(--dark-color), #34495e) !important;
+                color: white !important;
+                padding: 1.5rem !important;
             }
             
-            /* Responsividade */
+            [data-testid="stSidebar"] .stButton>button {
+                background: linear-gradient(135deg, var(--secondary-color), #27ae60) !important;
+            }
+            
+            [data-testid="stSidebar"] .stButton>button:hover {
+                background: linear-gradient(135deg, #27ae60, var(--secondary-color)) !important;
+            }
+            
+            /* Custom scrollbar */
+            ::-webkit-scrollbar {
+                width: 8px;
+                height: 8px;
+            }
+            
+            ::-webkit-scrollbar-track {
+                background: #f1f1f1;
+                border-radius: 10px;
+            }
+            
+            ::-webkit-scrollbar-thumb {
+                background: var(--primary-color);
+                border-radius: 10px;
+            }
+            
+            ::-webkit-scrollbar-thumb:hover {
+                background: #2980b9;
+            }
+            
+            /* Pulse animation for important elements */
+            @keyframes pulse {
+                0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(52, 152, 219, 0.7); }
+                70% { transform: scale(1.02); box-shadow: 0 0 0 10px rgba(52, 152, 219, 0); }
+                100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(52, 152, 219, 0); }
+            }
+            
+            .pulse {
+                animation: pulse 2s infinite;
+            }
+            
+            /* Responsive adjustments */
             @media (max-width: 768px) {
-                .main-title {
+                .title {
                     font-size: 2rem;
                 }
                 
-                .section-title {
+                .header {
                     font-size: 1.5rem;
                 }
             }
@@ -472,92 +554,70 @@ def get_dados_responsaveis(conn: sqlite3.Connection) -> pd.DataFrame:
 # --- COMPONENTES DA INTERFACE ---
 def login_section():
     """Exibe a seção de login."""
-    st.markdown('<div class="main-title animated">Carteira de Clientes - Painel de Atividades</div>', unsafe_allow_html=True)
+    st.markdown('<div class="title">Carteira de Clientes - Painel de Atividades</div>', unsafe_allow_html=True)
     
     with st.container():
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            st.image("https://via.placeholder.com/300x150?text=Company+Logo", width=200)
-        with col2:
-            st.markdown("""
-                <div style="margin-top: 1.5rem;">
-                    <h3 style="color: #2c3e50;">Gestão completa da carteira de clientes</h3>
-                    <p style="color: #7f8c8d;">Acompanhe todas as atividades e indicadores em um só lugar</p>
-                </div>
-            """, unsafe_allow_html=True)
-    
-    with st.form("login_form"):
-        st.markdown('<div class="section-title">🔒 Acesso ao Sistema</div>', unsafe_allow_html=True)
-        
-        username = st.text_input("Usuário", placeholder="Digite seu nome de usuário", key="username")
-        password = st.text_input("Senha", type="password", placeholder="Digite sua senha", key="password")
-        
-        col1, col2, col3 = st.columns([1,1,2])
-        with col1:
-            login_button = st.form_submit_button("Entrar", use_container_width=True)
-        with col2:
-            st.form_submit_button("Esqueci minha senha", use_container_width=True)
-        
-        if login_button:
-            if username == "admin" and password == "reali":
-                st.session_state.logged_in = True
-                st.session_state.user = username
-                st.rerun()
-            else:
-                st.error("Credenciais inválidas. Tente novamente.", icon="⚠️")
+        with st.form("login_form"):
+            col1, col2 = st.columns(2)
+            username = col1.text_input("Usuário", key="username")
+            password = col2.text_input("Senha", type="password", key="password")
+            
+            if st.form_submit_button("Entrar", use_container_width=True):
+                if username == "admin" and password == "reali":
+                    st.session_state.logged_in = True
+                    st.rerun()
+                else:
+                    st.error("Credenciais inválidas. Tente novamente.", icon="⚠️")
 
 def cadastro_atividade(conn: sqlite3.Connection):
     """Exibe o formulário para cadastro de novas atividades."""
-    st.markdown('<div class="section-title animated">📝 Cadastro de Atividades</div>', unsafe_allow_html=True)
+    st.markdown('<div class="header">📝 Cadastro de Atividades</div>', unsafe_allow_html=True)
     
     with st.form("nova_atividade", clear_on_submit=True):
-        with st.container():
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown('<div class="form-label">Informações Básicas</div>', unsafe_allow_html=True)
-                cliente = st.text_input("Cliente*", placeholder="Nome do cliente", key="cliente")
-                razao_social = st.text_input("Razão Social", placeholder="Razão social completa", key="razao_social")
-                classificacao = st.selectbox("Classificação", ["A", "B", "C", "D"], key="classificacao")
-                tributacao = st.selectbox("Tributação", ["Simples Nacional", "Lucro Presumido", "Lucro Real"], key="tributacao")
-                responsavel = st.text_input("Responsável*", placeholder="Nome do responsável", key="responsavel")
-                atividade = st.text_input("Atividade*", placeholder="Descrição da atividade", key="atividade")
-                
-            with col2:
-                st.markdown('<div class="form-label">Informações Adicionais</div>', unsafe_allow_html=True)
-                grupo = st.text_input("Grupo", placeholder="Grupo do cliente", key="grupo")
-                cidade = st.text_input("Cidade", placeholder="Cidade do cliente", key="cidade")
-                desde = st.date_input("Cliente desde", value=datetime.now(), key="desde")
-                status = st.selectbox("Status", ["Ativo", "Inativo", "Potencial", "Perdido"], key="status")
-                email = st.text_input("E-mail", placeholder="E-mail de contato", key="email")
-                telefone = st.text_input("Telefone", placeholder="Telefone de contato", key="telefone")
+        col1, col2 = st.columns(2)
         
-        st.markdown('<div class="form-label">Detalhes Financeiros</div>', unsafe_allow_html=True)
-        with st.container():
-            col3, col4, col5 = st.columns(3)
+        with col1:
+            st.markdown('<div class="form-label">Informações Básicas</div>', unsafe_allow_html=True)
+            cliente = st.text_input("Cliente*", placeholder="Nome do cliente")
+            razao_social = st.text_input("Razão Social", placeholder="Razão social completa")
+            classificacao = st.selectbox("Classificação", ["A", "B", "C", "D"])
+            tributacao = st.selectbox("Tributação", ["Simples Nacional", "Lucro Presumido", "Lucro Real"])
+            responsavel = st.text_input("Responsável*", placeholder="Nome do responsável")
+            atividade = st.text_input("Atividade*", placeholder="Descrição da atividade")
             
-            with col3:
-                contato = st.text_input("Contato Financeiro", placeholder="Nome do contato", key="contato")
-                possui_folha = st.selectbox("Possui Folha?", ["Sim", "Não", "Não se aplica"], key="possui_folha")
-                
-            with col4:
-                financeiro = st.text_input("Financeiro", placeholder="Informações financeiras", key="financeiro")
-                contas_bancarias = st.number_input("Contas Bancárias", min_value=0, value=1, key="contas_bancarias")
-                
-            with col5:
-                forma_entrega = st.selectbox("Forma de Entrega", ["E-mail", "Correio", "Pessoalmente", "Outros"], key="forma_entrega")
-                data_entrega = st.date_input("Data de Entrega", value=datetime.now(), key="data_entrega")
+        with col2:
+            st.markdown('<div class="form-label">Informações Adicionais</div>', unsafe_allow_html=True)
+            grupo = st.text_input("Grupo", placeholder="Grupo do cliente")
+            cidade = st.text_input("Cidade", placeholder="Cidade do cliente")
+            desde = st.date_input("Cliente desde", value=datetime.now())
+            status = st.selectbox("Status", ["Ativo", "Inativo", "Potencial", "Perdido"])
+            email = st.text_input("E-mail", placeholder="E-mail de contato")
+            telefone = st.text_input("Telefone", placeholder="Telefone de contato")
+            
+        st.markdown('<div class="form-label">Detalhes Financeiros</div>', unsafe_allow_html=True)
+        col3, col4, col5 = st.columns(3)
+        
+        with col3:
+            contato = st.text_input("Contato Financeiro", placeholder="Nome do contato")
+            possui_folha = st.selectbox("Possui Folha?", ["Sim", "Não", "Não se aplica"])
+            
+        with col4:
+            financeiro = st.text_input("Financeiro", placeholder="Informações financeiras")
+            contas_bancarias = st.number_input("Contas Bancárias", min_value=0, value=1)
+            
+        with col5:
+            forma_entrega = st.selectbox("Forma de Entrega", ["E-mail", "Correio", "Pessoalmente", "Outros"])
+            data_entrega = st.date_input("Data de Entrega", value=datetime.now())
         
         mes_referencia = st.selectbox("Mês de Referência", [
             f"{mes:02d}/{ano}" 
             for ano in range(2023, 2026) 
             for mes in range(1, 13)
-        ], key="mes_referencia")
+        ])
         
         st.markdown("<small>Campos marcados com * são obrigatórios</small>", unsafe_allow_html=True)
         
-        submitted = st.form_submit_button("Adicionar Atividade", use_container_width=True)
-        if submitted:
+        if st.form_submit_button("Adicionar Atividade", use_container_width=True, type="primary"):
             if cliente and responsavel and atividade:
                 campos = (
                     cliente, razao_social, classificacao, tributacao, responsavel, atividade,
@@ -571,25 +631,24 @@ def cadastro_atividade(conn: sqlite3.Connection):
 
 def lista_atividades(conn: sqlite3.Connection):
     """Exibe a lista de atividades cadastradas com filtros."""
-    st.markdown('<div class="section-title animated">📋 Lista de Atividades</div>', unsafe_allow_html=True)
+    st.markdown('<div class="header">📋 Lista de Atividades</div>', unsafe_allow_html=True)
     
     # Filtros
-    with st.container():
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Filtro por mês de referência
-            meses = sorted(set(
-                f"{mes:02d}/{ano}" 
-                for ano in range(2023, 2026) 
-                for mes in range(1, 13)
-            ), reverse=True)
-            mes_selecionado = st.selectbox("Filtrar por mês de referência:", ["Todos"] + meses, key="filtro_mes")
-        
-        with col2:
-            # Filtro por responsável
-            responsaveis = get_responsaveis(conn)
-            responsavel_selecionado = st.selectbox("Filtrar por responsável:", responsaveis, key="filtro_responsavel")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Filtro por mês de referência
+        meses = sorted(set(
+            f"{mes:02d}/{ano}" 
+            for ano in range(2023, 2026) 
+            for mes in range(1, 13)
+        ), reverse=True)
+        mes_selecionado = st.selectbox("Filtrar por mês de referência:", ["Todos"] + meses)
+    
+    with col2:
+        # Filtro por responsável
+        responsaveis = get_responsaveis(conn)
+        responsavel_selecionado = st.selectbox("Filtrar por responsável:", responsaveis)
     
     # Obter atividades com os filtros aplicados
     atividades = get_atividades(conn, mes_selecionado if mes_selecionado != "Todos" else None,
@@ -610,12 +669,9 @@ def lista_atividades(conn: sqlite3.Connection):
             st.error(f"Erro ao processar atividade: {e}")
             continue
         
-        # Determina a classe CSS baseada no status
-        container_class = "card completed" if feito else "card"
-        
         # Cartão de atividade
         with st.expander(f"{'✅' if feito else '📌'} {cliente} - {atividade} ({status}) - {mes_referencia}", expanded=False):
-            st.markdown(f'<div class="{container_class} activity-card">', unsafe_allow_html=True)
+            st.markdown(f'<div class="card{" completed" if feito else ""}">', unsafe_allow_html=True)
             
             col1, col2 = st.columns([3, 1])
             
@@ -649,7 +705,7 @@ def lista_atividades(conn: sqlite3.Connection):
 
 def mostrar_indicadores(conn: sqlite3.Connection):
     """Exibe os indicadores de entrega."""
-    st.markdown('<div class="section-title animated">📊 Indicadores de Entrega</div>', unsafe_allow_html=True)
+    st.markdown('<div class="header">📊 Indicadores de Entrega</div>', unsafe_allow_html=True)
     
     # Abas para diferentes visualizações
     tab1, tab2 = st.tabs(["📅 Por Mês", "👤 Por Responsável"])
@@ -692,7 +748,8 @@ def mostrar_indicadores(conn: sqlite3.Connection):
             fig_pie.update_traces(
                 textposition='inside', 
                 textinfo='percent+label',
-                marker=dict(line=dict(color='#fff', width=1))
+                marker=dict(line=dict(color='#fff', width=2))
+            )
             fig_pie.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)'
@@ -752,7 +809,8 @@ def mostrar_indicadores(conn: sqlite3.Connection):
             fig_pie_resp.update_traces(
                 textposition='inside', 
                 textinfo='percent+label',
-                marker=dict(line=dict(color='#fff', width=1))
+                marker=dict(line=dict(color='#fff', width=2))
+            )
             fig_pie_resp.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)'
@@ -775,12 +833,14 @@ def mostrar_indicadores(conn: sqlite3.Connection):
                 texttemplate='%{x:.1f}%', 
                 textposition='outside',
                 marker=dict(line=dict(color='rgba(0,0,0,0.1)', width=1))
+            )
             fig_hbar.update_layout(
                 showlegend=False,
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
-                xaxis=dict(showgrid=True, gridcolor='#f1f1f1'),
+                xaxis=dict(showgrid=False),
                 yaxis=dict(showgrid=False)
+            )
             st.plotly_chart(fig_hbar, use_container_width=True)
             
             # Tabela com os dados detalhados
@@ -811,44 +871,6 @@ def main():
     if not st.session_state.logged_in:
         login_section()
     else:
-        # Sidebar com informações do usuário
-        with st.sidebar:
-            st.markdown(f"""
-                <div style="text-align: center; margin-bottom: 2rem;">
-                    <div style="font-size: 1.2rem; font-weight: 600; color: white; margin-bottom: 0.5rem;">
-                        Olá, {st.session_state.user}!
-                    </div>
-                    <div style="color: #bdc3c7; font-size: 0.9rem;">
-                        Último acesso: {datetime.now().strftime('%d/%m/%Y %H:%M')}
-                    </div>
-                </div>
-            """, unsafe_allow_html=True)
-            
-            st.markdown("---")
-            
-            # Menu rápido
-            st.markdown("""
-                <div style="color: white; font-weight: 600; margin-bottom: 1rem;">
-                    🚀 Menu Rápido
-                </div>
-            """, unsafe_allow_html=True)
-            
-            if st.button("📋 Lista de Atividades", use_container_width=True):
-                st.session_state.current_tab = "📋 Lista de Atividades"
-            
-            if st.button("📝 Cadastrar Atividade", use_container_width=True):
-                st.session_state.current_tab = "📝 Cadastrar Atividades"
-            
-            if st.button("📊 Visualizar Indicadores", use_container_width=True):
-                st.session_state.current_tab = "📊 Indicadores de Entrega"
-            
-            st.markdown("---")
-            
-            # Botão de logout
-            if st.button("🔒 Sair", use_container_width=True, key="logout_button"):
-                st.session_state.logged_in = False
-                st.rerun()
-        
         # Menu principal com abas
         tab1, tab2, tab3 = st.tabs(["📋 Lista de Atividades", "📝 Cadastrar Atividades", "📊 Indicadores de Entrega"])
         
@@ -860,6 +882,60 @@ def main():
         
         with tab3:
             mostrar_indicadores(conn)
+        
+        # Sidebar com informações adicionais
+        with st.sidebar:
+            st.markdown("## Configurações")
+            
+            # Botão de logout
+            if st.button("🚪 Sair", use_container_width=True, type="primary"):
+                st.session_state.logged_in = False
+                st.rerun()
+            
+            st.markdown("---")
+            st.markdown("### Estatísticas Rápidas")
+            
+            # Estatísticas resumidas
+            try:
+                c = conn.cursor()
+                
+                # Total de atividades
+                c.execute("SELECT COUNT(*) FROM atividades")
+                total = c.fetchone()[0]
+                
+                # Atividades concluídas
+                c.execute("SELECT COUNT(*) FROM atividades WHERE feito = 1")
+                concluidas = c.fetchone()[0]
+                
+                # Percentual de conclusão
+                percentual = (concluidas / total * 100) if total > 0 else 0
+                
+                st.metric("Total de Atividades", total)
+                st.metric("Atividades Concluídas", f"{concluidas} ({percentual:.1f}%)")
+                
+                # Próximas entregas (5 próximas)
+                hoje = datetime.now().strftime('%Y-%m-%d')
+                c.execute('''
+                    SELECT cliente, atividade, data_entrega 
+                    FROM atividades 
+                    WHERE data_entrega >= ? AND feito = 0
+                    ORDER BY data_entrega ASC
+                    LIMIT 5
+                ''', (hoje,))
+                proximas = c.fetchall()
+                
+                if proximas:
+                    st.markdown("### Próximas Entregas")
+                    for cliente, atividade, data in proximas:
+                        st.markdown(f"""
+                            <div style="background: white; padding: 10px; border-radius: 8px; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+                                <strong>{cliente}</strong><br>
+                                {atividade}<br>
+                                <small>📅 {data}</small>
+                            </div>
+                        """, unsafe_allow_html=True)
+            except sqlite3.Error as e:
+                st.error(f"Erro ao carregar estatísticas: {e}")
 
 if __name__ == "__main__":
     main()
