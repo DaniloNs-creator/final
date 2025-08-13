@@ -139,10 +139,17 @@ def init_db() -> sqlite3.Connection:
             data_entrega TEXT,
             feito INTEGER DEFAULT 0,
             data_criacao TEXT NOT NULL,
-            mes_referencia TEXT
+            mes_referencia TEXT NOT NULL
         )
     ''')
     conn.commit()
+    
+    # Verificar se a coluna mes_referencia existe (para migração)
+    c.execute("PRAGMA table_info(atividades)")
+    columns = [column[1] for column in c.fetchall()]
+    if 'mes_referencia' not in columns:
+        c.execute("ALTER TABLE atividades ADD COLUMN mes_referencia TEXT NOT NULL DEFAULT '01/2023'")
+        conn.commit()
     
     # Gerar atividades mensais até 12/2025 se a tabela estiver vazia
     c.execute("SELECT COUNT(*) FROM atividades")
@@ -179,16 +186,17 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
             campos = (
                 cliente[0], cliente[1], cliente[2], cliente[3], cliente[4], atividade,
                 "Grupo 1", "São Paulo", "01/2020", "Ativo", "email@cliente.com", "(11) 99999-9999", "Contato Financeiro",
-                "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), mes_ref
+                "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), int(False), 
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S'), mes_ref
             )
             
             c.execute('''
                 INSERT INTO atividades (
                     cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
                     grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                    financeiro, contas_bancarias, forma_entrega, data_entrega, data_criacao, mes_referencia
+                    financeiro, contas_bancarias, forma_entrega, data_entrega, feito, data_criacao, mes_referencia
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),))
+            ''', campos)
         
         hoje += timedelta(days=30)  # Aproximadamente 1 mês
     
@@ -199,13 +207,13 @@ def adicionar_atividade(conn: sqlite3.Connection, campos: Tuple) -> bool:
     """Adiciona uma nova atividade ao banco de dados."""
     try:
         c = conn.cursor()
-        campos_completos = campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), campos[8])  # data_criacao e mes_referencia
+        campos_completos = campos + (int(False), datetime.now().strftime('%Y-%m-%d %H:%M:%S'), campos[17]  # feito, data_criacao, mes_referencia
         c.execute('''
             INSERT INTO atividades (
                 cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
                 grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                financeiro, contas_bancarias, forma_entrega, data_entrega, data_criacao, mes_referencia
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                financeiro, contas_bancarias, forma_entrega, data_entrega, feito, data_criacao, mes_referencia
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', campos_completos)
         conn.commit()
         return True
@@ -240,9 +248,24 @@ def get_atividades(conn: sqlite3.Connection, filtro_mes: str = None) -> List[Tup
     try:
         c = conn.cursor()
         if filtro_mes:
-            c.execute('SELECT * FROM atividades WHERE mes_referencia = ? ORDER BY data_criacao DESC', (filtro_mes,))
+            c.execute('''
+                SELECT id, cliente, razao_social, classificacao, tributacao, responsavel, 
+                       atividade, grupo, cidade, desde, status, email, telefone, contato, 
+                       possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega, 
+                       feito, data_criacao, mes_referencia 
+                FROM atividades 
+                WHERE mes_referencia = ? 
+                ORDER BY data_criacao DESC
+            ''', (filtro_mes,))
         else:
-            c.execute('SELECT * FROM atividades ORDER BY data_criacao DESC')
+            c.execute('''
+                SELECT id, cliente, razao_social, classificacao, tributacao, responsavel, 
+                       atividade, grupo, cidade, desde, status, email, telefone, contato, 
+                       possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega, 
+                       feito, data_criacao, mes_referencia 
+                FROM atividades 
+                ORDER BY data_criacao DESC
+            ''')
         return c.fetchall()
     except sqlite3.Error as e:
         st.error(f"Erro ao recuperar atividades: {e}")
@@ -259,7 +282,9 @@ def get_dados_indicadores(conn: sqlite3.Connection) -> pd.DataFrame:
                 (SUM(feito) * 100.0 / COUNT(*)) as percentual
             FROM atividades
             GROUP BY mes_referencia
-            ORDER BY SUBSTR(mes_referencia, 4) || SUBSTR(mes_referencia, 1, 2)
+            ORDER BY 
+                SUBSTR(mes_referencia, 4, 4) || 
+                SUBSTR(mes_referencia, 1, 2)
         '''
         return pd.read_sql(query, conn)
     except Exception as e:
@@ -323,20 +348,21 @@ def cadastro_atividade(conn: sqlite3.Connection):
             forma_entrega = st.selectbox("Forma de Entrega", ["E-mail", "Correio", "Pessoalmente", "Outros"])
             data_entrega = st.date_input("Data de Entrega", value=datetime.now())
         
-        mes_referencia = st.selectbox("Mês de Referência", [
+        mes_referencia = st.selectbox("Mês de Referência*", [
             f"{mes:02d}/{ano}" 
             for ano in range(2023, 2026) 
             for mes in range(1, 13)
-        ])
+        ], index=0)
         
         st.markdown("<small>Campos marcados com * são obrigatórios</small>", unsafe_allow_html=True)
         
         if st.form_submit_button("Adicionar Atividade", use_container_width=True):
-            if cliente and responsavel and atividade:
+            if cliente and responsavel and atividade and mes_referencia:
                 campos = (
                     cliente, razao_social, classificacao, tributacao, responsavel, atividade,
                     grupo, cidade, desde.strftime('%Y-%m-%d'), status, email, telefone, contato,
-                    possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega.strftime('%Y-%m-%d'), mes_referencia
+                    possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega.strftime('%Y-%m-%d'),
+                    mes_referencia
                 )
                 if adicionar_atividade(conn, campos):
                     st.success("Atividade cadastrada com sucesso!", icon="✅")
