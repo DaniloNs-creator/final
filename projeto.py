@@ -97,113 +97,92 @@ def load_css():
                 color: var(--secondary-color);
                 font-weight: 600;
             }
+            
+            .dataframe {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            
+            .dataframe th {
+                background-color: var(--primary-color);
+                color: white;
+                font-weight: 600;
+                padding: 0.75rem;
+                text-align: left;
+            }
+            
+            .dataframe td {
+                padding: 0.75rem;
+                border-bottom: 1px solid #ddd;
+            }
+            
+            .dataframe tr:nth-child(even) {
+                background-color: #f2f2f2;
+            }
+            
+            .dataframe tr:hover {
+                background-color: #e9e9e9;
+            }
         </style>
     """, unsafe_allow_html=True)
 
 # --- BANCO DE DADOS ---
 def init_db():
-    conn = None
-    try:
-        conn = sqlite3.connect('atividades.db', check_same_thread=False)
-        c = conn.cursor()
-        
-        # Verifica se a tabela existe
-        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='atividades'")
-        table_exists = c.fetchone()
-        
-        if not table_exists:
-            c.execute('''
-                CREATE TABLE atividades (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    cliente TEXT NOT NULL,
-                    razao_social TEXT,
-                    classificacao TEXT,
-                    tributacao TEXT,
-                    responsavel TEXT NOT NULL,
-                    atividade TEXT NOT NULL,
-                    grupo TEXT,
-                    cidade TEXT,
-                    desde TEXT,
-                    status TEXT,
-                    email TEXT,
-                    telefone TEXT,
-                    contato TEXT,
-                    possui_folha TEXT,
-                    financeiro TEXT,
-                    contas_bancarias INTEGER,
-                    forma_entrega TEXT,
-                    data_entrega TEXT,
-                    feito INTEGER DEFAULT 0,
-                    data_criacao TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            conn.commit()
-        
-        # Verifica se a coluna data_criacao existe (para migração)
-        c.execute("PRAGMA table_info(atividades)")
-        columns = [column[1] for column in c.fetchall()]
-        if 'data_criacao' not in columns:
-            c.execute('ALTER TABLE atividades ADD COLUMN data_criacao TEXT DEFAULT CURRENT_TIMESTAMP')
-            conn.commit()
-            
-    except sqlite3.Error as e:
-        st.error(f"Erro ao conectar ao banco de dados: {e}")
-        return None
-    
+    conn = sqlite3.connect('atividades.db', check_same_thread=False)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS atividades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente TEXT,
+            razao_social TEXT,
+            classificacao TEXT,
+            tributacao TEXT,
+            responsavel TEXT,
+            atividade TEXT,
+            grupo TEXT,
+            cidade TEXT,
+            desde TEXT,
+            status TEXT,
+            email TEXT,
+            telefone TEXT,
+            contato TEXT,
+            possui_folha TEXT,
+            financeiro TEXT,
+            contas_bancarias INTEGER,
+            forma_entrega TEXT,
+            data_entrega TEXT,
+            feito INTEGER DEFAULT 0,
+            data_criacao TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
     return conn
 
 # --- FUNÇÕES DO SISTEMA ---
 def adicionar_atividade(conn, campos):
-    try:
-        c = conn.cursor()
-        c.execute('''
-            INSERT INTO atividades (
-                cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
-                grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                financeiro, contas_bancarias, forma_entrega, data_entrega
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', campos)
-        conn.commit()
-        return True
-    except sqlite3.Error as e:
-        st.error(f"Erro ao adicionar atividade: {e}")
-        return False
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO atividades (
+            cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
+            grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
+            financeiro, contas_bancarias, forma_entrega, data_entrega
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', campos)
+    conn.commit()
 
 def excluir_atividade(conn, id):
-    try:
-        c = conn.cursor()
-        c.execute('DELETE FROM atividades WHERE id = ?', (id,))
-        conn.commit()
-        return True
-    except sqlite3.Error as e:
-        st.error(f"Erro ao excluir atividade: {e}")
-        return False
+    c = conn.cursor()
+    c.execute('DELETE FROM atividades WHERE id = ?', (id,))
+    conn.commit()
 
 def marcar_feito(conn, id, feito):
-    try:
-        c = conn.cursor()
-        c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (feito, id))
-        conn.commit()
-        return True
-    except sqlite3.Error as e:
-        st.error(f"Erro ao atualizar atividade: {e}")
-        return False
+    c = conn.cursor()
+    c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (feito, id))
+    conn.commit()
 
 def get_atividades(conn):
-    try:
-        c = conn.cursor()
-        c.execute('''
-            SELECT id, cliente, razao_social, classificacao, tributacao, responsavel, 
-                   atividade, grupo, cidade, desde, status, email, telefone, contato, 
-                   possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega, 
-                   feito, data_criacao 
-            FROM atividades 
-            ORDER BY data_criacao DESC
-        ''')
-        return c.fetchall()
-    except sqlite3.Error as e:
-        st.error(f"Erro ao carregar atividades: {e}")
-        return []
+    c = conn.cursor()
+    return c.execute('SELECT * FROM atividades ORDER BY data_criacao DESC').fetchall()
 
 # --- COMPONENTES DA INTERFACE ---
 def login_section():
@@ -269,8 +248,8 @@ def cadastro_atividade(conn):
                     grupo, cidade, desde.strftime('%Y-%m-%d'), status, email, telefone, contato,
                     possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega.strftime('%Y-%m-%d')
                 )
-                if adicionar_atividade(conn, campos):
-                    st.success("Atividade cadastrada com sucesso!", icon="✅")
+                adicionar_atividade(conn, campos)
+                st.success("Atividade cadastrada com sucesso!", icon="✅")
             else:
                 st.error("Preencha os campos obrigatórios!", icon="❌")
 
@@ -285,42 +264,44 @@ def lista_atividades(conn):
     
     for row in atividades:
         with st.container():
+            # Desempacotando os valores da linha
+            (id, cliente, razao_social, classificacao, tributacao, responsavel, 
+             atividade, grupo, cidade, desde, status, email, telefone, contato, 
+             possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega, 
+             feito, data_criacao) = row
+            
             # Criando um cartão para cada atividade
-            with st.expander(f"{'✅' if row[19] else '📌'} {row[1]} - {row[6]} ({row[10]})"):
+            with st.expander(f"📌 {cliente} - {atividade} ({status})"):
                 col1, col2 = st.columns([3, 1])
                 
                 with col1:
-                    st.markdown(f"**Responsável:** {row[5]}")
-                    st.markdown(f"**Razão Social:** {row[2]}")
-                    st.markdown(f"**Classificação/Tributação:** {row[3]} / {row[4]}")
-                    st.markdown(f"**Grupo/Cidade:** {row[7]} / {row[8]}")
-                    st.markdown(f"**Contato:** {row[13]} ({row[12]} - {row[11]})")
-                    st.markdown(f"**Financeiro:** {row[15]} | Folha: {row[14]} | Contas: {row[16]}")
-                    st.markdown(f"**Entrega:** {row[17]} em {row[18]}")
+                    st.markdown(f"**Responsável:** {responsavel}")
+                    st.markdown(f"**Razão Social:** {razao_social}")
+                    st.markdown(f"**Classificação/Tributação:** {classificacao} / {tributacao}")
+                    st.markdown(f"**Grupo/Cidade:** {grupo} / {cidade}")
+                    st.markdown(f"**Contato:** {contato} ({telefone} - {email})")
+                    st.markdown(f"**Financeiro:** {financeiro} | Folha: {possui_folha} | Contas: {contas_bancarias}")
+                    st.markdown(f"**Entrega:** {forma_entrega} em {data_entrega}")
                     
                 with col2:
                     feito_atual = st.checkbox(
                         "Marcar como concluído", 
-                        value=bool(row[19]),
-                        key=f"feito_{row[0]}",
+                        value=bool(feito),
+                        key=f"feito_{id}",
                         on_change=marcar_feito,
-                        args=(conn, row[0], not row[19])
+                        args=(conn, id, not feito)
                     )
                     
-                    if st.button("Excluir", key=f"del_{row[0]}", use_container_width=True):
-                        if excluir_atividade(conn, row[0]):
-                            st.rerun()
+                    if st.button("Excluir", key=f"del_{id}", use_container_width=True):
+                        excluir_atividade(conn, id)
+                        st.rerun()
                 
-                st.markdown(f"<small>Criado em: {row[20]}</small>", unsafe_allow_html=True)
+                st.markdown(f"<small>Criado em: {data_criacao}</small>", unsafe_allow_html=True)
 
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
     load_css()
     conn = init_db()
-    
-    if conn is None:
-        st.error("Não foi possível conectar ao banco de dados. O aplicativo não pode continuar.")
-        return
     
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
@@ -344,10 +325,6 @@ def main():
             cadastro_atividade(conn)
         else:
             lista_atividades(conn)
-    
-    # Fechar conexão quando não estiver mais em uso
-    if conn:
-        conn.close()
 
 if __name__ == "__main__":
     main()
