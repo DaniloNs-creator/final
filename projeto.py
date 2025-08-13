@@ -1,6 +1,7 @@
 import streamlit as st
 import sqlite3
 from datetime import datetime
+from typing import List, Tuple, Optional
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(
@@ -127,100 +128,94 @@ def load_css():
     """, unsafe_allow_html=True)
 
 # --- BANCO DE DADOS ---
-def init_db():
-    conn = sqlite3.connect('atividades.db', check_same_thread=False)
+def init_db() -> sqlite3.Connection:
+    """Inicializa e retorna a conexão com o banco de dados, criando a tabela se necessário."""
+    conn = sqlite3.connect('clientes.db', check_same_thread=False)
     c = conn.cursor()
     
-    # Verifica se a tabela existe
-    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='atividades'")
-    table_exists = c.fetchone()
-    
-    if not table_exists:
-        # Cria a tabela se não existir
-        c.execute('''
-            CREATE TABLE atividades (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cliente TEXT,
-                razao_social TEXT,
-                classificacao TEXT,
-                tributacao TEXT,
-                responsavel TEXT,
-                atividade TEXT,
-                grupo TEXT,
-                cidade TEXT,
-                desde TEXT,
-                status TEXT,
-                email TEXT,
-                telefone TEXT,
-                contato TEXT,
-                possui_folha TEXT,
-                financeiro TEXT,
-                contas_bancarias INTEGER,
-                forma_entrega TEXT,
-                data_entrega TEXT,
-                feito INTEGER DEFAULT 0,
-                data_criacao TEXT
-            )
-        ''')
-        conn.commit()
-    else:
-        # Verifica se a coluna data_criacao existe
-        c.execute("PRAGMA table_info(atividades)")
-        columns = [column[1] for column in c.fetchall()]
-        if 'data_criacao' not in columns:
-            c.execute("ALTER TABLE atividades ADD COLUMN data_criacao TEXT")
-            conn.commit()
-    
+    # Criação da tabela com todas as colunas necessárias
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS atividades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente TEXT NOT NULL,
+            razao_social TEXT,
+            classificacao TEXT,
+            tributacao TEXT,
+            responsavel TEXT NOT NULL,
+            atividade TEXT NOT NULL,
+            grupo TEXT,
+            cidade TEXT,
+            desde TEXT,
+            status TEXT,
+            email TEXT,
+            telefone TEXT,
+            contato TEXT,
+            possui_folha TEXT,
+            financeiro TEXT,
+            contas_bancarias INTEGER,
+            forma_entrega TEXT,
+            data_entrega TEXT,
+            feito INTEGER DEFAULT 0,
+            data_criacao TEXT NOT NULL
+        )
+    ''')
+    conn.commit()
     return conn
 
 # --- FUNÇÕES DO SISTEMA ---
-def adicionar_atividade(conn, campos):
-    c = conn.cursor()
+def adicionar_atividade(conn: sqlite3.Connection, campos: Tuple) -> bool:
+    """Adiciona uma nova atividade ao banco de dados."""
     try:
+        c = conn.cursor()
+        campos_completos = campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),)
         c.execute('''
             INSERT INTO atividades (
                 cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
                 grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
                 financeiro, contas_bancarias, forma_entrega, data_entrega, data_criacao
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),))
+        ''', campos_completos)
         conn.commit()
         return True
     except sqlite3.Error as e:
-        st.error(f"Erro ao adicionar atividade: {str(e)}")
+        st.error(f"Erro ao adicionar atividade: {e}")
         return False
 
-def excluir_atividade(conn, id):
-    c = conn.cursor()
+def excluir_atividade(conn: sqlite3.Connection, id: int) -> bool:
+    """Remove uma atividade do banco de dados pelo ID."""
     try:
+        c = conn.cursor()
         c.execute('DELETE FROM atividades WHERE id = ?', (id,))
         conn.commit()
-        return True
+        return c.rowcount > 0
     except sqlite3.Error as e:
-        st.error(f"Erro ao excluir atividade: {str(e)}")
+        st.error(f"Erro ao excluir atividade: {e}")
         return False
 
-def marcar_feito(conn, id, feito):
-    c = conn.cursor()
+def marcar_feito(conn: sqlite3.Connection, id: int, feito: bool) -> bool:
+    """Atualiza o status de conclusão de uma atividade."""
     try:
-        c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (feito, id))
+        c = conn.cursor()
+        c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (int(feito), id))
         conn.commit()
-        return True
+        return c.rowcount > 0
     except sqlite3.Error as e:
-        st.error(f"Erro ao atualizar status: {str(e)}")
+        st.error(f"Erro ao atualizar status: {e}")
         return False
 
-def get_atividades(conn):
-    c = conn.cursor()
+def get_atividades(conn: sqlite3.Connection) -> List[Tuple]:
+    """Retorna todas as atividades ordenadas por data de criação."""
     try:
+        c = conn.cursor()
         c.execute('SELECT * FROM atividades ORDER BY data_criacao DESC')
         return c.fetchall()
     except sqlite3.Error as e:
-        st.error(f"Erro ao recuperar atividades: {str(e)}")
+        st.error(f"Erro ao recuperar atividades: {e}")
         return []
 
 # --- COMPONENTES DA INTERFACE ---
 def login_section():
+    """Exibe a seção de login."""
     st.markdown('<div class="title">Carteira de Clientes - Painel de Atividades</div>', unsafe_allow_html=True)
     
     with st.form("login_form"):
@@ -235,7 +230,8 @@ def login_section():
             else:
                 st.error("Credenciais inválidas. Tente novamente.", icon="⚠️")
 
-def cadastro_atividade(conn):
+def cadastro_atividade(conn: sqlite3.Connection):
+    """Exibe o formulário para cadastro de novas atividades."""
     st.markdown('<div class="header">📝 Cadastro de Atividades</div>', unsafe_allow_html=True)
     
     with st.form("nova_atividade", clear_on_submit=True):
@@ -288,7 +284,8 @@ def cadastro_atividade(conn):
             else:
                 st.error("Preencha os campos obrigatórios!", icon="❌")
 
-def lista_atividades(conn):
+def lista_atividades(conn: sqlite3.Connection):
+    """Exibe a lista de atividades cadastradas."""
     st.markdown('<div class="header">📋 Lista de Atividades</div>', unsafe_allow_html=True)
     
     atividades = get_atividades(conn)
@@ -299,13 +296,17 @@ def lista_atividades(conn):
     
     for row in atividades:
         with st.container():
-            # Desempacotando os valores da linha
-            (id, cliente, razao_social, classificacao, tributacao, responsavel, 
-             atividade, grupo, cidade, desde, status, email, telefone, contato, 
-             possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega, 
-             feito, data_criacao) = row
+            # Verificação segura dos dados
+            try:
+                (id, cliente, razao_social, classificacao, tributacao, responsavel, 
+                 atividade, grupo, cidade, desde, status, email, telefone, contato, 
+                 possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega, 
+                 feito, data_criacao) = row
+            except ValueError as e:
+                st.error(f"Erro ao processar atividade: {e}")
+                continue
             
-            # Criando um cartão para cada atividade
+            # Cartão de atividade
             with st.expander(f"📌 {cliente} - {atividade} ({status})"):
                 col1, col2 = st.columns([3, 1])
                 
@@ -320,7 +321,8 @@ def lista_atividades(conn):
                     st.markdown(f"**Data de Criação:** {data_criacao}")
                     
                 with col2:
-                    feito_atual = st.checkbox(
+                    # Checkbox para marcar como concluído
+                    st.checkbox(
                         "Marcar como concluído", 
                         value=bool(feito),
                         key=f"feito_{id}",
@@ -328,21 +330,25 @@ def lista_atividades(conn):
                         args=(conn, id, not feito)
                     )
                     
+                    # Botão para excluir
                     if st.button("Excluir", key=f"del_{id}", use_container_width=True):
                         if excluir_atividade(conn, id):
                             st.rerun()
 
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
+    """Função principal que gerencia o fluxo da aplicação."""
     load_css()
     conn = init_db()
     
+    # Verifica estado de login
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
     
     if not st.session_state.logged_in:
         login_section()
     else:
+        # Menu principal
         st.sidebar.title("Menu")
         menu_option = st.sidebar.radio(
             "Selecione uma opção",
@@ -355,6 +361,7 @@ def main():
             st.session_state.logged_in = False
             st.rerun()
         
+        # Navegação entre páginas
         if menu_option == "Cadastrar Atividade":
             cadastro_atividade(conn)
         else:
