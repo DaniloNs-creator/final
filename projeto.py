@@ -348,6 +348,21 @@ def load_css():
                     font-size: 1.5rem;
                 }
             }
+            
+            /* Estilo específico para as próximas entregas */
+            .proxima-entrega {
+                background: white;
+                padding: 10px;
+                border-radius: 8px;
+                margin-bottom: 10px;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+                color: black !important;
+            }
+            
+            .proxima-entrega strong, 
+            .proxima-entrega small {
+                color: black !important;
+            }
         </style>
     """, unsafe_allow_html=True)
 
@@ -419,18 +434,13 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
         for cliente in clientes:
             atividade = random.choice(atividades)
             feito = random.choice([0, 1])  # Adiciona aleatoriamente atividades concluídas
-            
-            # Gerar datas de entrega aleatórias nos próximos 30 dias
-            dias_entrega = random.randint(1, 30)
-            data_entrega = (hoje + timedelta(days=dias_entrega)).strftime('%Y-%m-%d')
-            
             campos = (
                 cliente[0], cliente[1], cliente[2], cliente[3], cliente[4], atividade,
                 "Grupo 1", "São Paulo", "01/2020", "Ativo", "email@cliente.com", "(11) 99999-9999", "Contato Financeiro",
-                "Sim", "Em dia", 2, "E-mail", data_entrega, feito, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), mes_ref
+                "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), feito, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), mes_ref
             )
             
-            c.execute(''
+            c.execute('''
                 INSERT INTO atividades (
                     cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
                     grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
@@ -555,23 +565,6 @@ def get_dados_responsaveis(conn: sqlite3.Connection) -> pd.DataFrame:
     except Exception as e:
         st.error(f"Erro ao gerar dados por responsável: {e}")
         return pd.DataFrame()
-
-def get_proximas_entregas(conn: sqlite3.Connection, limite: int = 5) -> List[Tuple]:
-    """Retorna as próximas entregas ordenadas por data."""
-    try:
-        hoje = datetime.now().strftime('%Y-%m-%d')
-        c = conn.cursor()
-        c.execute('''
-            SELECT cliente, atividade, data_entrega, responsavel 
-            FROM atividades 
-            WHERE data_entrega >= ? AND feito = 0
-            ORDER BY data_entrega ASC
-            LIMIT ?
-        ''', (hoje, limite))
-        return c.fetchall()
-    except sqlite3.Error as e:
-        st.error(f"Erro ao recuperar próximas entregas: {e}")
-        return []
 
 # --- COMPONENTES DA INTERFACE ---
 def login_section():
@@ -935,39 +928,27 @@ def main():
                 st.metric("Total de Atividades", total)
                 st.metric("Atividades Concluídas", f"{concluidas} ({percentual:.1f}%)")
                 
-                # Próximas entregas
-                st.markdown("### Próximas Entregas")
-                proximas_entregas = get_proximas_entregas(conn)
+                # Próximas entregas (5 próximas)
+                hoje = datetime.now().strftime('%Y-%m-%d')
+                c.execute('''
+                    SELECT cliente, atividade, data_entrega 
+                    FROM atividades 
+                    WHERE data_entrega >= ? AND feito = 0
+                    ORDER BY data_entrega ASC
+                    LIMIT 5
+                ''', (hoje,))
+                proximas = c.fetchall()
                 
-                if proximas_entregas:
-                    for cliente, atividade, data_entrega, responsavel in proximas_entregas:
-                        # Calcular dias restantes
-                        data_entrega_obj = datetime.strptime(data_entrega, '%Y-%m-%d')
-                        dias_restantes = (data_entrega_obj - datetime.now()).days
-                        
-                        # Determinar cor com base na urgência
-                        if dias_restantes <= 3:
-                            cor_borda = "#e74c3c"  # Vermelho para urgente
-                        elif dias_restantes <= 7:
-                            cor_borda = "#f39c12"  # Amarelo para próximo
-                        else:
-                            cor_borda = "#2ecc71"  # Verde para normal
-                        
+                if proximas:
+                    st.markdown("### Próximas Entregas")
+                    for cliente, atividade, data in proximas:
                         st.markdown(f"""
-                            <div style="background: white; padding: 12px; border-radius: 8px; margin-bottom: 12px; 
-                                       box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-left: 4px solid {cor_borda}">
+                            <div class="proxima-entrega">
                                 <strong>{cliente}</strong><br>
-                                <div style="font-size: 0.9rem; margin: 5px 0;">{atividade}</div>
-                                <div style="display: flex; justify-content: space-between; align-items: center;">
-                                    <small>📅 {data_entrega_obj.strftime('%d/%m/%Y')}</small>
-                                    <small>⏳ {dias_restantes} dias</small>
-                                </div>
-                                <small>👤 {responsavel}</small>
+                                {atividade}<br>
+                                <small>📅 {data}</small>
                             </div>
                         """, unsafe_allow_html=True)
-                else:
-                    st.info("Nenhuma entrega pendente para os próximos dias.", icon="ℹ️")
-                    
             except sqlite3.Error as e:
                 st.error(f"Erro ao carregar estatísticas: {e}")
 
