@@ -993,7 +993,7 @@ def lista_atividades():
     col1, col2 = st.columns(2)
     
     with col1:
-        meses = sorted(set(
+        meses = sorted([
             f"{mes:02d}/{ano}" 
             for ano in range(2023, 2026) 
             for mes in range(1, 13)
