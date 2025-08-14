@@ -11,7 +11,7 @@ import contextlib
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(
     page_title="Carteira de Clientes",
-    page_icon="📊",
+    page_icon="https://www.realiconsultoria.com.br/wp-content/uploads/2022/02/cropped-fav_Prancheta-1-150x150.png",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -1210,3 +1210,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
