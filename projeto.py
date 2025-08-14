@@ -6,6 +6,7 @@ import plotly.express as px
 import random
 from typing import List, Tuple, Optional
 import io
+import contextlib
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(
@@ -14,6 +15,22 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# --- Gerenciador de Conexão Segura ---
+@contextlib.contextmanager
+def get_db_connection():
+    """Gerenciador de contexto para conexão segura com o banco de dados."""
+    conn = None
+    try:
+        conn = sqlite3.connect('clientes.db', check_same_thread=False, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")  # Melhora o desempenho com múltiplas conexões
+        yield conn
+    except sqlite3.Error as e:
+        st.error(f"Erro de conexão com o banco de dados: {e}")
+        raise
+    finally:
+        if conn:
+            conn.close()
 
 # --- CSS PROFISSIONAL ANIMADO ---
 def load_css():
@@ -386,44 +403,42 @@ def load_css():
     """, unsafe_allow_html=True)
 
 # --- BANCO DE DADOS ---
-def init_db() -> sqlite3.Connection:
-    """Inicializa e retorna a conexão com o banco de dados, criando a tabela se necessário."""
-    conn = sqlite3.connect('clientes.db', check_same_thread=False)
-    c = conn.cursor()
-    
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS atividades (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente TEXT NOT NULL,
-            razao_social TEXT,
-            classificacao TEXT,
-            tributacao TEXT,
-            responsavel TEXT NOT NULL,
-            atividade TEXT NOT NULL,
-            grupo TEXT,
-            cidade TEXT,
-            desde TEXT,
-            status TEXT,
-            email TEXT,
-            telefone TEXT,
-            contato TEXT,
-            possui_folha TEXT,
-            financeiro TEXT,
-            contas_bancarias INTEGER,
-            forma_entrega TEXT,
-            data_entrega TEXT,
-            feito INTEGER DEFAULT 0,
-            data_criacao TEXT NOT NULL,
-            mes_referencia TEXT
-        )
-    ''')
-    conn.commit()
-    
-    c.execute("SELECT COUNT(*) FROM atividades")
-    if c.fetchone()[0] == 0:
-        gerar_atividades_mensais(conn)
-    
-    return conn
+def init_db():
+    """Inicializa o banco de dados, criando a tabela se necessário."""
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS atividades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cliente TEXT NOT NULL,
+                razao_social TEXT,
+                classificacao TEXT,
+                tributacao TEXT,
+                responsavel TEXT NOT NULL,
+                atividade TEXT NOT NULL,
+                grupo TEXT,
+                cidade TEXT,
+                desde TEXT,
+                status TEXT,
+                email TEXT,
+                telefone TEXT,
+                contato TEXT,
+                possui_folha TEXT,
+                financeiro TEXT,
+                contas_bancarias INTEGER,
+                forma_entrega TEXT,
+                data_entrega TEXT,
+                feito INTEGER DEFAULT 0,
+                data_criacao TEXT NOT NULL,
+                mes_referencia TEXT
+            )
+        ''')
+        conn.commit()
+        
+        c.execute("SELECT COUNT(*) FROM atividades")
+        if c.fetchone()[0] == 0:
+            gerar_atividades_mensais(conn)
 
 def gerar_atividades_mensais(conn: sqlite3.Connection):
     """Gera atividades mensais para todos os clientes até dezembro de 2025."""
@@ -444,17 +459,16 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
     hoje = datetime.now()
     fim = datetime(2025, 12, 1)
     
-    c = conn.cursor()
-    
-    while hoje <= fim:
-        mes_ref = hoje.strftime("%m/%Y")
+    try:
+        c = conn.cursor()
+        
         for cliente in clientes:
             atividade = random.choice(atividades)
             feito = random.choice([0, 1])
             campos = (
                 cliente[0], cliente[1], cliente[2], cliente[3], cliente[4], atividade,
                 "Grupo 1", "São Paulo", "01/2020", "Ativo", "email@cliente.com", "(11) 99999-9999", "Contato Financeiro",
-                "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), feito, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), mes_ref
+                "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), feito, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), hoje.strftime('%m/%Y')
             )
             
             c.execute('''
@@ -462,152 +476,168 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
                     cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
                     grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
                     financeiro, contas_bancarias, forma_entrega, data_entrega, feito, data_criacao, mes_referencia
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', campos)
         
-        hoje += timedelta(days=30)
-    
-    conn.commit()
+        conn.commit()
+    except sqlite3.Error as e:
+        st.error(f"Erro ao gerar atividades iniciais: {e}")
 
 # --- FUNÇÕES DO SISTEMA ---
-def adicionar_atividade(conn: sqlite3.Connection, campos: Tuple) -> bool:
+def adicionar_atividade(campos: Tuple) -> bool:
     """Adiciona uma nova atividade ao banco de dados."""
     try:
-        c = conn.cursor()
-        campos_completos = campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),)
-        
-        c.execute('''
-            INSERT INTO atividades (
-                cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
-                grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, data_criacao
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', campos_completos)
-        conn.commit()
-        st.session_state.atualizar_lista = True  # Flag para atualizar a lista
-        return True
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            campos_completos = campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),)
+            
+            c.execute('''
+                INSERT INTO atividades (
+                    cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
+                    grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
+                    financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, data_criacao
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', campos_completos)
+            conn.commit()
+            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+            return True
     except sqlite3.Error as e:
         st.error(f"Erro ao adicionar atividade: {e}")
         return False
 
-def adicionar_atividades_em_lote(conn: sqlite3.Connection, dados: List[Tuple]) -> bool:
+def adicionar_atividades_em_lote(dados: List[Tuple]) -> bool:
     """Adiciona múltiplas atividades ao banco de dados em lote."""
     try:
-        c = conn.cursor()
-        
-        # Preparar os dados com data de criação
-        dados_completos = [
-            (*linha, datetime.now().strftime('%Y-%m-%d %H:%M:%S')) 
-            for linha in dados
-        ]
-        
-        c.executemany('''
-            INSERT INTO atividades (
-                cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
-                grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, data_criacao
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', dados_completos)
-        
-        conn.commit()
-        st.session_state.atualizar_lista = True  # Flag para atualizar a lista
-        return True
-    except sqlite3.Error as e:
-        st.error(f"Erro ao adicionar atividades em lote: {e}")
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            
+            # Preparar os dados com data de criação
+            dados_completos = [
+                (*linha, datetime.now().strftime('%Y-%m-%d %H:%M:%S')) 
+                for linha in dados
+            ]
+            
+            # Iniciar transação
+            c.execute("BEGIN TRANSACTION")
+            
+            try:
+                c.executemany('''
+                    INSERT INTO atividades (
+                        cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
+                        grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
+                        financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, data_criacao
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', dados_completos)
+                
+                conn.commit()
+                st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+                return True
+            except sqlite3.Error as e:
+                conn.rollback()
+                st.error(f"Erro durante a inserção em lote: {e}")
+                return False
+    except Exception as e:
+        st.error(f"Erro ao conectar ao banco de dados: {e}")
         return False
 
-def excluir_atividade(conn: sqlite3.Connection, id: int) -> bool:
+def excluir_atividade(id: int) -> bool:
     """Remove uma atividade do banco de dados pelo ID."""
     try:
-        c = conn.cursor()
-        c.execute('DELETE FROM atividades WHERE id = ?', (id,))
-        conn.commit()
-        st.session_state.atualizar_lista = True  # Flag para atualizar a lista
-        return c.rowcount > 0
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute('DELETE FROM atividades WHERE id = ?', (id,))
+            conn.commit()
+            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+            return c.rowcount > 0
     except sqlite3.Error as e:
         st.error(f"Erro ao excluir atividade: {e}")
         return False
 
-def marcar_feito(conn: sqlite3.Connection, id: int, feito: bool) -> bool:
+def marcar_feito(id: int, feito: bool) -> bool:
     """Atualiza o status de conclusão de uma atividade."""
     try:
-        c = conn.cursor()
-        c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (int(feito), id))
-        conn.commit()
-        st.session_state.atualizar_lista = True  # Flag para atualizar a lista
-        return c.rowcount > 0
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (int(feito), id))
+            conn.commit()
+            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+            return c.rowcount > 0
     except sqlite3.Error as e:
         st.error(f"Erro ao atualizar status: {e}")
         return False
 
-def get_atividades(conn: sqlite3.Connection, filtro_mes: str = None, filtro_responsavel: str = None) -> List[Tuple]:
+def get_atividades(filtro_mes: str = None, filtro_responsavel: str = None) -> List[Tuple]:
     """Retorna todas as atividades ordenadas por data de criação com filtros opcionais."""
     try:
-        c = conn.cursor()
-        query = 'SELECT * FROM atividades'
-        params = []
-        
-        conditions = []
-        if filtro_mes and filtro_mes != "Todos":
-            conditions.append('mes_referencia = ?')
-            params.append(filtro_mes)
-        if filtro_responsavel and filtro_responsavel != "Todos":
-            conditions.append('responsavel = ?')
-            params.append(filtro_responsavel)
-        
-        if conditions:
-            query += ' WHERE ' + ' AND '.join(conditions)
-        
-        query += ' ORDER BY data_criacao DESC'
-        
-        c.execute(query, tuple(params))
-        return c.fetchall()
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            query = 'SELECT * FROM atividades'
+            params = []
+            
+            conditions = []
+            if filtro_mes and filtro_mes != "Todos":
+                conditions.append('mes_referencia = ?')
+                params.append(filtro_mes)
+            if filtro_responsavel and filtro_responsavel != "Todos":
+                conditions.append('responsavel = ?')
+                params.append(filtro_responsavel)
+            
+            if conditions:
+                query += ' WHERE ' + ' AND '.join(conditions)
+            
+            query += ' ORDER BY data_criacao DESC'
+            
+            c.execute(query, tuple(params))
+            return c.fetchall()
     except sqlite3.Error as e:
         st.error(f"Erro ao recuperar atividades: {e}")
         return []
 
-def get_responsaveis(conn: sqlite3.Connection) -> List[str]:
+def get_responsaveis() -> List[str]:
     """Retorna a lista de responsáveis únicos."""
     try:
-        c = conn.cursor()
-        c.execute('SELECT DISTINCT responsavel FROM atividades ORDER BY responsavel')
-        return ["Todos"] + [row[0] for row in c.fetchall()]
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute('SELECT DISTINCT responsavel FROM atividades ORDER BY responsavel')
+            return ["Todos"] + [row[0] for row in c.fetchall()]
     except sqlite3.Error as e:
         st.error(f"Erro ao recuperar responsáveis: {e}")
         return ["Todos"]
 
-def get_dados_indicadores(conn: sqlite3.Connection) -> pd.DataFrame:
+def get_dados_indicadores() -> pd.DataFrame:
     """Retorna dados para os indicadores de entrega."""
     try:
-        query = '''
-            SELECT 
-                mes_referencia,
-                SUM(feito) as concluidas,
-                COUNT(*) as total,
-                (SUM(feito) * 100.0 / COUNT(*)) as percentual
-            FROM atividades
-            GROUP BY mes_referencia
-            ORDER BY SUBSTR(mes_referencia, 4) || SUBSTR(mes_referencia, 1, 2)
-        '''
-        return pd.read_sql(query, conn)
+        with get_db_connection() as conn:
+            query = '''
+                SELECT 
+                    mes_referencia,
+                    SUM(feito) as concluidas,
+                    COUNT(*) as total,
+                    (SUM(feito) * 100.0 / COUNT(*)) as percentual
+                FROM atividades
+                GROUP BY mes_referencia
+                ORDER BY SUBSTR(mes_referencia, 4) || SUBSTR(mes_referencia, 1, 2)
+            '''
+            return pd.read_sql(query, conn)
     except Exception as e:
         st.error(f"Erro ao gerar indicadores: {e}")
         return pd.DataFrame()
 
-def get_dados_responsaveis(conn: sqlite3.Connection) -> pd.DataFrame:
+def get_dados_responsaveis() -> pd.DataFrame:
     """Retorna dados para análise por responsável."""
     try:
-        query = '''
-            SELECT 
-                responsavel,
-                SUM(feito) as concluidas,
-                COUNT(*) as total,
-                (SUM(feito) * 100.0 / COUNT(*)) as percentual
-            FROM atividades
-            GROUP BY responsavel
-            ORDER BY percentual DESC
-        '''
-        return pd.read_sql(query, conn)
+        with get_db_connection() as conn:
+            query = '''
+                SELECT 
+                    responsavel,
+                    SUM(feito) as concluidas,
+                    COUNT(*) as total,
+                    (SUM(feito) * 100.0 / COUNT(*)) as percentual
+                FROM atividades
+                GROUP BY responsavel
+                ORDER BY percentual DESC
+            '''
+            return pd.read_sql(query, conn)
     except Exception as e:
         st.error(f"Erro ao gerar dados por responsável: {e}")
         return pd.DataFrame()
@@ -630,7 +660,7 @@ def login_section():
                 else:
                     st.error("Credenciais inválidas. Tente novamente.", icon="⚠️")
 
-def upload_atividades(conn: sqlite3.Connection):
+def upload_atividades():
     """Exibe o formulário para upload de atividades em Excel."""
     st.markdown('<div class="header">📤 Upload de Atividades</div>', unsafe_allow_html=True)
     
@@ -699,7 +729,7 @@ def upload_atividades(conn: sqlite3.Connection):
             
             # Botão para confirmar importação
             if st.button("Confirmar Importação", type="primary", use_container_width=True):
-                if adicionar_atividades_em_lote(conn, atividades):
+                if adicionar_atividades_em_lote(atividades):
                     st.success(f"✅ {len(atividades)} atividades importadas com sucesso!")
                     st.rerun()  # Força a atualização da lista de atividades
                 else:
@@ -707,7 +737,7 @@ def upload_atividades(conn: sqlite3.Connection):
         except Exception as e:
             st.error(f"Erro ao processar arquivo: {str(e)}")
 
-def cadastro_atividade(conn: sqlite3.Connection):
+def cadastro_atividade():
     """Exibe o formulário para cadastro de novas atividades."""
     st.markdown('<div class="header">📝 Cadastro de Atividades</div>', unsafe_allow_html=True)
     
@@ -765,16 +795,16 @@ def cadastro_atividade(conn: sqlite3.Connection):
                         grupo, cidade, desde.strftime('%Y-%m-%d'), status, email, telefone, contato,
                         possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega.strftime('%Y-%m-%d'), mes_referencia
                     )
-                    if adicionar_atividade(conn, campos):
+                    if adicionar_atividade(campos):
                         st.success("Atividade cadastrada com sucesso!", icon="✅")
                         st.rerun()  # Força a atualização da lista de atividades
                 else:
                     st.error("Preencha os campos obrigatórios!", icon="❌")
     
     with tab2:
-        upload_atividades(conn)
+        upload_atividades()
 
-def lista_atividades(conn: sqlite3.Connection):
+def lista_atividades():
     """Exibe a lista de atividades cadastradas com filtros."""
     st.markdown('<div class="header">📋 Lista de Atividades</div>', unsafe_allow_html=True)
     
@@ -789,10 +819,10 @@ def lista_atividades(conn: sqlite3.Connection):
         mes_selecionado = st.selectbox("Filtrar por mês de referência:", ["Todos"] + meses)
     
     with col2:
-        responsaveis = get_responsaveis(conn)
+        responsaveis = get_responsaveis()
         responsavel_selecionado = st.selectbox("Filtrar por responsável:", responsaveis)
     
-    atividades = get_atividades(conn, mes_selecionado if mes_selecionado != "Todos" else None,
+    atividades = get_atividades(mes_selecionado if mes_selecionado != "Todos" else None,
                               responsavel_selecionado if responsavel_selecionado != "Todos" else None)
     
     if not atividades:
@@ -831,23 +861,23 @@ def lista_atividades(conn: sqlite3.Connection):
                     value=bool(feito),
                     key=f"feito_{id}",
                     on_change=marcar_feito,
-                    args=(conn, id, not feito)
+                    args=(id, not feito)
                 )
                 
                 if st.button("Excluir", key=f"del_{id}", use_container_width=True):
-                    if excluir_atividade(conn, id):
+                    if excluir_atividade(id):
                         st.rerun()
             
             st.markdown('</div>', unsafe_allow_html=True)
 
-def mostrar_indicadores(conn: sqlite3.Connection):
+def mostrar_indicadores():
     """Exibe os indicadores de entrega."""
     st.markdown('<div class="header">📊 Indicadores de Entrega</div>', unsafe_allow_html=True)
     
     tab1, tab2 = st.tabs(["📅 Por Mês", "👤 Por Responsável"])
     
     with tab1:
-        dados_mes = get_dados_indicadores(conn)
+        dados_mes = get_dados_indicadores()
         
         if dados_mes.empty:
             st.warning("Não há dados suficientes para exibir os indicadores por mês.")
@@ -905,7 +935,7 @@ def mostrar_indicadores(conn: sqlite3.Connection):
             )
     
     with tab2:
-        dados_responsaveis = get_dados_responsaveis(conn)
+        dados_responsaveis = get_dados_responsaveis()
         
         if dados_responsaveis.empty:
             st.warning("Não há dados suficientes para exibir os indicadores por responsável.")
@@ -987,40 +1017,20 @@ def mostrar_indicadores(conn: sqlite3.Connection):
                 height=400
             )
 
-# --- APLICAÇÃO PRINCIPAL ---
-def main():
-    """Função principal que gerencia o fluxo da aplicação."""
-    load_css()
-    conn = init_db()
-    
-    if 'logged_in' not in st.session_state:
-        st.session_state.logged_in = False
-    
-    if not st.session_state.logged_in:
-        login_section()
-    else:
-        tab1, tab2, tab3 = st.tabs(["📋 Lista de Atividades", "📝 Cadastrar Atividades", "📊 Indicadores de Entrega"])
+def mostrar_sidebar():
+    """Exibe a barra lateral com estatísticas e próximas entregas."""
+    with st.sidebar:
+        st.markdown("## Configurações")
         
-        with tab1:
-            lista_atividades(conn)
+        if st.button("🚪 Sair", use_container_width=True, type="primary"):
+            st.session_state.logged_in = False
+            st.rerun()
         
-        with tab2:
-            cadastro_atividade(conn)
+        st.markdown("---")
+        st.markdown("### Estatísticas Rápidas")
         
-        with tab3:
-            mostrar_indicadores(conn)
-        
-        with st.sidebar:
-            st.markdown("## Configurações")
-            
-            if st.button("🚪 Sair", use_container_width=True, type="primary"):
-                st.session_state.logged_in = False
-                st.rerun()
-            
-            st.markdown("---")
-            st.markdown("### Estatísticas Rápidas")
-            
-            try:
+        try:
+            with get_db_connection() as conn:
                 c = conn.cursor()
                 
                 c.execute("SELECT COUNT(*) FROM atividades")
@@ -1060,8 +1070,33 @@ def main():
                                 <small>📅 {data}</small>
                             </div>
                         """, unsafe_allow_html=True)
-            except sqlite3.Error as e:
-                st.error(f"Erro ao carregar estatísticas: {e}")
+        except sqlite3.Error as e:
+            st.error(f"Erro ao carregar estatísticas: {e}")
+
+# --- APLICAÇÃO PRINCIPAL ---
+def main():
+    """Função principal que gerencia o fluxo da aplicação."""
+    load_css()
+    init_db()
+    
+    if 'logged_in' not in st.session_state:
+        st.session_state.logged_in = False
+    
+    if not st.session_state.logged_in:
+        login_section()
+    else:
+        tab1, tab2, tab3 = st.tabs(["📋 Lista de Atividades", "📝 Cadastrar Atividades", "📊 Indicadores de Entrega"])
+        
+        with tab1:
+            lista_atividades()
+        
+        with tab2:
+            cadastro_atividade()
+        
+        with tab3:
+            mostrar_indicadores()
+        
+        mostrar_sidebar()
 
 if __name__ == "__main__":
     main()
