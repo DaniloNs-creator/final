@@ -758,13 +758,11 @@ def upload_atividades():
             
             atividades = []
             for _, row in df.iterrows():
-                # Tenta converter a data, se falhar, usa um valor padrão
                 try:
                     data_entrega_str = pd.to_datetime(row['DATA DE ENTREGA']).strftime('%Y-%m-%d')
                 except (ValueError, TypeError):
                     data_entrega_str = datetime.now().strftime('%Y-%m-%d')
                 
-                # Tenta converter o mês de referência, se falhar, usa um valor padrão
                 try:
                     mes_referencia_str = pd.to_datetime(row['MÊS DE REFERÊNCIA']).strftime('%m/%Y')
                 except (ValueError, TypeError):
@@ -874,11 +872,11 @@ def lista_atividades():
     col1, col2 = st.columns(2)
     
     with col1:
-        meses = sorted(set(
+        meses = sorted(list(set(
             f"{mes:02d}/{ano}" 
             for ano in range(2023, 2026) 
             for mes in range(1, 13)
-        ), reverse=True)
+        )), reverse=True)
         mes_selecionado = st.selectbox("Filtrar por mês de referência:", ["Todos"] + meses)
     
     with col2:
@@ -892,7 +890,6 @@ def lista_atividades():
         st.info("Nenhuma atividade encontrada com os filtros selecionados.", icon="ℹ️")
         return
     
-    # As colunas da tabela atividades são 22, então desempacotamos para 22 variáveis.
     for row in atividades:
         try:
             (id, cnpj, razao_social, classificacao, tributacao, responsavel, 
@@ -952,7 +949,6 @@ def mostrar_entregas_gerais():
     if df.empty:
         st.info("Nenhuma entrega encontrada no período selecionado.")
     else:
-        # Renomeia as colunas do DataFrame para um formato mais amigável
         df_display = df.rename(columns={
             'cnpj': 'CNPJ',
             'razao_social': 'Razão Social',
@@ -972,9 +968,11 @@ def mostrar_entregas_gerais():
             'contas_bancarias': 'Contas Bancárias',
             'forma_entrega': 'Forma de Entrega',
             'data_entrega': 'Data de Entrega',
+            'feito': 'Feito',
+            'data_criacao': 'Data de Criação',
             'mes_referencia': 'Mês de Referência'
         })
-        st.dataframe(df_display.drop(columns=['id', 'feito', 'data_criacao']), use_container_width=True)
+        st.dataframe(df_display, use_container_width=True)
         csv = df_display.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="Baixar como CSV",
