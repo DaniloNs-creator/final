@@ -704,7 +704,7 @@ def upload_atividades():
             1. O arquivo deve conter as colunas obrigatórias:
                - `CNPJ` (texto)
                - `Razão Social` (texto)
-               - `Classificação do Cliente` (texto)
+               - `Classificação` (texto)
                - `Tributação` (texto)
                - `Responsável` (texto)
                - `Atividade` (texto)
@@ -896,6 +896,7 @@ def lista_atividades():
     
     for row in atividades:
         try:
+            # CORREÇÃO: Adicionando 'mes_referencia' à lista de variáveis para desempacotamento
             (id, cnpj, razao_social, classificacao, tributacao, responsavel, 
              atividade, grupo, cidade, desde, status, email, telefone, contato, 
              possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega, 
@@ -1172,7 +1173,7 @@ def main():
     init_db()
     
     if 'logged_in' not in st.session_state:
-        st.session_state.logged_in = False
+        st.session_in_state.logged_in = False
     
     if not st.session_state.logged_in:
         login_section()
@@ -1195,4 +1196,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
