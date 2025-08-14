@@ -23,7 +23,7 @@ def get_db_connection():
     conn = None
     try:
         conn = sqlite3.connect('clientes.db', check_same_thread=False, timeout=10)
-        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA journal_mode=WAL")  # Melhora o desempenho com múltiplas conexões
         yield conn
     except sqlite3.Error as e:
         st.error(f"Erro de conexão com o banco de dados: {e}")
@@ -46,13 +46,13 @@ def load_css():
                 --card-shadow: 0 10px 20px rgba(0,0,0,0.1), 0 6px 6px rgba(0,0,0,0.05);
                 --transition: all 0.3s cubic-bezier(.25,.8,.25,1);
             }
-
+            
             .main {
                 background: var(--background-gradient);
                 color: var(--dark-color);
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             }
-
+            
             .title {
                 color: var(--dark-color);
                 font-size: 2.8rem;
@@ -65,12 +65,12 @@ def load_css():
                 text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
                 animation: fadeIn 1s ease-in-out;
             }
-
+            
             @keyframes fadeIn {
                 from { opacity: 0; transform: translateY(-20px); }
                 to { opacity: 1; transform: translateY(0); }
             }
-
+            
             .header {
                 color: var(--dark-color);
                 font-size: 1.8rem;
@@ -80,12 +80,12 @@ def load_css():
                 border-left: 5px solid var(--primary-color);
                 animation: slideIn 0.5s ease-out;
             }
-
+            
             @keyframes slideIn {
                 from { transform: translateX(-20px); opacity: 0; }
                 to { transform: translateX(0); opacity: 1; }
             }
-
+            
             .card {
                 background: white;
                 border-radius: 12px;
@@ -96,24 +96,24 @@ def load_css():
                 border: none;
                 animation: popIn 0.4s ease-out;
             }
-
+            
             @keyframes popIn {
                 0% { transform: scale(0.95); opacity: 0; }
                 100% { transform: scale(1); opacity: 1; }
             }
-
+            
             .card:hover {
                 transform: translateY(-5px);
                 box-shadow: 0 15px 30px rgba(0,0,0,0.15);
             }
-
+            
             .completed {
                 background-color: rgba(46, 204, 113, 0.1);
                 border-left: 5px solid var(--secondary-color);
                 position: relative;
                 overflow: hidden;
             }
-
+            
             .completed::after {
                 content: "✓ CONCLUÍDO";
                 position: absolute;
@@ -127,31 +127,31 @@ def load_css():
                 transform: rotate(45deg);
                 box-shadow: 0 2px 5px rgba(0,0,0,0.2);
             }
-
+            
             /* Sidebar styling */
             [data-testid="stSidebar"] {
                 background: linear-gradient(180deg, var(--dark-color), #34495e) !important;
                 color: white !important;
                 padding: 1.5rem !important;
             }
-
+            
             /* Estilo para as métricas na sidebar */
             .sidebar-metric {
                 color: white !important;
             }
-
+            
             .sidebar-metric-label {
                 color: white !important;
                 font-size: 1rem !important;
                 margin-bottom: 0.5rem !important;
             }
-
+            
             .sidebar-metric-value {
                 color: white !important;
                 font-size: 1.5rem !important;
                 font-weight: bold !important;
             }
-
+            
             /* Estilo específico para as próximas entregas */
             .proxima-entrega {
                 background: white;
@@ -161,12 +161,12 @@ def load_css():
                 box-shadow: 0 2px 5px rgba(0,0,0,0.1);
                 color: black !important;
             }
-
-            .proxima-entrega strong,
+            
+            .proxima-entrega strong, 
             .proxima-entrega small {
                 color: black !important;
             }
-
+            
             /* Restante do CSS permanece igual */
             .form-label {
                 font-weight: 600;
@@ -176,7 +176,7 @@ def load_css():
                 position: relative;
                 padding-left: 15px;
             }
-
+            
             .form-label::before {
                 content: "";
                 position: absolute;
@@ -188,7 +188,7 @@ def load_css():
                 background: var(--primary-color);
                 border-radius: 50%;
             }
-
+            
             .stButton>button {
                 background: linear-gradient(135deg, var(--primary-color), #2980b9);
                 color: white;
@@ -200,19 +200,19 @@ def load_css():
                 box-shadow: 0 4px 6px rgba(0,0,0,0.1);
                 width: 100%;
             }
-
+            
             .stButton>button:hover {
                 transform: translateY(-2px);
                 box-shadow: 0 7px 14px rgba(0,0,0,0.15);
                 background: linear-gradient(135deg, #2980b9, var(--primary-color));
             }
-
+            
             .stButton>button:active {
                 transform: translateY(0);
                 box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             }
-
-            .stTextInput>div>div>input,
+            
+            .stTextInput>div>div>input, 
             .stSelectbox>div>div>select,
             .stDateInput>div>div>input,
             .stNumberInput>div>div>input {
@@ -222,24 +222,24 @@ def load_css():
                 padding: 0.7rem 1rem;
                 transition: var(--transition);
             }
-
-            .stTextInput>div>div>input:focus,
+            
+            .stTextInput>div>div>input:focus, 
             .stSelectbox>div>div>select:focus,
             .stDateInput>div>div>input:focus {
                 border-color: var(--primary-color);
                 box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
                 outline: none;
             }
-
+            
             .stCheckbox>div>label {
                 font-weight: 500;
                 color: var(--dark-color);
             }
-
+            
             .stCheckbox>div>div>svg {
                 color: var(--secondary-color) !important;
             }
-
+            
             .success-message {
                 background-color: rgba(46, 204, 113, 0.2);
                 color: var(--dark-color);
@@ -249,7 +249,7 @@ def load_css():
                 margin: 1rem 0;
                 animation: fadeIn 0.5s ease-in;
             }
-
+            
             .error-message {
                 background-color: rgba(231, 76, 60, 0.2);
                 color: var(--dark-color);
@@ -259,13 +259,13 @@ def load_css():
                 margin: 1rem 0;
                 animation: shake 0.5s ease-in;
             }
-
+            
             @keyframes shake {
                 0%, 100% { transform: translateX(0); }
                 20%, 60% { transform: translateX(-5px); }
                 40%, 80% { transform: translateX(5px); }
             }
-
+            
             .info-message {
                 background-color: rgba(52, 152, 219, 0.2);
                 color: var(--dark-color);
@@ -275,11 +275,11 @@ def load_css():
                 margin: 1rem 0;
                 animation: fadeIn 0.5s ease-in;
             }
-
+            
             .stTabs [data-baseweb="tab-list"] {
                 gap: 10px;
             }
-
+            
             .stTabs [data-baseweb="tab"] {
                 padding: 0.5rem 1.5rem;
                 border-radius: 8px !important;
@@ -288,18 +288,18 @@ def load_css():
                 border: 1px solid #dfe6e9 !important;
                 font-weight: 600;
             }
-
+            
             .stTabs [aria-selected="true"] {
                 background: linear-gradient(135deg, var(--primary-color), #2980b9) !important;
                 color: white !important;
                 border: none !important;
                 box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             }
-
+            
             .stTabs [aria-selected="true"] [data-testid="stMarkdownContainer"] p {
                 color: white !important;
             }
-
+            
             .stExpander [data-testid="stExpander"] {
                 border: none !important;
                 box-shadow: var(--card-shadow);
@@ -307,26 +307,26 @@ def load_css():
                 margin-bottom: 1rem;
                 transition: var(--transition);
             }
-
+            
             .stExpander [data-testid="stExpander"]:hover {
                 box-shadow: 0 15px 30px rgba(0,0,0,0.15);
             }
-
+            
             .stExpander [data-testid="stExpanderDetails"] {
                 padding: 1.5rem !important;
             }
-
+            
             .stDataFrame {
                 border-radius: 12px !important;
                 box-shadow: var(--card-shadow) !important;
             }
-
+            
             /* Efeito de onda nos botões */
             .ripple {
                 position: relative;
                 overflow: hidden;
             }
-
+            
             .ripple:after {
                 content: "";
                 display: block;
@@ -343,58 +343,58 @@ def load_css():
                 opacity: 0;
                 transition: transform .5s, opacity 1s;
             }
-
+            
             .ripple:active:after {
                 transform: scale(0, 0);
                 opacity: 0.3;
                 transition: 0s;
             }
-
+            
             [data-testid="stSidebar"] .stButton>button {
                 background: linear-gradient(135deg, var(--secondary-color), #27ae60) !important;
             }
-
+            
             [data-testid="stSidebar"] .stButton>button:hover {
                 background: linear-gradient(135deg, #27ae60, var(--secondary-color)) !important;
             }
-
+            
             /* Custom scrollbar */
             ::-webkit-scrollbar {
                 width: 8px;
                 height: 8px;
             }
-
+            
             ::-webkit-scrollbar-track {
                 background: #f1f1f1;
                 border-radius: 10px;
             }
-
+            
             ::-webkit-scrollbar-thumb {
                 background: var(--primary-color);
                 border-radius: 10px;
             }
-
+            
             ::-webkit-scrollbar-thumb:hover {
                 background: #2980b9;
             }
-
+            
             /* Pulse animation for important elements */
             @keyframes pulse {
                 0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(52, 152, 219, 0.7); }
                 70% { transform: scale(1.02); box-shadow: 0 0 0 10px rgba(52, 152, 219, 0); }
                 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(52, 152, 219, 0); }
             }
-
+            
             .pulse {
                 animation: pulse 2s infinite;
             }
-
+            
             /* Responsive adjustments */
             @media (max-width: 768px) {
                 .title {
                     font-size: 2rem;
                 }
-
+                
                 .header {
                     font-size: 1.5rem;
                 }
@@ -407,7 +407,7 @@ def init_db():
     """Inicializa o banco de dados, criando a tabela se necessário."""
     with get_db_connection() as conn:
         c = conn.cursor()
-
+        
         c.execute('''
             CREATE TABLE IF NOT EXISTS atividades (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -435,7 +435,7 @@ def init_db():
             )
         ''')
         conn.commit()
-
+        
         c.execute("SELECT COUNT(*) FROM atividades")
         if c.fetchone()[0] == 0:
             gerar_atividades_mensais(conn)
@@ -448,20 +448,20 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
         ("00.000.000/0001-03", "Cliente C", "Razão Social C", "C", "Lucro Real", "Responsável 1"),
         ("00.000.000/0001-04", "Cliente D", "Razão Social D", "B", "Simples Nacional", "Responsável 3"),
     ]
-
+    
     atividades = [
         "Fechamento mensal",
         "Relatório contábil",
         "Conciliação bancária",
         "Declarações fiscais"
     ]
-
+    
     hoje = datetime.now()
     fim = datetime(2025, 12, 1)
-
+    
     try:
         c = conn.cursor()
-
+        
         for cliente in clientes:
             atividade = random.choice(atividades)
             feito = random.choice([0, 1])
@@ -470,15 +470,15 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
                 "Grupo 1", "São Paulo", "01/2020", "Ativo", "email@cliente.com", "(11) 99999-9999", "Contato Financeiro",
                 "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), feito, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), hoje.strftime('%m/%Y')
             )
-
+            
             c.execute('''
                 INSERT INTO atividades (
-                    cnpj, razao_social, classificacao, tributacao, responsavel, atividade,
-                    grupo, cidade, desde, status, email, telefone, contato, possui_folha,
+                    cnpj, razao_social, classificacao, tributacao, responsavel, atividade, 
+                    grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
                     financeiro, contas_bancarias, forma_entrega, data_entrega, feito, data_criacao, mes_referencia
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', campos)
-
+        
         conn.commit()
     except sqlite3.Error as e:
         st.error(f"Erro ao gerar atividades iniciais: {e}")
@@ -490,16 +490,16 @@ def adicionar_atividade(campos: Tuple) -> bool:
         with get_db_connection() as conn:
             c = conn.cursor()
             campos_completos = campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),)
-
+            
             c.execute('''
                 INSERT INTO atividades (
-                    cnpj, razao_social, classificacao, tributacao, responsavel, atividade,
-                    grupo, cidade, desde, status, email, telefone, contato, possui_folha,
+                    cnpj, razao_social, classificacao, tributacao, responsavel, atividade, 
+                    grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
                     financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, data_criacao
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', campos_completos)
             conn.commit()
-            st.session_state.atualizar_lista = True
+            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
             return True
     except sqlite3.Error as e:
         st.error(f"Erro ao adicionar atividade: {e}")
@@ -510,25 +510,27 @@ def adicionar_atividades_em_lote(dados: List[Tuple]) -> bool:
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
-
+            
+            # Preparar os dados com data de criação
             dados_completos = [
-                (*linha, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                (*linha, datetime.now().strftime('%Y-%m-%d %H:%M:%S')) 
                 for linha in dados
             ]
-
+            
+            # Iniciar transação
             c.execute("BEGIN TRANSACTION")
-
+            
             try:
                 c.executemany('''
                     INSERT INTO atividades (
-                        cnpj, razao_social, classificacao, tributacao, responsavel, atividade,
-                        grupo, cidade, desde, status, email, telefone, contato, possui_folha,
+                        cnpj, razao_social, classificacao, tributacao, responsavel, atividade, 
+                        grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
                         financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, data_criacao
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', dados_completos)
-
+                
                 conn.commit()
-                st.session_state.atualizar_lista = True
+                st.session_state.atualizar_lista = True  # Flag para atualizar a lista
                 return True
             except sqlite3.Error as e:
                 conn.rollback()
@@ -545,7 +547,7 @@ def excluir_atividade(id: int) -> bool:
             c = conn.cursor()
             c.execute('DELETE FROM atividades WHERE id = ?', (id,))
             conn.commit()
-            st.session_state.atualizar_lista = True
+            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
             return c.rowcount > 0
     except sqlite3.Error as e:
         st.error(f"Erro ao excluir atividade: {e}")
@@ -558,7 +560,7 @@ def marcar_feito(id: int, feito: bool) -> bool:
             c = conn.cursor()
             c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (int(feito), id))
             conn.commit()
-            st.session_state.atualizar_lista = True
+            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
             return c.rowcount > 0
     except sqlite3.Error as e:
         st.error(f"Erro ao atualizar status: {e}")
@@ -571,7 +573,7 @@ def get_atividades(filtro_mes: str = None, filtro_responsavel: str = None) -> Li
             c = conn.cursor()
             query = 'SELECT * FROM atividades'
             params = []
-
+            
             conditions = []
             if filtro_mes and filtro_mes != "Todos":
                 conditions.append('mes_referencia = ?')
@@ -579,12 +581,12 @@ def get_atividades(filtro_mes: str = None, filtro_responsavel: str = None) -> Li
             if filtro_responsavel and filtro_responsavel != "Todos":
                 conditions.append('responsavel = ?')
                 params.append(filtro_responsavel)
-
+            
             if conditions:
                 query += ' WHERE ' + ' AND '.join(conditions)
-
+            
             query += ' ORDER BY data_criacao DESC'
-
+            
             c.execute(query, tuple(params))
             return c.fetchall()
     except sqlite3.Error as e:
@@ -601,30 +603,30 @@ def get_responsaveis() -> List[str]:
     except sqlite3.Error as e:
         st.error(f"Erro ao recuperar responsáveis: {e}")
         return ["Todos"]
-
+        
 def get_entregas_gerais(start_date: str, end_date: str) -> pd.DataFrame:
     """Retorna os dados de entregas gerais para um período selecionado."""
     try:
         with get_db_connection() as conn:
             query = '''
-                SELECT
-                    cnpj,
-                    razao_social,
-                    classificacao,
-                    tributacao,
-                    responsavel,
-                    atividade,
-                    grupo,
-                    cidade,
-                    desde,
-                    status,
-                    email,
-                    telefone,
-                    contato,
-                    possui_folha,
-                    financeiro,
-                    contas_bancarias,
-                    forma_entrega,
+                SELECT 
+                    cnpj, 
+                    razao_social, 
+                    classificacao, 
+                    tributacao, 
+                    responsavel, 
+                    atividade, 
+                    grupo, 
+                    cidade, 
+                    desde, 
+                    status, 
+                    email, 
+                    telefone, 
+                    contato, 
+                    possui_folha, 
+                    financeiro, 
+                    contas_bancarias, 
+                    forma_entrega, 
                     data_entrega
                 FROM atividades
                 WHERE data_entrega BETWEEN ? AND ?
@@ -641,7 +643,7 @@ def get_dados_indicadores() -> pd.DataFrame:
     try:
         with get_db_connection() as conn:
             query = '''
-                SELECT
+                SELECT 
                     mes_referencia,
                     SUM(feito) as concluidas,
                     COUNT(*) as total,
@@ -660,7 +662,7 @@ def get_dados_responsaveis() -> pd.DataFrame:
     try:
         with get_db_connection() as conn:
             query = '''
-                SELECT
+                SELECT 
                     responsavel,
                     SUM(feito) as concluidas,
                     COUNT(*) as total,
@@ -678,13 +680,13 @@ def get_dados_responsaveis() -> pd.DataFrame:
 def login_section():
     """Exibe a seção de login."""
     st.markdown('<div class="title">Carteira de Clientes - Painel de Atividades</div>', unsafe_allow_html=True)
-
+    
     with st.container():
         with st.form("login_form"):
             col1, col2 = st.columns(2)
             username = col1.text_input("Usuário", key="username")
             password = col2.text_input("Senha", type="password", key="password")
-
+            
             if st.form_submit_button("Entrar", use_container_width=True):
                 if username == "admin" and password == "reali":
                     st.session_state.logged_in = True
@@ -695,7 +697,7 @@ def login_section():
 def upload_atividades():
     """Exibe o formulário para upload de atividades em Excel."""
     st.markdown('<div class="header">📤 Upload de Atividades</div>', unsafe_allow_html=True)
-
+    
     with st.expander("📝 Instruções para Upload", expanded=False):
         st.markdown("""
             **Como preparar seu arquivo Excel:**
@@ -721,18 +723,20 @@ def upload_atividades():
                - `Mês de Referência` (texto no formato MM/YYYY)
             2. Salve o arquivo no formato .xlsx ou .xls
         """)
-
+    
     uploaded_file = st.file_uploader(
-        "Selecione o arquivo Excel com as atividades",
+        "Selecione o arquivo Excel com as atividades", 
         type=["xlsx", "xls"],
         accept_multiple_files=False,
         help="Arraste e solte ou clique para selecionar o arquivo"
     )
-
+    
     if uploaded_file is not None:
         try:
+            # Lê o arquivo Excel
             df = pd.read_excel(uploaded_file)
             
+            # Mapeia os nomes das colunas da imagem para o banco de dados
             column_mapping = {
                 'CNPJ': 'cnpj',
                 'RAZÃO SOCIAL': 'razao_social',
@@ -755,16 +759,16 @@ def upload_atividades():
                 'MÊS DE REFERÊNCIA': 'mes_referencia'
             }
 
-            required_columns = column_mapping.keys()
-
-            for col in required_columns:
-                if col not in df.columns:
-                    st.error(f"Coluna obrigatória não encontrada: '{col}'")
-                    return
-
+            # Garante que as colunas existam no dataframe, usando um valor padrão se não
+            for col_excel, col_db in column_mapping.items():
+                if col_excel not in df.columns:
+                    df[col_excel] = None
+            
+            # Mostra pré-visualização
             st.markdown("**Pré-visualização dos dados (5 primeiras linhas):**")
             st.dataframe(df.head())
-
+            
+            # Prepara dados para inserção
             atividades = []
             for _, row in df.iterrows():
                 atividades.append((
@@ -788,11 +792,12 @@ def upload_atividades():
                     row['DATA DE ENTREGA'],
                     row['MÊS DE REFERÊNCIA']
                 ))
-
+            
+            # Botão para confirmar importação
             if st.button("Confirmar Importação", type="primary", use_container_width=True):
                 if adicionar_atividades_em_lote(atividades):
                     st.success(f"✅ {len(atividades)} atividades importadas com sucesso!")
-                    st.rerun()
+                    st.rerun()  # Força a atualização da lista de atividades
                 else:
                     st.error("Ocorreu um erro ao importar as atividades")
         except Exception as e:
@@ -801,9 +806,9 @@ def upload_atividades():
 def cadastro_atividade():
     """Exibe o formulário para cadastro de novas atividades."""
     st.markdown('<div class="header">📝 Cadastro de Atividades</div>', unsafe_allow_html=True)
-
+    
     tab1, tab2 = st.tabs(["Formulário Manual", "Upload em Lote"])
-
+    
     with tab1:
         with st.form("nova_atividade", clear_on_submit=True):
             st.markdown('<div class="form-label">Informações Básicas</div>', unsafe_allow_html=True)
@@ -812,7 +817,7 @@ def cadastro_atividade():
                 cnpj = st.text_input("CNPJ", placeholder="00.000.000/0001-00")
                 razao_social = st.text_input("Razão Social", placeholder="Razão social completa")
                 classificacao = st.selectbox("Classificação", ["A", "B", "C", "D"])
-
+                
             with col2:
                 tributacao = st.selectbox("Tributação", ["Simples Nacional", "Lucro Presumido", "Lucro Real"])
                 responsavel = st.text_input("Responsável*", placeholder="Nome do responsável")
@@ -822,14 +827,14 @@ def cadastro_atividade():
                 grupo = st.text_input("Grupo", placeholder="Grupo do cliente")
                 cidade = st.text_input("Cidade", placeholder="Cidade do cliente")
                 desde = st.date_input("Cliente desde", value=datetime.now())
-
+            
             st.markdown('<div class="form-label">Detalhes de Contato e Financeiros</div>', unsafe_allow_html=True)
             col4, col5, col6 = st.columns(3)
             with col4:
                 status = st.selectbox("Status", ["Ativo", "Inativo", "Potencial", "Perdido"])
                 email = st.text_input("E-mail", placeholder="E-mail de contato")
                 telefone = st.text_input("Telefone", placeholder="Telefone de contato")
-
+                
             with col5:
                 contato = st.text_input("Contato Financeiro", placeholder="Nome do contato")
                 possui_folha = st.selectbox("Possui Folha?", ["Sim", "Não", "Não se aplica"])
@@ -839,15 +844,15 @@ def cadastro_atividade():
                 contas_bancarias = st.number_input("Contas Bancárias", min_value=0, value=1)
                 forma_entrega = st.selectbox("Forma de Entrega", ["E-mail", "Correio", "Pessoalmente", "Outros"])
                 data_entrega = st.date_input("Data de Entrega", value=datetime.now())
-
+            
             mes_referencia = st.selectbox("Mês de Referência", [
-                f"{mes:02d}/{ano}"
-                for ano in range(2023, 2026)
+                f"{mes:02d}/{ano}" 
+                for ano in range(2023, 2026) 
                 for mes in range(1, 13)
             ])
-
+            
             st.markdown("<small>Campos marcados com * são obrigatórios</small>", unsafe_allow_html=True)
-
+            
             if st.form_submit_button("Adicionar Atividade", use_container_width=True, type="primary"):
                 if responsavel and atividade:
                     campos = (
@@ -857,53 +862,68 @@ def cadastro_atividade():
                     )
                     if adicionar_atividade(campos):
                         st.success("Atividade cadastrada com sucesso!", icon="✅")
-                        st.rerun()
+                        st.rerun()  # Força a atualização da lista de atividades
                 else:
                     st.error("Preencha os campos obrigatórios!", icon="❌")
-
+    
     with tab2:
         upload_atividades()
 
 def lista_atividades():
     """Exibe a lista de atividades cadastradas com filtros."""
     st.markdown('<div class="header">📋 Lista de Atividades</div>', unsafe_allow_html=True)
-
+    
     col1, col2 = st.columns(2)
-
+    
     with col1:
-        meses = sorted(list(set(
-            f"{mes:02d}/{ano}"
-            for ano in range(2023, 2026)
+        meses = sorted(set(
+            f"{mes:02d}/{ano}" 
+            for ano in range(2023, 2026) 
             for mes in range(1, 13)
-        )), reverse=True)
+        ), reverse=True)
         mes_selecionado = st.selectbox("Filtrar por mês de referência:", ["Todos"] + meses)
-
+    
     with col2:
         responsaveis = get_responsaveis()
         responsavel_selecionado = st.selectbox("Filtrar por responsável:", responsaveis)
-
+    
     atividades = get_atividades(mes_selecionado if mes_selecionado != "Todos" else None,
                               responsavel_selecionado if responsavel_selecionado != "Todos" else None)
-
+    
     if not atividades:
         st.info("Nenhuma atividade encontrada com os filtros selecionados.", icon="ℹ️")
         return
-
+    
     for row in atividades:
-        try:
-            (id, cnpj, razao_social, classificacao, tributacao, responsavel,
-             atividade, grupo, cidade, desde, status, email, telefone, contato,
-             possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega,
-             feito, data_criacao, mes_referencia) = row
-        except ValueError as e:
-            st.error(f"Erro ao processar atividade: {e}")
-            continue
-
+        # Usando índices numéricos para acessar os valores da tupla
+        id = row[0]
+        cnpj = row[1]
+        razao_social = row[2]
+        classificacao = row[3]
+        tributacao = row[4]
+        responsavel = row[5]
+        atividade = row[6]
+        grupo = row[7]
+        cidade = row[8]
+        desde = row[9]
+        status = row[10]
+        email = row[11]
+        telefone = row[12]
+        contato = row[13]
+        possui_folha = row[14]
+        financeiro = row[15]
+        contas_bancarias = row[16]
+        forma_entrega = row[17]
+        data_entrega = row[18]
+        feito = row[19]
+        data_criacao = row[20]
+        mes_referencia = row[21] if len(row) > 21 else ""
+        
         with st.expander(f"{'✅' if feito else '📌'} {razao_social} - {atividade} ({status}) - {mes_referencia}", expanded=False):
             st.markdown(f'<div class="card{" completed" if feito else ""}">', unsafe_allow_html=True)
-
+            
             col1, col2 = st.columns([3, 1])
-
+            
             with col1:
                 st.markdown(f"**CNPJ:** {cnpj}")
                 st.markdown(f"**Responsável:** {responsavel}")
@@ -915,20 +935,20 @@ def lista_atividades():
                 st.markdown(f"**Entrega:** {forma_entrega} em {data_entrega}")
                 st.markdown(f"**Mês Referência:** {mes_referencia}")
                 st.markdown(f"**Data de Criação:** {data_criacao}")
-
+                
             with col2:
                 st.checkbox(
-                    "Marcar como concluído",
+                    "Marcar como concluído", 
                     value=bool(feito),
                     key=f"feito_{id}",
                     on_change=marcar_feito,
                     args=(id, not feito)
                 )
-
+                
                 if st.button("Excluir", key=f"del_{id}", use_container_width=True):
                     if excluir_atividade(id):
                         st.rerun()
-
+            
             st.markdown('</div>', unsafe_allow_html=True)
 
 def mostrar_entregas_gerais():
@@ -944,7 +964,7 @@ def mostrar_entregas_gerais():
         return
 
     df = get_entregas_gerais(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
-
+    
     if df.empty:
         st.info("Nenhuma entrega encontrada no período selecionado.")
     else:
@@ -960,12 +980,12 @@ def mostrar_entregas_gerais():
 def mostrar_indicadores():
     """Exibe os indicadores de entrega."""
     st.markdown('<div class="header">📊 Indicadores de Entrega</div>', unsafe_allow_html=True)
-
+    
     tab1, tab2 = st.tabs(["📅 Por Mês", "👤 Por Responsável"])
-
+    
     with tab1:
         dados_mes = get_dados_indicadores()
-
+        
         if dados_mes.empty:
             st.warning("Não há dados suficientes para exibir os indicadores por mês.")
         else:
@@ -979,7 +999,7 @@ def mostrar_indicadores():
                 color_discrete_map={'concluidas': '#2ecc71', 'total': '#3498db'}
             )
             fig_bar.update_layout(
-                showlegend=True,
+                showlegend=True, 
                 legend_title_text='',
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
@@ -987,7 +1007,7 @@ def mostrar_indicadores():
                 yaxis=dict(showgrid=True, gridcolor='#f1f1f1')
             )
             st.plotly_chart(fig_bar, use_container_width=True)
-
+            
             st.subheader("Percentual de Conclusão")
             fig_pie = px.pie(
                 dados_mes,
@@ -997,7 +1017,7 @@ def mostrar_indicadores():
                 color_discrete_sequence=px.colors.sequential.Greens
             )
             fig_pie.update_traces(
-                textposition='inside',
+                textposition='inside', 
                 textinfo='percent+label',
                 marker=dict(line=dict(color='#fff', width=2))
             )
@@ -1006,7 +1026,7 @@ def mostrar_indicadores():
                 paper_bgcolor='rgba(0,0,0,0)'
             )
             st.plotly_chart(fig_pie, use_container_width=True)
-
+            
             st.subheader("Detalhamento por Mês")
             dados_mes['percentual'] = dados_mes['percentual'].round(2)
             st.dataframe(
@@ -1020,10 +1040,10 @@ def mostrar_indicadores():
                 use_container_width=True,
                 height=400
             )
-
+    
     with tab2:
         dados_responsaveis = get_dados_responsaveis()
-
+        
         if dados_responsaveis.empty:
             st.warning("Não há dados suficientes para exibir os indicadores por responsável.")
         else:
@@ -1037,7 +1057,7 @@ def mostrar_indicadores():
                 color_discrete_map={'concluidas': '#2ecc71', 'total': '#3498db'}
             )
             fig_bar_resp.update_layout(
-                showlegend=True,
+                showlegend=True, 
                 legend_title_text='',
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
@@ -1045,7 +1065,7 @@ def mostrar_indicadores():
                 yaxis=dict(showgrid=True, gridcolor='#f1f1f1')
             )
             st.plotly_chart(fig_bar_resp, use_container_width=True)
-
+            
             st.subheader("Distribuição de Atividades")
             fig_pie_resp = px.pie(
                 dados_responsaveis,
@@ -1055,7 +1075,7 @@ def mostrar_indicadores():
                 color_discrete_sequence=px.colors.qualitative.Pastel
             )
             fig_pie_resp.update_traces(
-                textposition='inside',
+                textposition='inside', 
                 textinfo='percent+label',
                 marker=dict(line=dict(color='#fff', width=2))
             )
@@ -1064,7 +1084,7 @@ def mostrar_indicadores():
                 paper_bgcolor='rgba(0,0,0,0)'
             )
             st.plotly_chart(fig_pie_resp, use_container_width=True)
-
+            
             st.subheader("Performance por Responsável")
             fig_hbar = px.bar(
                 dados_responsaveis,
@@ -1077,7 +1097,7 @@ def mostrar_indicadores():
                 color_continuous_scale='Greens'
             )
             fig_hbar.update_traces(
-                texttemplate='%{x:.1f}%',
+                texttemplate='%{x:.1f}%', 
                 textposition='outside',
                 marker=dict(line=dict(color='rgba(0,0,0,0.1)', width=1))
             )
@@ -1089,7 +1109,7 @@ def mostrar_indicadores():
                 yaxis=dict(showgrid=False)
             )
             st.plotly_chart(fig_hbar, use_container_width=True)
-
+            
             st.subheader("Detalhamento por Responsável")
             dados_responsaveis['percentual'] = dados_responsaveis['percentual'].round(2)
             st.dataframe(
@@ -1108,43 +1128,45 @@ def mostrar_sidebar():
     """Exibe a barra lateral com estatísticas e próximas entregas."""
     with st.sidebar:
         st.markdown("## Configurações")
-
+        
         if st.button("🚪 Sair", use_container_width=True, type="primary"):
             st.session_state.logged_in = False
             st.rerun()
-
+        
         st.markdown("---")
         st.markdown("### Estatísticas Rápidas")
-
+        
         try:
             with get_db_connection() as conn:
                 c = conn.cursor()
-
+                
                 c.execute("SELECT COUNT(*) FROM atividades")
                 total = c.fetchone()[0]
-
+                
                 c.execute("SELECT COUNT(*) FROM atividades WHERE feito = 1")
                 concluidas = c.fetchone()[0]
-
+                
                 percentual = (concluidas / total * 100) if total > 0 else 0
-
+                
+                # Exibindo as métricas com texto branco
                 st.markdown(f"""
                     <div class="sidebar-metric-label">Total de Atividades</div>
                     <div class="sidebar-metric-value">{total}</div>
                     <div class="sidebar-metric-label">Atividades Concluídas</div>
                     <div class="sidebar-metric-value">{concluidas} ({percentual:.1f}%)</div>
                 """, unsafe_allow_html=True)
-
+                
+                # Próximas entregas
                 hoje = datetime.now().strftime('%Y-%m-%d')
                 c.execute('''
-                    SELECT razao_social, atividade, data_entrega
-                    FROM atividades
+                    SELECT razao_social, atividade, data_entrega 
+                    FROM atividades 
                     WHERE data_entrega >= ? AND feito = 0
                     ORDER BY data_entrega ASC
                     LIMIT 5
                 ''', (hoje,))
                 proximas = c.fetchall()
-
+                
                 if proximas:
                     st.markdown("### Próximas Entregas")
                     for razao_social, atividade, data in proximas:
@@ -1163,21 +1185,21 @@ def main():
     """Função principal que gerencia o fluxo da aplicação."""
     load_css()
     init_db()
-
+    
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
-
+    
     if not st.session_state.logged_in:
         login_section()
     else:
         tab1, tab2, tab3, tab4 = st.tabs(["📋 Lista de Atividades", "📝 Cadastrar Atividades", "📊 Indicadores de Entrega", "📦 Entregas Gerais"])
-
+        
         with tab1:
             lista_atividades()
-
+        
         with tab2:
             cadastro_atividade()
-
+        
         with tab3:
             mostrar_indicadores()
 
