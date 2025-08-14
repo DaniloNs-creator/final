@@ -5,6 +5,7 @@ import pandas as pd
 import plotly.express as px
 import random
 from typing import List, Tuple, Optional
+import io
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(
@@ -488,6 +489,31 @@ def adicionar_atividade(conn: sqlite3.Connection, campos: Tuple) -> bool:
         st.error(f"Erro ao adicionar atividade: {e}")
         return False
 
+def adicionar_atividades_em_lote(conn: sqlite3.Connection, dados: List[Tuple]) -> bool:
+    """Adiciona múltiplas atividades ao banco de dados em lote."""
+    try:
+        c = conn.cursor()
+        
+        # Preparar os dados com data de criação
+        dados_completos = [
+            (*linha, datetime.now().strftime('%Y-%m-%d %H:%M:%S')) 
+            for linha in dados
+        ]
+        
+        c.executemany('''
+            INSERT INTO atividades (
+                cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
+                grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
+                financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, data_criacao
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', dados_completos)
+        
+        conn.commit()
+        return True
+    except sqlite3.Error as e:
+        st.error(f"Erro ao adicionar atividades em lote: {e}")
+        return False
+
 def excluir_atividade(conn: sqlite3.Connection, id: int) -> bool:
     """Remove uma atividade do banco de dados pelo ID."""
     try:
@@ -600,65 +626,147 @@ def login_section():
                 else:
                     st.error("Credenciais inválidas. Tente novamente.", icon="⚠️")
 
+def upload_atividades(conn: sqlite3.Connection):
+    """Exibe o formulário para upload de atividades em Excel."""
+    st.markdown('<div class="header">📤 Upload de Atividades</div>', unsafe_allow_html=True)
+    
+    with st.expander("📝 Instruções para Upload", expanded=False):
+        st.markdown("""
+            **Como preparar seu arquivo Excel:**
+            1. O arquivo deve conter as colunas obrigatórias:
+               - `Razão Social` (texto)
+               - `CNPJ` (texto)
+               - `Grupo` (texto)
+               - `Tributação` (texto)
+               - `Responsável` (texto)
+            2. Você pode incluir colunas adicionais se desejar
+            3. Salve o arquivo no formato .xlsx ou .xls
+            
+            **Dica:** Baixe nosso [modelo de planilha](#) para garantir o formato correto.
+        """)
+    
+    uploaded_file = st.file_uploader(
+        "Selecione o arquivo Excel com as atividades", 
+        type=["xlsx", "xls"],
+        accept_multiple_files=False,
+        help="Arraste e solte ou clique para selecionar o arquivo"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            # Lê o arquivo Excel
+            df = pd.read_excel(uploaded_file)
+            
+            # Verifica colunas obrigatórias
+            required_columns = {'Razão Social', 'CNPJ', 'Grupo', 'Tributação', 'Responsável'}
+            if not required_columns.issubset(df.columns):
+                missing_cols = required_columns - set(df.columns)
+                st.error(f"Colunas obrigatórias faltando: {', '.join(missing_cols)}")
+                return
+            
+            # Mostra pré-visualização
+            st.markdown("**Pré-visualização dos dados (5 primeiras linhas):**")
+            st.dataframe(df.head())
+            
+            # Prepara dados para inserção
+            atividades = []
+            for _, row in df.iterrows():
+                atividades.append((
+                    row.get('Razão Social', ''),  # cliente
+                    row.get('Razão Social', ''),  # razao_social
+                    row.get('Classificação', 'B'),  # classificacao
+                    row.get('Tributação', 'Simples Nacional'),  # tributacao
+                    row.get('Responsável', ''),  # responsavel
+                    "Atividade cadastrada em lote",  # atividade
+                    row.get('Grupo', ''),  # grupo
+                    row.get('Cidade', ''),  # cidade
+                    datetime.now().strftime('%Y-%m-%d'),  # desde
+                    "Ativo",  # status
+                    row.get('E-mail', ''),  # email
+                    row.get('Telefone', ''),  # telefone
+                    row.get('Contato', ''),  # contato
+                    row.get('Possui Folha', 'Sim'),  # possui_folha
+                    row.get('Financeiro', 'Em dia'),  # financeiro
+                    row.get('Contas Bancárias', 1),  # contas_bancarias
+                    row.get('Forma de Entrega', 'E-mail'),  # forma_entrega
+                    datetime.now().strftime('%Y-%m-%d'),  # data_entrega
+                    datetime.now().strftime('%m/%Y')  # mes_referencia
+                ))
+            
+            # Botão para confirmar importação
+            if st.button("Confirmar Importação", type="primary", use_container_width=True):
+                if adicionar_atividades_em_lote(conn, atividades):
+                    st.success(f"✅ {len(atividades)} atividades importadas com sucesso!")
+                else:
+                    st.error("Ocorreu um erro ao importar as atividades")
+        except Exception as e:
+            st.error(f"Erro ao processar arquivo: {str(e)}")
+
 def cadastro_atividade(conn: sqlite3.Connection):
     """Exibe o formulário para cadastro de novas atividades."""
     st.markdown('<div class="header">📝 Cadastro de Atividades</div>', unsafe_allow_html=True)
     
-    with st.form("nova_atividade", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown('<div class="form-label">Informações Básicas</div>', unsafe_allow_html=True)
-            cliente = st.text_input("Cliente*", placeholder="Nome do cliente")
-            razao_social = st.text_input("Razão Social", placeholder="Razão social completa")
-            classificacao = st.selectbox("Classificação", ["A", "B", "C", "D"])
-            tributacao = st.selectbox("Tributação", ["Simples Nacional", "Lucro Presumido", "Lucro Real"])
-            responsavel = st.text_input("Responsável*", placeholder="Nome do responsável")
-            atividade = st.text_input("Atividade*", placeholder="Descrição da atividade")
+    tab1, tab2 = st.tabs(["Formulário Manual", "Upload em Lote"])
+    
+    with tab1:
+        with st.form("nova_atividade", clear_on_submit=True):
+            col1, col2 = st.columns(2)
             
-        with col2:
-            st.markdown('<div class="form-label">Informações Adicionais</div>', unsafe_allow_html=True)
-            grupo = st.text_input("Grupo", placeholder="Grupo do cliente")
-            cidade = st.text_input("Cidade", placeholder="Cidade do cliente")
-            desde = st.date_input("Cliente desde", value=datetime.now())
-            status = st.selectbox("Status", ["Ativo", "Inativo", "Potencial", "Perdido"])
-            email = st.text_input("E-mail", placeholder="E-mail de contato")
-            telefone = st.text_input("Telefone", placeholder="Telefone de contato")
+            with col1:
+                st.markdown('<div class="form-label">Informações Básicas</div>', unsafe_allow_html=True)
+                cliente = st.text_input("Cliente*", placeholder="Nome do cliente")
+                razao_social = st.text_input("Razão Social", placeholder="Razão social completa")
+                classificacao = st.selectbox("Classificação", ["A", "B", "C", "D"])
+                tributacao = st.selectbox("Tributação", ["Simples Nacional", "Lucro Presumido", "Lucro Real"])
+                responsavel = st.text_input("Responsável*", placeholder="Nome do responsável")
+                atividade = st.text_input("Atividade*", placeholder="Descrição da atividade")
+                
+            with col2:
+                st.markdown('<div class="form-label">Informações Adicionais</div>', unsafe_allow_html=True)
+                grupo = st.text_input("Grupo", placeholder="Grupo do cliente")
+                cidade = st.text_input("Cidade", placeholder="Cidade do cliente")
+                desde = st.date_input("Cliente desde", value=datetime.now())
+                status = st.selectbox("Status", ["Ativo", "Inativo", "Potencial", "Perdido"])
+                email = st.text_input("E-mail", placeholder="E-mail de contato")
+                telefone = st.text_input("Telefone", placeholder="Telefone de contato")
+                
+            st.markdown('<div class="form-label">Detalhes Financeiros</div>', unsafe_allow_html=True)
+            col3, col4, col5 = st.columns(3)
             
-        st.markdown('<div class="form-label">Detalhes Financeiros</div>', unsafe_allow_html=True)
-        col3, col4, col5 = st.columns(3)
-        
-        with col3:
-            contato = st.text_input("Contato Financeiro", placeholder="Nome do contato")
-            possui_folha = st.selectbox("Possui Folha?", ["Sim", "Não", "Não se aplica"])
+            with col3:
+                contato = st.text_input("Contato Financeiro", placeholder="Nome do contato")
+                possui_folha = st.selectbox("Possui Folha?", ["Sim", "Não", "Não se aplica"])
+                
+            with col4:
+                financeiro = st.text_input("Financeiro", placeholder="Informações financeiras")
+                contas_bancarias = st.number_input("Contas Bancárias", min_value=0, value=1)
+                
+            with col5:
+                forma_entrega = st.selectbox("Forma de Entrega", ["E-mail", "Correio", "Pessoalmente", "Outros"])
+                data_entrega = st.date_input("Data de Entrega", value=datetime.now())
             
-        with col4:
-            financeiro = st.text_input("Financeiro", placeholder="Informações financeiras")
-            contas_bancarias = st.number_input("Contas Bancárias", min_value=0, value=1)
+            mes_referencia = st.selectbox("Mês de Referência", [
+                f"{mes:02d}/{ano}" 
+                for ano in range(2023, 2026) 
+                for mes in range(1, 13)
+            ])
             
-        with col5:
-            forma_entrega = st.selectbox("Forma de Entrega", ["E-mail", "Correio", "Pessoalmente", "Outros"])
-            data_entrega = st.date_input("Data de Entrega", value=datetime.now())
-        
-        mes_referencia = st.selectbox("Mês de Referência", [
-            f"{mes:02d}/{ano}" 
-            for ano in range(2023, 2026) 
-            for mes in range(1, 13)
-        ])
-        
-        st.markdown("<small>Campos marcados com * são obrigatórios</small>", unsafe_allow_html=True)
-        
-        if st.form_submit_button("Adicionar Atividade", use_container_width=True, type="primary"):
-            if cliente and responsavel and atividade:
-                campos = (
-                    cliente, razao_social, classificacao, tributacao, responsavel, atividade,
-                    grupo, cidade, desde.strftime('%Y-%m-%d'), status, email, telefone, contato,
-                    possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega.strftime('%Y-%m-%d'), mes_referencia
-                )
-                if adicionar_atividade(conn, campos):
-                    st.success("Atividade cadastrada com sucesso!", icon="✅")
-            else:
-                st.error("Preencha os campos obrigatórios!", icon="❌")
+            st.markdown("<small>Campos marcados com * são obrigatórios</small>", unsafe_allow_html=True)
+            
+            if st.form_submit_button("Adicionar Atividade", use_container_width=True, type="primary"):
+                if cliente and responsavel and atividade:
+                    campos = (
+                        cliente, razao_social, classificacao, tributacao, responsavel, atividade,
+                        grupo, cidade, desde.strftime('%Y-%m-%d'), status, email, telefone, contato,
+                        possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega.strftime('%Y-%m-%d'), mes_referencia
+                    )
+                    if adicionar_atividade(conn, campos):
+                        st.success("Atividade cadastrada com sucesso!", icon="✅")
+                else:
+                    st.error("Preencha os campos obrigatórios!", icon="❌")
+    
+    with tab2:
+        upload_atividades(conn)
 
 def lista_atividades(conn: sqlite3.Connection):
     """Exibe a lista de atividades cadastradas com filtros."""
