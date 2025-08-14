@@ -6,8 +6,6 @@ import plotly.express as px
 import random
 from typing import List, Tuple, Optional
 import io
-import contextlib
-from dateutil.relativedelta import relativedelta
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(
@@ -16,22 +14,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# --- Gerenciador de Conexão Segura ---
-@contextlib.contextmanager
-def get_db_connection():
-    """Gerenciador de contexto para conexão segura com o banco de dados."""
-    conn = None
-    try:
-        conn = sqlite3.connect('clientes.db', check_same_thread=False, timeout=10)
-        conn.execute("PRAGMA journal_mode=WAL")  # Melhora o desempenho com múltiplas conexões
-        yield conn
-    except sqlite3.Error as e:
-        st.error(f"Erro de conexão com o banco de dados: {e}")
-        raise
-    finally:
-        if conn:
-            conn.close()
 
 # --- CSS PROFISSIONAL ANIMADO ---
 def load_css():
@@ -404,56 +386,52 @@ def load_css():
     """, unsafe_allow_html=True)
 
 # --- BANCO DE DADOS ---
-def init_db():
-    """Inicializa o banco de dados, criando a tabela se necessário."""
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS atividades (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cnpj TEXT,
-                razao_social TEXT NOT NULL,
-                olaiseto_folio_cliente TEXT,
-                tributacao TEXT NOT NULL,
-                empresa_responsavel TEXT,
-                responsavel TEXT NOT NULL,
-                atividade TEXT NOT NULL,
-                grupo TEXT,
-                cidade TEXT,
-                desde TEXT,
-                status TEXT,
-                email TEXT,
-                telefone TEXT,
-                contato TEXT,
-                possui_folha TEXT,
-                financeiro TEXT,
-                quadro_contas_bancarias INTEGER,
-                forma_entrega TEXT,
-                empresa_administrada TEXT,
-                protesta_no_bancario TEXT,
-                parcela_perto TEXT,
-                catrato TEXT,
-                saldo_anterior TEXT,
-                extrato TEXT,
-                data_criacao TEXT NOT NULL,
-                mes_referencia TEXT,
-                feito INTEGER DEFAULT 0
-            )
-        ''')
-        conn.commit()
-        
-        c.execute("SELECT COUNT(*) FROM atividades")
-        if c.fetchone()[0] == 0:
-            gerar_atividades_mensais(conn)
+def init_db() -> sqlite3.Connection:
+    """Inicializa e retorna a conexão com o banco de dados, criando a tabela se necessário."""
+    conn = sqlite3.connect('clientes.db', check_same_thread=False)
+    c = conn.cursor()
+    
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS atividades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente TEXT NOT NULL,
+            razao_social TEXT,
+            classificacao TEXT,
+            tributacao TEXT,
+            responsavel TEXT NOT NULL,
+            atividade TEXT NOT NULL,
+            grupo TEXT,
+            cidade TEXT,
+            desde TEXT,
+            status TEXT,
+            email TEXT,
+            telefone TEXT,
+            contato TEXT,
+            possui_folha TEXT,
+            financeiro TEXT,
+            contas_bancarias INTEGER,
+            forma_entrega TEXT,
+            data_entrega TEXT,
+            feito INTEGER DEFAULT 0,
+            data_criacao TEXT NOT NULL,
+            mes_referencia TEXT
+        )
+    ''')
+    conn.commit()
+    
+    c.execute("SELECT COUNT(*) FROM atividades")
+    if c.fetchone()[0] == 0:
+        gerar_atividades_mensais(conn)
+    
+    return conn
 
 def gerar_atividades_mensais(conn: sqlite3.Connection):
     """Gera atividades mensais para todos os clientes até dezembro de 2025."""
     clientes = [
-        ("00.000.000/0001-00", "Cliente A", "OL12345", "Simples Nacional", "Empresa A", "Responsável 1"),
-        ("11.111.111/0001-11", "Cliente B", "OL67890", "Lucro Presumido", "Empresa B", "Responsável 2"),
-        ("22.222.222/0001-22", "Cliente C", "OL54321", "Lucro Real", "Empresa C", "Responsável 1"),
-        ("33.333.333/0001-33", "Cliente D", "OL09876", "Simples Nacional", "Empresa D", "Responsável 3"),
+        ("Cliente A", "Razão Social A", "B", "Simples Nacional", "Responsável 1"),
+        ("Cliente B", "Razão Social B", "A", "Lucro Presumido", "Responsável 2"),
+        ("Cliente C", "Razão Social C", "C", "Lucro Real", "Responsável 1"),
+        ("Cliente D", "Razão Social D", "B", "Simples Nacional", "Responsável 3"),
     ]
     
     atividades = [
@@ -466,270 +444,172 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
     hoje = datetime.now()
     fim = datetime(2025, 12, 1)
     
-    try:
-        c = conn.cursor()
-        
+    c = conn.cursor()
+    
+    while hoje <= fim:
+        mes_ref = hoje.strftime("%m/%Y")
         for cliente in clientes:
             atividade = random.choice(atividades)
             feito = random.choice([0, 1])
             campos = (
-                cliente[0], cliente[1], cliente[2], cliente[3], cliente[4], cliente[5], atividade,
+                cliente[0], cliente[1], cliente[2], cliente[3], cliente[4], atividade,
                 "Grupo 1", "São Paulo", "01/2020", "Ativo", "email@cliente.com", "(11) 99999-9999", "Contato Financeiro",
-                "Sim", "Em dia", 2, "E-mail", "Empresa Admin", "Não", "Parcela 1", "Contrato 123",
-                "R$ 10.000,00", "Disponível", datetime.now().strftime('%Y-%m-%d %H:%M:%S'), hoje.strftime('%m/%Y'), feito
+                "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), feito, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), mes_ref
             )
             
             c.execute('''
                 INSERT INTO atividades (
-                    cnpj, razao_social, olaiseto_folio_cliente, tributacao, empresa_responsavel, responsavel, atividade, 
+                    cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
                     grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                    financeiro, quadro_contas_bancarias, forma_entrega, empresa_administrada, protesta_no_bancario, 
-                    parcela_perto, catrato, saldo_anterior, extrato, data_criacao, mes_referencia, feito
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    financeiro, contas_bancarias, forma_entrega, data_entrega, feito, data_criacao, mes_referencia
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', campos)
         
-        conn.commit()
-    except sqlite3.Error as e:
-        st.error(f"Erro ao gerar atividades iniciais: {e}")
+        hoje += timedelta(days=30)
+    
+    conn.commit()
 
 # --- FUNÇÕES DO SISTEMA ---
-def adicionar_atividade(campos: Tuple) -> bool:
+def adicionar_atividade(conn: sqlite3.Connection, campos: Tuple) -> bool:
     """Adiciona uma nova atividade ao banco de dados."""
     try:
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            campos_completos = campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),)
-            
-            c.execute('''
-                INSERT INTO atividades (
-                    cnpj, razao_social, olaiseto_folio_cliente, tributacao, empresa_responsavel, responsavel, atividade, 
-                    grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                    financeiro, quadro_contas_bancarias, forma_entrega, empresa_administrada, protesta_no_bancario, 
-                    parcela_perto, catrato, saldo_anterior, extrato, data_criacao, mes_referencia
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', campos_completos)
-            conn.commit()
-            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
-            return True
+        c = conn.cursor()
+        campos_completos = campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),)
+        
+        c.execute('''
+            INSERT INTO atividades (
+                cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
+                grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
+                financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, data_criacao
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', campos_completos)
+        conn.commit()
+        st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+        return True
     except sqlite3.Error as e:
         st.error(f"Erro ao adicionar atividade: {e}")
         return False
 
-def adicionar_atividades_em_lote(dados: List[Tuple]) -> bool:
+def adicionar_atividades_em_lote(conn: sqlite3.Connection, dados: List[Tuple]) -> bool:
     """Adiciona múltiplas atividades ao banco de dados em lote."""
     try:
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            
-            # Preparar os dados com data de criação
-            dados_completos = [
-                (*linha, datetime.now().strftime('%Y-%m-%d %H:%M:%S')) 
-                for linha in dados
-            ]
-            
-            # Iniciar transação
-            c.execute("BEGIN TRANSACTION")
-            
-            try:
-                c.executemany('''
-                    INSERT INTO atividades (
-                        cnpj, razao_social, olaiseto_folio_cliente, tributacao, empresa_responsavel, responsavel, atividade, 
-                        grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                        financeiro, quadro_contas_bancarias, forma_entrega, empresa_administrada, protesta_no_bancario, 
-                        parcela_perto, catrato, saldo_anterior, extrato, data_criacao, mes_referencia
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', dados_completos)
-                
-                conn.commit()
-                st.session_state.atualizar_lista = True  # Flag para atualizar a lista
-                return True
-            except sqlite3.Error as e:
-                conn.rollback()
-                st.error(f"Erro durante a inserção em lote: {e}")
-                return False
-    except Exception as e:
-        st.error(f"Erro ao conectar ao banco de dados: {e}")
+        c = conn.cursor()
+        
+        # Preparar os dados com data de criação
+        dados_completos = [
+            (*linha, datetime.now().strftime('%Y-%m-%d %H:%M:%S')) 
+            for linha in dados
+        ]
+        
+        c.executemany('''
+            INSERT INTO atividades (
+                cliente, razao_social, classificacao, tributacao, responsavel, atividade, 
+                grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
+                financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, data_criacao
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', dados_completos)
+        
+        conn.commit()
+        st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+        return True
+    except sqlite3.Error as e:
+        st.error(f"Erro ao adicionar atividades em lote: {e}")
         return False
 
-def excluir_atividade(id: int) -> bool:
+def excluir_atividade(conn: sqlite3.Connection, id: int) -> bool:
     """Remove uma atividade do banco de dados pelo ID."""
     try:
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute('DELETE FROM atividades WHERE id = ?', (id,))
-            conn.commit()
-            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
-            return c.rowcount > 0
+        c = conn.cursor()
+        c.execute('DELETE FROM atividades WHERE id = ?', (id,))
+        conn.commit()
+        st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+        return c.rowcount > 0
     except sqlite3.Error as e:
         st.error(f"Erro ao excluir atividade: {e}")
         return False
 
-def marcar_feito(id: int, feito: bool) -> bool:
+def marcar_feito(conn: sqlite3.Connection, id: int, feito: bool) -> bool:
     """Atualiza o status de conclusão de uma atividade."""
     try:
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (int(feito), id))
-            conn.commit()
-            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
-            return c.rowcount > 0
+        c = conn.cursor()
+        c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (int(feito), id))
+        conn.commit()
+        st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+        return c.rowcount > 0
     except sqlite3.Error as e:
         st.error(f"Erro ao atualizar status: {e}")
         return False
 
-def get_atividades(filtro_mes: str = None, filtro_responsavel: str = None, data_inicio: str = None, data_fim: str = None) -> List[Tuple]:
+def get_atividades(conn: sqlite3.Connection, filtro_mes: str = None, filtro_responsavel: str = None) -> List[Tuple]:
     """Retorna todas as atividades ordenadas por data de criação com filtros opcionais."""
     try:
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            query = 'SELECT * FROM atividades'
-            params = []
-            
-            conditions = []
-            if filtro_mes and filtro_mes != "Todos":
-                conditions.append('mes_referencia = ?')
-                params.append(filtro_mes)
-            if filtro_responsavel and filtro_responsavel != "Todos":
-                conditions.append('responsavel = ?')
-                params.append(filtro_responsavel)
-            if data_inicio and data_fim:
-                conditions.append('data_criacao BETWEEN ? AND ?')
-                params.extend([data_inicio, data_fim])
-            
-            if conditions:
-                query += ' WHERE ' + ' AND '.join(conditions)
-            
-            query += ' ORDER BY data_criacao DESC'
-            
-            c.execute(query, tuple(params))
-            return c.fetchall()
+        c = conn.cursor()
+        query = 'SELECT * FROM atividades'
+        params = []
+        
+        conditions = []
+        if filtro_mes and filtro_mes != "Todos":
+            conditions.append('mes_referencia = ?')
+            params.append(filtro_mes)
+        if filtro_responsavel and filtro_responsavel != "Todos":
+            conditions.append('responsavel = ?')
+            params.append(filtro_responsavel)
+        
+        if conditions:
+            query += ' WHERE ' + ' AND '.join(conditions)
+        
+        query += ' ORDER BY data_criacao DESC'
+        
+        c.execute(query, tuple(params))
+        return c.fetchall()
     except sqlite3.Error as e:
         st.error(f"Erro ao recuperar atividades: {e}")
         return []
 
-def get_responsaveis() -> List[str]:
+def get_responsaveis(conn: sqlite3.Connection) -> List[str]:
     """Retorna a lista de responsáveis únicos."""
     try:
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute('SELECT DISTINCT responsavel FROM atividades ORDER BY responsavel')
-            return ["Todos"] + [row[0] for row in c.fetchall()]
+        c = conn.cursor()
+        c.execute('SELECT DISTINCT responsavel FROM atividades ORDER BY responsavel')
+        return ["Todos"] + [row[0] for row in c.fetchall()]
     except sqlite3.Error as e:
         st.error(f"Erro ao recuperar responsáveis: {e}")
         return ["Todos"]
 
-def get_dados_indicadores(data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
+def get_dados_indicadores(conn: sqlite3.Connection) -> pd.DataFrame:
     """Retorna dados para os indicadores de entrega."""
     try:
-        with get_db_connection() as conn:
-            query = '''
-                SELECT 
-                    mes_referencia,
-                    SUM(feito) as concluidas,
-                    COUNT(*) as total,
-                    (SUM(feito) * 100.0 / COUNT(*)) as percentual
-                FROM atividades
-            '''
-            params = []
-            
-            conditions = []
-            if data_inicio and data_fim:
-                conditions.append('data_criacao BETWEEN ? AND ?')
-                params.extend([data_inicio, data_fim])
-            
-            if conditions:
-                query += ' WHERE ' + ' AND '.join(conditions)
-            
-            query += '''
-                GROUP BY mes_referencia
-                ORDER BY SUBSTR(mes_referencia, 4) || SUBSTR(mes_referencia, 1, 2)
-            '''
-            
-            return pd.read_sql(query, conn, params=tuple(params) if params else None)
+        query = '''
+            SELECT 
+                mes_referencia,
+                SUM(feito) as concluidas,
+                COUNT(*) as total,
+                (SUM(feito) * 100.0 / COUNT(*)) as percentual
+            FROM atividades
+            GROUP BY mes_referencia
+            ORDER BY SUBSTR(mes_referencia, 4) || SUBSTR(mes_referencia, 1, 2)
+        '''
+        return pd.read_sql(query, conn)
     except Exception as e:
         st.error(f"Erro ao gerar indicadores: {e}")
         return pd.DataFrame()
 
-def get_dados_responsaveis(data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
+def get_dados_responsaveis(conn: sqlite3.Connection) -> pd.DataFrame:
     """Retorna dados para análise por responsável."""
     try:
-        with get_db_connection() as conn:
-            query = '''
-                SELECT 
-                    responsavel,
-                    SUM(feito) as concluidas,
-                    COUNT(*) as total,
-                    (SUM(feito) * 100.0 / COUNT(*)) as percentual
-                FROM atividades
-            '''
-            params = []
-            
-            conditions = []
-            if data_inicio and data_fim:
-                conditions.append('data_criacao BETWEEN ? AND ?')
-                params.extend([data_inicio, data_fim])
-            
-            if conditions:
-                query += ' WHERE ' + ' AND '.join(conditions)
-            
-            query += '''
-                GROUP BY responsavel
-                ORDER BY percentual DESC
-            '''
-            
-            return pd.read_sql(query, conn, params=tuple(params) if params else None)
+        query = '''
+            SELECT 
+                responsavel,
+                SUM(feito) as concluidas,
+                COUNT(*) as total,
+                (SUM(feito) * 100.0 / COUNT(*)) as percentual
+            FROM atividades
+            GROUP BY responsavel
+            ORDER BY percentual DESC
+        '''
+        return pd.read_sql(query, conn)
     except Exception as e:
         st.error(f"Erro ao gerar dados por responsável: {e}")
-        return pd.DataFrame()
-
-def get_entregas_gerais(data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
-    """Retorna dados para a tabela de entregas gerais."""
-    try:
-        with get_db_connection() as conn:
-            query = '''
-                SELECT 
-                    cnpj AS "CNPJ",
-                    razao_social AS "B.22.0 SOCIAL",
-                    olaiseto_folio_cliente AS "OLAISETO FOLIO DO CLIENTE",
-                    tributacao AS "TRIBUTAÇÃO",
-                    empresa_responsavel AS "EMPRESA RESPONSÁVEL",
-                    responsavel AS "RESPONSÁVEL",
-                    atividade AS "ATIVIDADE",
-                    grupo AS "GRUPO",
-                    cidade AS "CIDADE",
-                    desde AS "DESDE",
-                    status AS "ESTATUS",
-                    email AS "E-MAIL",
-                    telefone AS "TELEFONE",
-                    contato AS "CONTATO",
-                    possui_folha AS "POSSUI FOLLIM",
-                    financeiro AS "FINANCEIRO",
-                    quadro_contas_bancarias AS "QUADR DE CONTAS BANCALAS",
-                    forma_entrega AS "FORMA DE ENTREVÊNCIA",
-                    empresa_administrada AS "EMPRESA ADMINISTRADA",
-                    protesta_no_bancario AS "PROFÉSITA NO BANCÁRIO",
-                    parcela_perto AS "PARCELA PERTO",
-                    catrato AS "CATRATO",
-                    saldo_anterior AS "SALANCI",
-                    extrato AS "EXTRATO",
-                    data_criacao AS "DATA CRIAÇÃO"
-                FROM atividades
-            '''
-            params = []
-            
-            conditions = []
-            if data_inicio and data_fim:
-                conditions.append('data_criacao BETWEEN ? AND ?')
-                params.extend([data_inicio, data_fim])
-            
-            if conditions:
-                query += ' WHERE ' + ' AND '.join(conditions)
-            
-            query += ' ORDER BY data_criacao DESC'
-            
-            return pd.read_sql(query, conn, params=tuple(params) if params else None)
-    except Exception as e:
-        st.error(f"Erro ao gerar dados de entregas gerais: {e}")
         return pd.DataFrame()
 
 # --- COMPONENTES DA INTERFACE ---
@@ -750,7 +630,7 @@ def login_section():
                 else:
                     st.error("Credenciais inválidas. Tente novamente.", icon="⚠️")
 
-def upload_atividades():
+def upload_atividades(conn: sqlite3.Connection):
     """Exibe o formulário para upload de atividades em Excel."""
     st.markdown('<div class="header">📤 Upload de Atividades</div>', unsafe_allow_html=True)
     
@@ -758,9 +638,9 @@ def upload_atividades():
         st.markdown("""
             **Como preparar seu arquivo Excel:**
             1. O arquivo deve conter as colunas obrigatórias:
-               - `CNPJ` (texto)
                - `Razão Social` (texto)
-               - `OLAISETO FOLIO DO CLIENTE` (texto)
+               - `CNPJ` (texto)
+               - `Grupo` (texto)
                - `Tributação` (texto)
                - `Responsável` (texto)
             2. Você pode incluir colunas adicionais se desejar
@@ -782,7 +662,7 @@ def upload_atividades():
             df = pd.read_excel(uploaded_file)
             
             # Verifica colunas obrigatórias
-            required_columns = {'CNPJ', 'Razão Social', 'OLAISETO FOLIO DO CLIENTE', 'Tributação', 'Responsável'}
+            required_columns = {'Razão Social', 'CNPJ', 'Grupo', 'Tributação', 'Responsável'}
             if not required_columns.issubset(df.columns):
                 missing_cols = required_columns - set(df.columns)
                 st.error(f"Colunas obrigatórias faltando: {', '.join(missing_cols)}")
@@ -796,36 +676,30 @@ def upload_atividades():
             atividades = []
             for _, row in df.iterrows():
                 atividades.append((
-                    row.get('CNPJ', ''),  # cnpj
+                    row.get('Razão Social', ''),  # cliente
                     row.get('Razão Social', ''),  # razao_social
-                    row.get('OLAISETO FOLIO DO CLIENTE', ''),  # olaiseto_folio_cliente
+                    row.get('Classificação', 'B'),  # classificacao
                     row.get('Tributação', 'Simples Nacional'),  # tributacao
-                    row.get('Empresa Responsável', ''),  # empresa_responsavel
                     row.get('Responsável', ''),  # responsavel
-                    row.get('Atividade', 'Atividade cadastrada em lote'),  # atividade
+                    "Atividade cadastrada em lote",  # atividade
                     row.get('Grupo', ''),  # grupo
                     row.get('Cidade', ''),  # cidade
-                    row.get('Desde', datetime.now().strftime('%Y-%m-%d')),  # desde
-                    row.get('Status', 'Ativo'),  # status
+                    datetime.now().strftime('%Y-%m-%d'),  # desde
+                    "Ativo",  # status
                     row.get('E-mail', ''),  # email
                     row.get('Telefone', ''),  # telefone
                     row.get('Contato', ''),  # contato
                     row.get('Possui Folha', 'Sim'),  # possui_folha
                     row.get('Financeiro', 'Em dia'),  # financeiro
-                    row.get('Quadro de Contas Bancárias', 1),  # quadro_contas_bancarias
+                    row.get('Contas Bancárias', 1),  # contas_bancarias
                     row.get('Forma de Entrega', 'E-mail'),  # forma_entrega
-                    row.get('Empresa Administrada', ''),  # empresa_administrada
-                    row.get('Protesta no Bancário', 'Não'),  # protesta_no_bancario
-                    row.get('Parcela Perto', ''),  # parcela_perto
-                    row.get('Contrato', ''),  # catrato
-                    row.get('Saldo Anterior', ''),  # saldo_anterior
-                    row.get('Extrato', ''),  # extrato
+                    datetime.now().strftime('%Y-%m-%d'),  # data_entrega
                     datetime.now().strftime('%m/%Y')  # mes_referencia
                 ))
             
             # Botão para confirmar importação
             if st.button("Confirmar Importação", type="primary", use_container_width=True):
-                if adicionar_atividades_em_lote(atividades):
+                if adicionar_atividades_em_lote(conn, atividades):
                     st.success(f"✅ {len(atividades)} atividades importadas com sucesso!")
                     st.rerun()  # Força a atualização da lista de atividades
                 else:
@@ -833,7 +707,7 @@ def upload_atividades():
         except Exception as e:
             st.error(f"Erro ao processar arquivo: {str(e)}")
 
-def cadastro_atividade():
+def cadastro_atividade(conn: sqlite3.Connection):
     """Exibe o formulário para cadastro de novas atividades."""
     st.markdown('<div class="header">📝 Cadastro de Atividades</div>', unsafe_allow_html=True)
     
@@ -845,11 +719,10 @@ def cadastro_atividade():
             
             with col1:
                 st.markdown('<div class="form-label">Informações Básicas</div>', unsafe_allow_html=True)
-                cnpj = st.text_input("CNPJ*", placeholder="00.000.000/0000-00")
-                razao_social = st.text_input("Razão Social*", placeholder="Razão social completa")
-                olaiseto_folio = st.text_input("OLAISETO FOLIO DO CLIENTE", placeholder="Código do cliente")
-                tributacao = st.selectbox("Tributação*", ["Simples Nacional", "Lucro Presumido", "Lucro Real"])
-                empresa_responsavel = st.text_input("Empresa Responsável", placeholder="Nome da empresa responsável")
+                cliente = st.text_input("Cliente*", placeholder="Nome do cliente")
+                razao_social = st.text_input("Razão Social", placeholder="Razão social completa")
+                classificacao = st.selectbox("Classificação", ["A", "B", "C", "D"])
+                tributacao = st.selectbox("Tributação", ["Simples Nacional", "Lucro Presumido", "Lucro Real"])
                 responsavel = st.text_input("Responsável*", placeholder="Nome do responsável")
                 atividade = st.text_input("Atividade*", placeholder="Descrição da atividade")
                 
@@ -861,35 +734,21 @@ def cadastro_atividade():
                 status = st.selectbox("Status", ["Ativo", "Inativo", "Potencial", "Perdido"])
                 email = st.text_input("E-mail", placeholder="E-mail de contato")
                 telefone = st.text_input("Telefone", placeholder="Telefone de contato")
-                contato = st.text_input("Contato", placeholder="Nome do contato")
                 
             st.markdown('<div class="form-label">Detalhes Financeiros</div>', unsafe_allow_html=True)
             col3, col4, col5 = st.columns(3)
             
             with col3:
+                contato = st.text_input("Contato Financeiro", placeholder="Nome do contato")
                 possui_folha = st.selectbox("Possui Folha?", ["Sim", "Não", "Não se aplica"])
-                financeiro = st.text_input("Financeiro", placeholder="Informações financeiras")
                 
             with col4:
-                quadro_contas_bancarias = st.number_input("Quadro de Contas Bancárias", min_value=0, value=1)
-                forma_entrega = st.selectbox("Forma de Entrega", ["E-mail", "Correio", "Pessoalmente", "Outros"])
+                financeiro = st.text_input("Financeiro", placeholder="Informações financeiras")
+                contas_bancarias = st.number_input("Contas Bancárias", min_value=0, value=1)
                 
             with col5:
-                empresa_administrada = st.text_input("Empresa Administrada", placeholder="Nome da empresa administrada")
-                protesta_no_bancario = st.selectbox("Protesta no Bancário?", ["Sim", "Não"])
-                
-            st.markdown('<div class="form-label">Outras Informações</div>', unsafe_allow_html=True)
-            col6, col7, col8 = st.columns(3)
-            
-            with col6:
-                parcela_perto = st.text_input("Parcela Perto", placeholder="Informações sobre parcelas")
-                
-            with col7:
-                catrato = st.text_input("Contrato", placeholder="Número do contrato")
-                
-            with col8:
-                saldo_anterior = st.text_input("Saldo Anterior", placeholder="Saldo anterior")
-                extrato = st.text_input("Extrato", placeholder="Extrato disponível")
+                forma_entrega = st.selectbox("Forma de Entrega", ["E-mail", "Correio", "Pessoalmente", "Outros"])
+                data_entrega = st.date_input("Data de Entrega", value=datetime.now())
             
             mes_referencia = st.selectbox("Mês de Referência", [
                 f"{mes:02d}/{ano}" 
@@ -900,23 +759,22 @@ def cadastro_atividade():
             st.markdown("<small>Campos marcados com * são obrigatórios</small>", unsafe_allow_html=True)
             
             if st.form_submit_button("Adicionar Atividade", use_container_width=True, type="primary"):
-                if cnpj and razao_social and responsavel and atividade:
+                if cliente and responsavel and atividade:
                     campos = (
-                        cnpj, razao_social, olaiseto_folio, tributacao, empresa_responsavel, responsavel, atividade,
+                        cliente, razao_social, classificacao, tributacao, responsavel, atividade,
                         grupo, cidade, desde.strftime('%Y-%m-%d'), status, email, telefone, contato,
-                        possui_folha, financeiro, quadro_contas_bancarias, forma_entrega, empresa_administrada,
-                        protesta_no_bancario, parcela_perto, catrato, saldo_anterior, extrato, mes_referencia
+                        possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega.strftime('%Y-%m-%d'), mes_referencia
                     )
-                    if adicionar_atividade(campos):
+                    if adicionar_atividade(conn, campos):
                         st.success("Atividade cadastrada com sucesso!", icon="✅")
                         st.rerun()  # Força a atualização da lista de atividades
                 else:
                     st.error("Preencha os campos obrigatórios!", icon="❌")
     
     with tab2:
-        upload_atividades()
+        upload_atividades(conn)
 
-def lista_atividades():
+def lista_atividades(conn: sqlite3.Connection):
     """Exibe a lista de atividades cadastradas com filtros."""
     st.markdown('<div class="header">📋 Lista de Atividades</div>', unsafe_allow_html=True)
     
@@ -931,13 +789,11 @@ def lista_atividades():
         mes_selecionado = st.selectbox("Filtrar por mês de referência:", ["Todos"] + meses)
     
     with col2:
-        responsaveis = get_responsaveis()
+        responsaveis = get_responsaveis(conn)
         responsavel_selecionado = st.selectbox("Filtrar por responsável:", responsaveis)
     
-    atividades = get_atividades(
-        mes_selecionado if mes_selecionado != "Todos" else None,
-        responsavel_selecionado if responsavel_selecionado != "Todos" else None
-    )
+    atividades = get_atividades(conn, mes_selecionado if mes_selecionado != "Todos" else None,
+                              responsavel_selecionado if responsavel_selecionado != "Todos" else None)
     
     if not atividades:
         st.info("Nenhuma atividade encontrada com os filtros selecionados.", icon="ℹ️")
@@ -945,36 +801,27 @@ def lista_atividades():
     
     for row in atividades:
         try:
-            (id, cnpj, razao_social, olaiseto_folio, tributacao, empresa_responsavel, responsavel, 
-             atividade, grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-             financeiro, quadro_contas_bancarias, forma_entrega, empresa_administrada, protesta_no_bancario,
-             parcela_perto, catrato, saldo_anterior, extrato, data_criacao, mes_referencia, feito) = row
+            (id, cliente, razao_social, classificacao, tributacao, responsavel, 
+             atividade, grupo, cidade, desde, status, email, telefone, contato, 
+             possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega, 
+             feito, data_criacao, mes_referencia) = row
         except ValueError as e:
             st.error(f"Erro ao processar atividade: {e}")
             continue
         
-        with st.expander(f"{'✅' if feito else '📌'} {razao_social} - {atividade} ({status}) - {mes_referencia}", expanded=False):
+        with st.expander(f"{'✅' if feito else '📌'} {cliente} - {atividade} ({status}) - {mes_referencia}", expanded=False):
             st.markdown(f'<div class="card{" completed" if feito else ""}">', unsafe_allow_html=True)
             
             col1, col2 = st.columns([3, 1])
             
             with col1:
-                st.markdown(f"**CNPJ:** {cnpj}")
-                st.markdown(f"**Razão Social:** {razao_social}")
-                st.markdown(f"**OLAISETO FOLIO:** {olaiseto_folio}")
-                st.markdown(f"**Tributação:** {tributacao}")
-                st.markdown(f"**Empresa Responsável:** {empresa_responsavel}")
                 st.markdown(f"**Responsável:** {responsavel}")
+                st.markdown(f"**Razão Social:** {razao_social}")
+                st.markdown(f"**Classificação/Tributação:** {classificacao} / {tributacao}")
                 st.markdown(f"**Grupo/Cidade:** {grupo} / {cidade}")
                 st.markdown(f"**Contato:** {contato} ({telefone} - {email})")
-                st.markdown(f"**Financeiro:** {financeiro} | Folha: {possui_folha} | Contas: {quadro_contas_bancarias}")
-                st.markdown(f"**Entrega:** {forma_entrega}")
-                st.markdown(f"**Empresa Administrada:** {empresa_administrada}")
-                st.markdown(f"**Protesta no Bancário:** {protesta_no_bancario}")
-                st.markdown(f"**Parcela Perto:** {parcela_perto}")
-                st.markdown(f"**Contrato:** {catrato}")
-                st.markdown(f"**Saldo Anterior:** {saldo_anterior}")
-                st.markdown(f"**Extrato:** {extrato}")
+                st.markdown(f"**Financeiro:** {financeiro} | Folha: {possui_folha} | Contas: {contas_bancarias}")
+                st.markdown(f"**Entrega:** {forma_entrega} em {data_entrega}")
                 st.markdown(f"**Mês Referência:** {mes_referencia}")
                 st.markdown(f"**Data de Criação:** {data_criacao}")
                 
@@ -984,45 +831,23 @@ def lista_atividades():
                     value=bool(feito),
                     key=f"feito_{id}",
                     on_change=marcar_feito,
-                    args=(id, not feito)
+                    args=(conn, id, not feito)
                 )
                 
                 if st.button("Excluir", key=f"del_{id}", use_container_width=True):
-                    if excluir_atividade(id):
+                    if excluir_atividade(conn, id):
                         st.rerun()
             
             st.markdown('</div>', unsafe_allow_html=True)
 
-def mostrar_indicadores():
+def mostrar_indicadores(conn: sqlite3.Connection):
     """Exibe os indicadores de entrega."""
     st.markdown('<div class="header">📊 Indicadores de Entrega</div>', unsafe_allow_html=True)
     
-    tab1, tab2, tab3 = st.tabs(["📅 Por Mês", "👤 Por Responsável", "📋 Entregas Gerais"])
+    tab1, tab2 = st.tabs(["📅 Por Mês", "👤 Por Responsável"])
     
     with tab1:
-        st.subheader("Selecionar Período")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            data_inicio = st.date_input(
-                "Data Início",
-                value=datetime.now() - relativedelta(months=3),
-                min_value=datetime(2023, 1, 1),
-                max_value=datetime.now()
-            )
-        
-        with col2:
-            data_fim = st.date_input(
-                "Data Fim",
-                value=datetime.now(),
-                min_value=datetime(2023, 1, 1),
-                max_value=datetime.now()
-            )
-        
-        dados_mes = get_dados_indicadores(
-            data_inicio.strftime('%Y-%m-%d'),
-            data_fim.strftime('%Y-%m-%d')
-        )
+        dados_mes = get_dados_indicadores(conn)
         
         if dados_mes.empty:
             st.warning("Não há dados suficientes para exibir os indicadores por mês.")
@@ -1080,31 +905,7 @@ def mostrar_indicadores():
             )
     
     with tab2:
-        st.subheader("Selecionar Período")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            data_inicio = st.date_input(
-                "Data Início",
-                value=datetime.now() - relativedelta(months=3),
-                min_value=datetime(2023, 1, 1),
-                max_value=datetime.now(),
-                key="data_inicio_resp"
-            )
-        
-        with col2:
-            data_fim = st.date_input(
-                "Data Fim",
-                value=datetime.now(),
-                min_value=datetime(2023, 1, 1),
-                max_value=datetime.now(),
-                key="data_fim_resp"
-            )
-        
-        dados_responsaveis = get_dados_responsaveis(
-            data_inicio.strftime('%Y-%m-%d'),
-            data_fim.strftime('%Y-%m-%d')
-        )
+        dados_responsaveis = get_dados_responsaveis(conn)
         
         if dados_responsaveis.empty:
             st.warning("Não há dados suficientes para exibir os indicadores por responsável.")
@@ -1185,58 +986,41 @@ def mostrar_indicadores():
                 use_container_width=True,
                 height=400
             )
-    
-    with tab3:
-        st.subheader("Selecionar Período")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            data_inicio = st.date_input(
-                "Data Início",
-                value=datetime.now() - relativedelta(months=3),
-                min_value=datetime(2023, 1, 1),
-                max_value=datetime.now(),
-                key="data_inicio_geral"
-            )
-        
-        with col2:
-            data_fim = st.date_input(
-                "Data Fim",
-                value=datetime.now(),
-                min_value=datetime(2023, 1, 1),
-                max_value=datetime.now(),
-                key="data_fim_geral"
-            )
-        
-        entregas_gerais = get_entregas_gerais(
-            data_inicio.strftime('%Y-%m-%d'),
-            data_fim.strftime('%Y-%m-%d')
-        )
-        
-        if entregas_gerais is None or entregas_gerais.empty:
-            st.warning("Não há dados suficientes para exibir as entregas gerais.")
-        else:
-            st.subheader("Tabela de Entregas Gerais")
-            st.dataframe(
-                entregas_gerais,
-                use_container_width=True,
-                height=600
-            )
 
-def mostrar_sidebar():
-    """Exibe a barra lateral com estatísticas e próximas entregas."""
-    with st.sidebar:
-        st.markdown("## Configurações")
+# --- APLICAÇÃO PRINCIPAL ---
+def main():
+    """Função principal que gerencia o fluxo da aplicação."""
+    load_css()
+    conn = init_db()
+    
+    if 'logged_in' not in st.session_state:
+        st.session_state.logged_in = False
+    
+    if not st.session_state.logged_in:
+        login_section()
+    else:
+        tab1, tab2, tab3 = st.tabs(["📋 Lista de Atividades", "📝 Cadastrar Atividades", "📊 Indicadores de Entrega"])
         
-        if st.button("🚪 Sair", use_container_width=True, type="primary"):
-            st.session_state.logged_in = False
-            st.rerun()
+        with tab1:
+            lista_atividades(conn)
         
-        st.markdown("---")
-        st.markdown("### Estatísticas Rápidas")
+        with tab2:
+            cadastro_atividade(conn)
         
-        try:
-            with get_db_connection() as conn:
+        with tab3:
+            mostrar_indicadores(conn)
+        
+        with st.sidebar:
+            st.markdown("## Configurações")
+            
+            if st.button("🚪 Sair", use_container_width=True, type="primary"):
+                st.session_state.logged_in = False
+                st.rerun()
+            
+            st.markdown("---")
+            st.markdown("### Estatísticas Rápidas")
+            
+            try:
                 c = conn.cursor()
                 
                 c.execute("SELECT COUNT(*) FROM atividades")
@@ -1258,10 +1042,10 @@ def mostrar_sidebar():
                 # Próximas entregas
                 hoje = datetime.now().strftime('%Y-%m-%d')
                 c.execute('''
-                    SELECT razao_social, atividade, data_criacao 
+                    SELECT cliente, atividade, data_entrega 
                     FROM atividades 
-                    WHERE data_criacao >= ? AND feito = 0
-                    ORDER BY data_criacao ASC
+                    WHERE data_entrega >= ? AND feito = 0
+                    ORDER BY data_entrega ASC
                     LIMIT 5
                 ''', (hoje,))
                 proximas = c.fetchall()
@@ -1276,33 +1060,8 @@ def mostrar_sidebar():
                                 <small>📅 {data}</small>
                             </div>
                         """, unsafe_allow_html=True)
-        except sqlite3.Error as e:
-            st.error(f"Erro ao carregar estatísticas: {e}")
-
-# --- APLICAÇÃO PRINCIPAL ---
-def main():
-    """Função principal que gerencia o fluxo da aplicação."""
-    load_css()
-    init_db()
-    
-    if 'logged_in' not in st.session_state:
-        st.session_state.logged_in = False
-    
-    if not st.session_state.logged_in:
-        login_section()
-    else:
-        tab1, tab2, tab3 = st.tabs(["📋 Lista de Atividades", "📝 Cadastrar Atividades", "📊 Indicadores de Entrega"])
-        
-        with tab1:
-            lista_atividades()
-        
-        with tab2:
-            cadastro_atividade()
-        
-        with tab3:
-            mostrar_indicadores()
-        
-        mostrar_sidebar()
+            except sqlite3.Error as e:
+                st.error(f"Erro ao carregar estatísticas: {e}")
 
 if __name__ == "__main__":
     main()
