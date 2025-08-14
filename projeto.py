@@ -443,10 +443,10 @@ def init_db():
 def gerar_atividades_mensais(conn: sqlite3.Connection):
     """Gera atividades mensais para todos os clientes até dezembro de 2025."""
     clientes = [
-        ("00.000.000/0001-01", "Razão Social A", "B", "Simples Nacional", "Responsável 1"),
-        ("00.000.000/0001-02", "Razão Social B", "A", "Lucro Presumido", "Responsável 2"),
-        ("00.000.000/0001-03", "Razão Social C", "C", "Lucro Real", "Responsável 1"),
-        ("00.000.000/0001-04", "Razão Social D", "B", "Simples Nacional", "Responsável 3"),
+        ("00.000.000/0001-01", "Cliente A", "Razão Social A", "B", "Simples Nacional", "Responsável 1"),
+        ("00.000.000/0001-02", "Cliente B", "Razão Social B", "A", "Lucro Presumido", "Responsável 2"),
+        ("00.000.000/0001-03", "Cliente C", "Razão Social C", "C", "Lucro Real", "Responsável 1"),
+        ("00.000.000/0001-04", "Cliente D", "Razão Social D", "B", "Simples Nacional", "Responsável 3"),
     ]
     
     atividades = [
@@ -466,7 +466,7 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
             atividade = random.choice(atividades)
             feito = random.choice([0, 1])
             campos = (
-                cliente[0], cliente[1], cliente[2], cliente[3], cliente[4], atividade,
+                cliente[0], cliente[1], cliente[2], cliente[3], cliente[4], cliente[5], atividade,
                 "Grupo 1", "São Paulo", "01/2020", "Ativo", "email@cliente.com", "(11) 99999-9999", "Contato Financeiro",
                 "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), feito, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), hoje.strftime('%m/%Y')
             )
@@ -610,7 +610,6 @@ def get_entregas_gerais(start_date: str, end_date: str) -> pd.DataFrame:
         with get_db_connection() as conn:
             query = '''
                 SELECT 
-                    id,
                     cnpj, 
                     razao_social, 
                     classificacao, 
@@ -628,10 +627,7 @@ def get_entregas_gerais(start_date: str, end_date: str) -> pd.DataFrame:
                     financeiro, 
                     contas_bancarias, 
                     forma_entrega, 
-                    data_entrega,
-                    feito,
-                    data_criacao,
-                    mes_referencia
+                    data_entrega
                 FROM atividades
                 WHERE data_entrega BETWEEN ? AND ?
                 ORDER BY data_entrega DESC
@@ -707,24 +703,24 @@ def upload_atividades():
             **Como preparar seu arquivo Excel:**
             1. O arquivo deve conter as colunas obrigatórias:
                - `CNPJ` (texto)
-               - `RAZÃO SOCIAL` (texto)
-               - `CLASSIFICAÇÃO DO CLIENTE` (texto)
-               - `TRIBUTAÇÃO` (texto)
-               - `RESPONSÁVEL` (texto)
-               - `ATIVIDADE` (texto)
-               - `GRUPO` (texto)
-               - `CIDADE` (texto)
-               - `DESDE` (data/texto)
-               - `STATUS` (texto)
-               - `E-MAIL` (texto)
-               - `TELEFONE` (texto)
-               - `CONTATO` (texto)
-               - `POSSUI FOLHA` (texto)
-               - `FINANCEIRO` (texto)
-               - `CONTAS BANCÁRIAS` (número inteiro)
-               - `FORMA DE ENTREGA` (texto)
-               - `DATA DE ENTREGA` (data no formato AAAA-MM-DD)
-               - `MÊS DE REFERÊNCIA` (texto no formato MM/AAAA)
+               - `Razão Social` (texto)
+               - `Classificação do Cliente` (texto)
+               - `Tributação` (texto)
+               - `Responsável` (texto)
+               - `Atividade` (texto)
+               - `Grupo` (texto)
+               - `Cidade` (texto)
+               - `Desde` (texto)
+               - `Status` (texto)
+               - `E-mail` (texto)
+               - `Telefone` (texto)
+               - `Contato` (texto)
+               - `Possui Folha` (texto)
+               - `Financeiro` (texto)
+               - `Contas Bancárias` (número inteiro)
+               - `Forma de Entrega` (texto)
+               - `Data de Entrega` (data no formato YYYY-MM-DD)
+               - `Mês de Referência` (texto no formato MM/YYYY)
             2. Salve o arquivo no formato .xlsx ou .xls
         """)
     
@@ -737,37 +733,44 @@ def upload_atividades():
     
     if uploaded_file is not None:
         try:
+            # Lê o arquivo Excel
             df = pd.read_excel(uploaded_file)
             
-            required_columns = {
-                'CNPJ', 'RAZÃO SOCIAL', 'CLASSIFICAÇÃO DO CLIENTE', 'TRIBUTAÇÃO', 
-                'RESPONSÁVEL', 'ATIVIDADE', 'GRUPO', 'CIDADE', 'DESDE', 'STATUS',
-                'E-MAIL', 'TELEFONE', 'CONTATO', 'POSSUI FOLHA', 'FINANCEIRO',
-                'CONTAS BANCÁRIAS', 'FORMA DE ENTREGA', 'DATA DE ENTREGA', 'MÊS DE REFERÊNCIA'
+            # Mapeia os nomes das colunas da imagem para o banco de dados
+            column_mapping = {
+                'CNPJ': 'cnpj',
+                'RAZÃO SOCIAL': 'razao_social',
+                'CLASSIFICAÇÃO DO CLIENTE': 'classificacao',
+                'TRIBUTAÇÃO': 'tributacao',
+                'RESPONSÁVEL': 'responsavel',
+                'ATIVIDADE': 'atividade',
+                'GRUPO': 'grupo',
+                'CIDADE': 'cidade',
+                'DESDE': 'desde',
+                'STATUS': 'status',
+                'E-MAIL': 'email',
+                'TELEFONE': 'telefone',
+                'CONTATO': 'contato',
+                'POSSUI FOLHA': 'possui_folha',
+                'FINANCEIRO': 'financeiro',
+                'CONTAS BANCÁRIAS': 'contas_bancarias',
+                'FORMA DE ENTREGA': 'forma_entrega',
+                'DATA DE ENTREGA': 'data_entrega',
+                'MÊS DE REFERÊNCIA': 'mes_referencia' # Se você tiver esta coluna no seu arquivo
             }
+
+            # Garante que as colunas existam no dataframe, usando um valor padrão se não
+            for col_excel, col_db in column_mapping.items():
+                if col_excel not in df.columns:
+                    df[col_excel] = None # ou um valor padrão adequado
             
-            df.columns = [col.upper() for col in df.columns]
-            
-            if not required_columns.issubset(df.columns):
-                missing_cols = required_columns - set(df.columns)
-                st.error(f"Colunas obrigatórias faltando: {', '.join(missing_cols)}")
-                return
-            
+            # Mostra pré-visualização
             st.markdown("**Pré-visualização dos dados (5 primeiras linhas):**")
             st.dataframe(df.head())
             
+            # Prepara dados para inserção
             atividades = []
             for _, row in df.iterrows():
-                try:
-                    data_entrega_str = pd.to_datetime(row['DATA DE ENTREGA']).strftime('%Y-%m-%d')
-                except (ValueError, TypeError):
-                    data_entrega_str = datetime.now().strftime('%Y-%m-%d')
-                
-                try:
-                    mes_referencia_str = pd.to_datetime(row['MÊS DE REFERÊNCIA']).strftime('%m/%Y')
-                except (ValueError, TypeError):
-                    mes_referencia_str = datetime.now().strftime('%m/%Y')
-                    
                 atividades.append((
                     row['CNPJ'],
                     row['RAZÃO SOCIAL'],
@@ -777,7 +780,7 @@ def upload_atividades():
                     row['ATIVIDADE'],
                     row['GRUPO'],
                     row['CIDADE'],
-                    str(row['DESDE']),
+                    row['DESDE'],
                     row['STATUS'],
                     row['E-MAIL'],
                     row['TELEFONE'],
@@ -786,14 +789,15 @@ def upload_atividades():
                     row['FINANCEIRO'],
                     row['CONTAS BANCÁRIAS'],
                     row['FORMA DE ENTREGA'],
-                    data_entrega_str,
-                    mes_referencia_str
+                    row['DATA DE ENTREGA'],
+                    row['MÊS DE REFERÊNCIA']
                 ))
             
+            # Botão para confirmar importação
             if st.button("Confirmar Importação", type="primary", use_container_width=True):
                 if adicionar_atividades_em_lote(atividades):
                     st.success(f"✅ {len(atividades)} atividades importadas com sucesso!")
-                    st.rerun()
+                    st.rerun()  # Força a atualização da lista de atividades
                 else:
                     st.error("Ocorreu um erro ao importar as atividades")
         except Exception as e:
@@ -872,11 +876,11 @@ def lista_atividades():
     col1, col2 = st.columns(2)
     
     with col1:
-        meses = sorted(list(set(
+        meses = sorted(set(
             f"{mes:02d}/{ano}" 
             for ano in range(2023, 2026) 
             for mes in range(1, 13)
-        )), reverse=True)
+        ), reverse=True)
         mes_selecionado = st.selectbox("Filtrar por mês de referência:", ["Todos"] + meses)
     
     with col2:
@@ -949,31 +953,8 @@ def mostrar_entregas_gerais():
     if df.empty:
         st.info("Nenhuma entrega encontrada no período selecionado.")
     else:
-        df_display = df.rename(columns={
-            'cnpj': 'CNPJ',
-            'razao_social': 'Razão Social',
-            'classificacao': 'Classificação',
-            'tributacao': 'Tributação',
-            'responsavel': 'Responsável',
-            'atividade': 'Atividade',
-            'grupo': 'Grupo',
-            'cidade': 'Cidade',
-            'desde': 'Desde',
-            'status': 'Status',
-            'email': 'E-mail',
-            'telefone': 'Telefone',
-            'contato': 'Contato',
-            'possui_folha': 'Possui Folha',
-            'financeiro': 'Financeiro',
-            'contas_bancarias': 'Contas Bancárias',
-            'forma_entrega': 'Forma de Entrega',
-            'data_entrega': 'Data de Entrega',
-            'feito': 'Feito',
-            'data_criacao': 'Data de Criação',
-            'mes_referencia': 'Mês de Referência'
-        })
-        st.dataframe(df_display, use_container_width=True)
-        csv = df_display.to_csv(index=False).encode('utf-8')
+        st.dataframe(df, use_container_width=True)
+        csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="Baixar como CSV",
             data=csv,
@@ -988,85 +969,62 @@ def mostrar_indicadores():
     tab1, tab2 = st.tabs(["📅 Por Mês", "👤 Por Responsável"])
     
     with tab1:
-        st.subheader("Filtrar por Período")
-        start_date = st.date_input("Data de Início", value=datetime.now() - timedelta(days=365))
-        end_date = st.date_input("Data de Fim", value=datetime.now())
-
-        if start_date > end_date:
-            st.error("A data de início não pode ser posterior à data de fim.")
+        dados_mes = get_dados_indicadores()
+        
+        if dados_mes.empty:
+            st.warning("Não há dados suficientes para exibir os indicadores por mês.")
         else:
-            try:
-                with get_db_connection() as conn:
-                    query = '''
-                        SELECT 
-                            mes_referencia,
-                            SUM(feito) as concluidas,
-                            COUNT(*) as total,
-                            (SUM(feito) * 100.0 / COUNT(*)) as percentual
-                        FROM atividades
-                        WHERE data_entrega BETWEEN ? AND ?
-                        GROUP BY mes_referencia
-                        ORDER BY SUBSTR(mes_referencia, 4) || SUBSTR(mes_referencia, 1, 2)
-                    '''
-                    dados_mes = pd.read_sql(query, conn, params=(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')))
-            except Exception as e:
-                st.error(f"Erro ao gerar indicadores: {e}")
-                dados_mes = pd.DataFrame()
-
-            if dados_mes.empty:
-                st.warning("Não há dados suficientes para exibir os indicadores por mês para o período selecionado.")
-            else:
-                st.subheader("Entregas por Mês")
-                fig_bar = px.bar(
-                    dados_mes,
-                    x='mes_referencia',
-                    y=['concluidas', 'total'],
-                    barmode='group',
-                    labels={'value': 'Quantidade', 'mes_referencia': 'Mês de Referência'},
-                    color_discrete_map={'concluidas': '#2ecc71', 'total': '#3498db'}
-                )
-                fig_bar.update_layout(
-                    showlegend=True, 
-                    legend_title_text='',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    xaxis=dict(showgrid=False),
-                    yaxis=dict(showgrid=True, gridcolor='#f1f1f1')
-                )
-                st.plotly_chart(fig_bar, use_container_width=True)
-                
-                st.subheader("Percentual de Conclusão")
-                fig_pie = px.pie(
-                    dados_mes,
-                    values='percentual',
-                    names='mes_referencia',
-                    hole=0.4,
-                    color_discrete_sequence=px.colors.sequential.Greens
-                )
-                fig_pie.update_traces(
-                    textposition='inside', 
-                    textinfo='percent+label',
-                    marker=dict(line=dict(color='#fff', width=2))
-                )
-                fig_pie.update_layout(
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    paper_bgcolor='rgba(0,0,0,0)'
-                )
-                st.plotly_chart(fig_pie, use_container_width=True)
-                
-                st.subheader("Detalhamento por Mês")
-                dados_mes['percentual'] = dados_mes['percentual'].round(2)
-                st.dataframe(
-                    dados_mes[['mes_referencia', 'concluidas', 'total', 'percentual']]
-                    .rename(columns={
-                        'mes_referencia': 'Mês',
-                        'concluidas': 'Concluídas',
-                        'total': 'Total',
-                        'percentual': '% Conclusão'
-                    }),
-                    use_container_width=True,
-                    height=400
-                )
+            st.subheader("Entregas por Mês")
+            fig_bar = px.bar(
+                dados_mes,
+                x='mes_referencia',
+                y=['concluidas', 'total'],
+                barmode='group',
+                labels={'value': 'Quantidade', 'mes_referencia': 'Mês de Referência'},
+                color_discrete_map={'concluidas': '#2ecc71', 'total': '#3498db'}
+            )
+            fig_bar.update_layout(
+                showlegend=True, 
+                legend_title_text='',
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                xaxis=dict(showgrid=False),
+                yaxis=dict(showgrid=True, gridcolor='#f1f1f1')
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
+            
+            st.subheader("Percentual de Conclusão")
+            fig_pie = px.pie(
+                dados_mes,
+                values='percentual',
+                names='mes_referencia',
+                hole=0.4,
+                color_discrete_sequence=px.colors.sequential.Greens
+            )
+            fig_pie.update_traces(
+                textposition='inside', 
+                textinfo='percent+label',
+                marker=dict(line=dict(color='#fff', width=2))
+            )
+            fig_pie.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)'
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
+            
+            st.subheader("Detalhamento por Mês")
+            dados_mes['percentual'] = dados_mes['percentual'].round(2)
+            st.dataframe(
+                dados_mes[['mes_referencia', 'concluidas', 'total', 'percentual']]
+                .rename(columns={
+                    'mes_referencia': 'Mês',
+                    'concluidas': 'Concluídas',
+                    'total': 'Total',
+                    'percentual': '% Conclusão'
+                }),
+                use_container_width=True,
+                height=400
+            )
     
     with tab2:
         dados_responsaveis = get_dados_responsaveis()
@@ -1175,6 +1133,7 @@ def mostrar_sidebar():
                 
                 percentual = (concluidas / total * 100) if total > 0 else 0
                 
+                # Exibindo as métricas com texto branco
                 st.markdown(f"""
                     <div class="sidebar-metric-label">Total de Atividades</div>
                     <div class="sidebar-metric-value">{total}</div>
@@ -1182,6 +1141,7 @@ def mostrar_sidebar():
                     <div class="sidebar-metric-value">{concluidas} ({percentual:.1f}%)</div>
                 """, unsafe_allow_html=True)
                 
+                # Próximas entregas
                 hoje = datetime.now().strftime('%Y-%m-%d')
                 c.execute('''
                     SELECT razao_social, atividade, data_entrega 
@@ -1235,3 +1195,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
