@@ -484,6 +484,7 @@ def adicionar_atividade(conn: sqlite3.Connection, campos: Tuple) -> bool:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', campos_completos)
         conn.commit()
+        st.session_state.atualizar_lista = True  # Flag para atualizar a lista
         return True
     except sqlite3.Error as e:
         st.error(f"Erro ao adicionar atividade: {e}")
@@ -509,6 +510,7 @@ def adicionar_atividades_em_lote(conn: sqlite3.Connection, dados: List[Tuple]) -
         ''', dados_completos)
         
         conn.commit()
+        st.session_state.atualizar_lista = True  # Flag para atualizar a lista
         return True
     except sqlite3.Error as e:
         st.error(f"Erro ao adicionar atividades em lote: {e}")
@@ -520,6 +522,7 @@ def excluir_atividade(conn: sqlite3.Connection, id: int) -> bool:
         c = conn.cursor()
         c.execute('DELETE FROM atividades WHERE id = ?', (id,))
         conn.commit()
+        st.session_state.atualizar_lista = True  # Flag para atualizar a lista
         return c.rowcount > 0
     except sqlite3.Error as e:
         st.error(f"Erro ao excluir atividade: {e}")
@@ -531,6 +534,7 @@ def marcar_feito(conn: sqlite3.Connection, id: int, feito: bool) -> bool:
         c = conn.cursor()
         c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (int(feito), id))
         conn.commit()
+        st.session_state.atualizar_lista = True  # Flag para atualizar a lista
         return c.rowcount > 0
     except sqlite3.Error as e:
         st.error(f"Erro ao atualizar status: {e}")
@@ -697,6 +701,7 @@ def upload_atividades(conn: sqlite3.Connection):
             if st.button("Confirmar Importação", type="primary", use_container_width=True):
                 if adicionar_atividades_em_lote(conn, atividades):
                     st.success(f"✅ {len(atividades)} atividades importadas com sucesso!")
+                    st.rerun()  # Força a atualização da lista de atividades
                 else:
                     st.error("Ocorreu um erro ao importar as atividades")
         except Exception as e:
@@ -762,6 +767,7 @@ def cadastro_atividade(conn: sqlite3.Connection):
                     )
                     if adicionar_atividade(conn, campos):
                         st.success("Atividade cadastrada com sucesso!", icon="✅")
+                        st.rerun()  # Força a atualização da lista de atividades
                 else:
                     st.error("Preencha os campos obrigatórios!", icon="❌")
     
