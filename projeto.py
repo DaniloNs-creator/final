@@ -5,7 +5,6 @@ import pandas as pd
 import plotly.express as px
 import random
 from typing import List, Tuple, Optional
-import io
 import contextlib
 
 # --- CONFIGURAÇÃO INICIAL ---
@@ -22,6 +21,8 @@ def get_db_connection():
     """Gerenciador de contexto para conexão segura com o banco de dados."""
     conn = None
     try:
+        # Usando ':memory:' para o exemplo, mas pode ser 'clientes.db'
+        # A opção 'check_same_thread=False' é importante para Streamlit
         conn = sqlite3.connect('clientes.db', check_same_thread=False, timeout=10)
         conn.execute("PRAGMA journal_mode=WAL")  # Melhora o desempenho com múltiplas conexões
         yield conn
@@ -32,7 +33,7 @@ def get_db_connection():
         if conn:
             conn.close()
 
-# --- CSS PROFISSIONAL ANIMADO ---
+# --- CSS PROFISSIONAL ANIMADO (MANTIDO) ---
 def load_css():
     st.markdown("""
         <style>
@@ -438,15 +439,15 @@ def init_db():
         
         c.execute("SELECT COUNT(*) FROM atividades")
         if c.fetchone()[0] == 0:
-            gerar_atividades_mensais(conn)
+            gerar_atividades_iniciais(conn)
 
-def gerar_atividades_mensais(conn: sqlite3.Connection):
-    """Gera atividades mensais para todos os clientes até dezembro de 2025."""
+def gerar_atividades_iniciais(conn: sqlite3.Connection):
+    """Gera atividades de exemplo para popular o banco de dados."""
     clientes = [
-        ("00.000.000/0001-01", "Cliente A", "Razão Social A", "B", "Simples Nacional", "Responsável 1"),
-        ("00.000.000/0001-02", "Cliente B", "Razão Social B", "A", "Lucro Presumido", "Responsável 2"),
-        ("00.000.000/0001-03", "Cliente C", "Razão Social C", "C", "Lucro Real", "Responsável 1"),
-        ("00.000.000/0001-04", "Cliente D", "Razão Social D", "B", "Simples Nacional", "Responsável 3"),
+        ("00.000.000/0001-01", "Cliente A", "A", "Simples Nacional", "Responsável 1"),
+        ("00.000.000/0001-02", "Cliente B", "A", "Lucro Presumido", "Responsável 2"),
+        ("00.000.000/0001-03", "Cliente C", "C", "Lucro Real", "Responsável 1"),
+        ("00.000.000/0001-04", "Cliente D", "B", "Simples Nacional", "Responsável 3"),
     ]
     
     atividades = [
@@ -457,27 +458,36 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
     ]
     
     hoje = datetime.now()
-    fim = datetime(2025, 12, 1)
     
     try:
         c = conn.cursor()
         
-        for cliente in clientes:
-            atividade = random.choice(atividades)
-            feito = random.choice([0, 1])
-            campos = (
-                cliente[0], cliente[1], cliente[2], cliente[3], cliente[4], cliente[5], atividade,
-                "Grupo 1", "São Paulo", "01/2020", "Ativo", "email@cliente.com", "(11) 99999-9999", "Contato Financeiro",
-                "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), feito, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), hoje.strftime('%m/%Y')
-            )
+        # Gerar atividades para os próximos 3 meses para os clientes de exemplo
+        for i in range(3):
+            mes_referencia = (hoje + timedelta(days=i*30)).strftime('%m/%Y')
+            data_entrega = (hoje + timedelta(days=i*30, seconds=random.randint(0, 86400))).strftime('%Y-%m-%d %H:%M:%S')
             
-            c.execute('''
-                INSERT INTO atividades (
-                    cnpj, razao_social, classificacao, tributacao, responsavel, atividade, 
-                    grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                    financeiro, contas_bancarias, forma_entrega, data_entrega, feito, data_criacao, mes_referencia
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', campos)
+            for cliente in clientes:
+                atividade = random.choice(atividades)
+                feito = 0
+                
+                # A tupla precisa ter 21 elementos para corresponder às 21 colunas da tabela
+                # excluindo o id (que é autoincrement)
+                campos = (
+                    cliente[0], cliente[1], cliente[2], cliente[3], cliente[4], atividade,
+                    "Grupo 1", "São Paulo", "01/2020", "Ativo", "email@cliente.com", "(11) 99999-9999", 
+                    "Contato Financeiro", "Sim", "Em dia", 2, "E-mail", data_entrega, feito, 
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'), mes_referencia
+                )
+                
+                c.execute('''
+                    INSERT INTO atividades (
+                        cnpj, razao_social, classificacao, tributacao, responsavel, atividade, 
+                        grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
+                        financeiro, contas_bancarias, forma_entrega, data_entrega, feito, 
+                        data_criacao, mes_referencia
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', campos)
         
         conn.commit()
     except sqlite3.Error as e:
@@ -489,17 +499,19 @@ def adicionar_atividade(campos: Tuple) -> bool:
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
-            campos_completos = campos + (datetime.now().strftime('%Y-%m-%d %H:%M:%S'),)
+            
+            # Ajustando a tupla para ter o mesmo número de campos da tabela
+            campos_completos = campos + (0, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             
             c.execute('''
                 INSERT INTO atividades (
                     cnpj, razao_social, classificacao, tributacao, responsavel, atividade, 
                     grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                    financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, data_criacao
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, feito, data_criacao
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', campos_completos)
             conn.commit()
-            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+            st.session_state.atualizar_lista = True
             return True
     except sqlite3.Error as e:
         st.error(f"Erro ao adicionar atividade: {e}")
@@ -511,13 +523,12 @@ def adicionar_atividades_em_lote(dados: List[Tuple]) -> bool:
         with get_db_connection() as conn:
             c = conn.cursor()
             
-            # Preparar os dados com data de criação
+            # Prepara os dados com 'feito' padrão (0) e a data de criação
             dados_completos = [
-                (*linha, datetime.now().strftime('%Y-%m-%d %H:%M:%S')) 
+                (*linha, 0, datetime.now().strftime('%Y-%m-%d %H:%M:%S')) 
                 for linha in dados
             ]
             
-            # Iniciar transação
             c.execute("BEGIN TRANSACTION")
             
             try:
@@ -525,12 +536,12 @@ def adicionar_atividades_em_lote(dados: List[Tuple]) -> bool:
                     INSERT INTO atividades (
                         cnpj, razao_social, classificacao, tributacao, responsavel, atividade, 
                         grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                        financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, data_criacao
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, feito, data_criacao
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', dados_completos)
                 
                 conn.commit()
-                st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+                st.session_state.atualizar_lista = True
                 return True
             except sqlite3.Error as e:
                 conn.rollback()
@@ -547,7 +558,7 @@ def excluir_atividade(id: int) -> bool:
             c = conn.cursor()
             c.execute('DELETE FROM atividades WHERE id = ?', (id,))
             conn.commit()
-            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+            st.session_state.atualizar_lista = True
             return c.rowcount > 0
     except sqlite3.Error as e:
         st.error(f"Erro ao excluir atividade: {e}")
@@ -560,7 +571,7 @@ def marcar_feito(id: int, feito: bool) -> bool:
             c = conn.cursor()
             c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (int(feito), id))
             conn.commit()
-            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+            st.session_state.atualizar_lista = True
             return c.rowcount > 0
     except sqlite3.Error as e:
         st.error(f"Erro ao atualizar status: {e}")
@@ -610,24 +621,9 @@ def get_entregas_gerais(start_date: str, end_date: str) -> pd.DataFrame:
         with get_db_connection() as conn:
             query = '''
                 SELECT 
-                    cnpj, 
-                    razao_social, 
-                    classificacao, 
-                    tributacao, 
-                    responsavel, 
-                    atividade, 
-                    grupo, 
-                    cidade, 
-                    desde, 
-                    status, 
-                    email, 
-                    telefone, 
-                    contato, 
-                    possui_folha, 
-                    financeiro, 
-                    contas_bancarias, 
-                    forma_entrega, 
-                    data_entrega
+                    cnpj, razao_social, classificacao, tributacao, responsavel, atividade, 
+                    grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
+                    financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia
                 FROM atividades
                 WHERE data_entrega BETWEEN ? AND ?
                 ORDER BY data_entrega DESC
@@ -701,26 +697,26 @@ def upload_atividades():
     with st.expander("📝 Instruções para Upload", expanded=False):
         st.markdown("""
             **Como preparar seu arquivo Excel:**
-            1. O arquivo deve conter as colunas obrigatórias:
+            1. O arquivo deve conter as colunas obrigatórias com os seguintes nomes (exatos):
                - `CNPJ` (texto)
-               - `Razão Social` (texto)
-               - `Classificação` (texto)
-               - `Tributação` (texto)
-               - `Responsável` (texto)
-               - `Atividade` (texto)
-               - `Grupo` (texto)
-               - `Cidade` (texto)
-               - `Desde` (texto)
-               - `Status` (texto)
-               - `E-mail` (texto)
-               - `Telefone` (texto)
-               - `Contato` (texto)
-               - `Possui Folha` (texto)
-               - `Financeiro` (texto)
-               - `Contas Bancárias` (número inteiro)
-               - `Forma de Entrega` (texto)
-               - `Data de Entrega` (data no formato YYYY-MM-DD)
-               - `Mês de Referência` (texto no formato MM/YYYY)
+               - `RAZÃO SOCIAL` (texto)
+               - `CLASSIFICAÇÃO DO CLIENTE` (texto)
+               - `TRIBUTAÇÃO` (texto)
+               - `RESPONSÁVEL` (texto)
+               - `ATIVIDADE` (texto)
+               - `GRUPO` (texto)
+               - `CIDADE` (texto)
+               - `DESDE` (texto)
+               - `STATUS` (texto)
+               - `E-MAIL` (texto)
+               - `TELEFONE` (texto)
+               - `CONTATO` (texto)
+               - `POSSUI FOLHA` (texto)
+               - `FINANCEIRO` (texto)
+               - `CONTAS BANCÁRIAS` (número inteiro)
+               - `FORMA DE ENTREGA` (texto)
+               - `DATA DE ENTREGA` (data no formato YYYY-MM-DD)
+               - `MÊS DE REFERÊNCIA` (texto no formato MM/YYYY)
             2. Salve o arquivo no formato .xlsx ou .xls
         """)
     
@@ -733,71 +729,39 @@ def upload_atividades():
     
     if uploaded_file is not None:
         try:
-            # Lê o arquivo Excel
             df = pd.read_excel(uploaded_file)
             
-            # Mapeia os nomes das colunas da imagem para o banco de dados
-            column_mapping = {
-                'CNPJ': 'cnpj',
-                'RAZÃO SOCIAL': 'razao_social',
-                'CLASSIFICAÇÃO DO CLIENTE': 'classificacao',
-                'TRIBUTAÇÃO': 'tributacao',
-                'RESPONSÁVEL': 'responsavel',
-                'ATIVIDADE': 'atividade',
-                'GRUPO': 'grupo',
-                'CIDADE': 'cidade',
-                'DESDE': 'desde',
-                'STATUS': 'status',
-                'E-MAIL': 'email',
-                'TELEFONE': 'telefone',
-                'CONTATO': 'contato',
-                'POSSUI FOLHA': 'possui_folha',
-                'FINANCEIRO': 'financeiro',
-                'CONTAS BANCÁRIAS': 'contas_bancarias',
-                'FORMA DE ENTREGA': 'forma_entrega',
-                'DATA DE ENTREGA': 'data_entrega',
-                'MÊS DE REFERÊNCIA': 'mes_referencia' # Se você tiver esta coluna no seu arquivo
-            }
-
-            # Garante que as colunas existam no dataframe, usando um valor padrão se não
-            for col_excel, col_db in column_mapping.items():
-                if col_excel not in df.columns:
-                    df[col_excel] = None # ou um valor padrão adequado
+            required_columns = [
+                'CNPJ', 'RAZÃO SOCIAL', 'CLASSIFICAÇÃO DO CLIENTE', 'TRIBUTAÇÃO', 
+                'RESPONSÁVEL', 'ATIVIDADE', 'GRUPO', 'CIDADE', 'DESDE', 'STATUS', 
+                'E-MAIL', 'TELEFONE', 'CONTATO', 'POSSUI FOLHA', 'FINANCEIRO', 
+                'CONTAS BANCÁRIAS', 'FORMA DE ENTREGA', 'DATA DE ENTREGA', 'MÊS DE REFERÊNCIA'
+            ]
             
-            # Mostra pré-visualização
+            missing_cols = [col for col in required_columns if col not in df.columns]
+            if missing_cols:
+                st.error(f"O arquivo está faltando as seguintes colunas obrigatórias: {', '.join(missing_cols)}")
+                return
+            
             st.markdown("**Pré-visualização dos dados (5 primeiras linhas):**")
             st.dataframe(df.head())
             
-            # Prepara dados para inserção
             atividades = []
             for _, row in df.iterrows():
+                # A tupla tem 19 elementos
                 atividades.append((
-                    row['CNPJ'],
-                    row['RAZÃO SOCIAL'],
-                    row['CLASSIFICAÇÃO DO CLIENTE'],
-                    row['TRIBUTAÇÃO'],
-                    row['RESPONSÁVEL'],
-                    row['ATIVIDADE'],
-                    row['GRUPO'],
-                    row['CIDADE'],
-                    row['DESDE'],
-                    row['STATUS'],
-                    row['E-MAIL'],
-                    row['TELEFONE'],
-                    row['CONTATO'],
-                    row['POSSUI FOLHA'],
-                    row['FINANCEIRO'],
-                    row['CONTAS BANCÁRIAS'],
-                    row['FORMA DE ENTREGA'],
-                    row['DATA DE ENTREGA'],
-                    row['MÊS DE REFERÊNCIA']
+                    row['CNPJ'], row['RAZÃO SOCIAL'], row['CLASSIFICAÇÃO DO CLIENTE'], 
+                    row['TRIBUTAÇÃO'], row['RESPONSÁVEL'], row['ATIVIDADE'], row['GRUPO'], 
+                    row['CIDADE'], str(row['DESDE']), row['STATUS'], row['E-MAIL'], 
+                    row['TELEFONE'], row['CONTATO'], row['POSSUI FOLHA'], row['FINANCEIRO'], 
+                    int(row['CONTAS BANCÁRIAS']), row['FORMA DE ENTREGA'], 
+                    str(row['DATA DE ENTREGA']), row['MÊS DE REFERÊNCIA']
                 ))
             
-            # Botão para confirmar importação
             if st.button("Confirmar Importação", type="primary", use_container_width=True):
                 if adicionar_atividades_em_lote(atividades):
                     st.success(f"✅ {len(atividades)} atividades importadas com sucesso!")
-                    st.rerun()  # Força a atualização da lista de atividades
+                    st.rerun()
                 else:
                     st.error("Ocorreu um erro ao importar as atividades")
         except Exception as e:
@@ -849,12 +813,13 @@ def cadastro_atividade():
                 f"{mes:02d}/{ano}" 
                 for ano in range(2023, 2026) 
                 for mes in range(1, 13)
-            ])
+            ], index=datetime.now().month + (datetime.now().year-2023)*12 - 1)
             
             st.markdown("<small>Campos marcados com * são obrigatórios</small>", unsafe_allow_html=True)
             
             if st.form_submit_button("Adicionar Atividade", use_container_width=True, type="primary"):
                 if responsavel and atividade:
+                    # A tupla tem 19 elementos, igual a upload_atividades
                     campos = (
                         cnpj, razao_social, classificacao, tributacao, responsavel, atividade,
                         grupo, cidade, desde.strftime('%Y-%m-%d'), status, email, telefone, contato,
@@ -862,7 +827,7 @@ def cadastro_atividade():
                     )
                     if adicionar_atividade(campos):
                         st.success("Atividade cadastrada com sucesso!", icon="✅")
-                        st.rerun()  # Força a atualização da lista de atividades
+                        st.rerun()
                 else:
                     st.error("Preencha os campos obrigatórios!", icon="❌")
     
@@ -876,19 +841,18 @@ def lista_atividades():
     col1, col2 = st.columns(2)
     
     with col1:
-        meses = sorted(set(
+        meses = sorted(list(set(
             f"{mes:02d}/{ano}" 
             for ano in range(2023, 2026) 
             for mes in range(1, 13)
-        ), reverse=True)
+        )), reverse=True)
         mes_selecionado = st.selectbox("Filtrar por mês de referência:", ["Todos"] + meses)
     
     with col2:
         responsaveis = get_responsaveis()
         responsavel_selecionado = st.selectbox("Filtrar por responsável:", responsaveis)
     
-    atividades = get_atividades(mes_selecionado if mes_selecionado != "Todos" else None,
-                              responsavel_selecionado if responsavel_selecionado != "Todos" else None)
+    atividades = get_atividades(mes_selecionado, responsavel_selecionado)
     
     if not atividades:
         st.info("Nenhuma atividade encontrada com os filtros selecionados.", icon="ℹ️")
@@ -896,13 +860,14 @@ def lista_atividades():
     
     for row in atividades:
         try:
-            # CORREÇÃO: Adicionando 'mes_referencia' à lista de variáveis para desempacotamento
+            # CORREÇÃO CRÍTICA: A tupla precisa ter 22 variáveis para desempacotar
+            # as 22 colunas retornadas pela query 'SELECT * FROM atividades'
             (id, cnpj, razao_social, classificacao, tributacao, responsavel, 
              atividade, grupo, cidade, desde, status, email, telefone, contato, 
              possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega, 
              feito, data_criacao, mes_referencia) = row
         except ValueError as e:
-            st.error(f"Erro ao processar atividade: {e}")
+            st.error(f"Erro ao processar atividade com ID {row[0]}: {e}. O banco de dados pode estar corrompido ou o esquema foi alterado. Por favor, verifique a estrutura da sua tabela.")
             continue
         
         with st.expander(f"{'✅' if feito else '📌'} {razao_social} - {atividade} ({status}) - {mes_referencia}", expanded=False):
@@ -923,6 +888,7 @@ def lista_atividades():
                 st.markdown(f"**Data de Criação:** {data_criacao}")
                 
             with col2:
+                # O key precisa ser único
                 st.checkbox(
                     "Marcar como concluído", 
                     value=bool(feito),
@@ -1173,7 +1139,7 @@ def main():
     init_db()
     
     if 'logged_in' not in st.session_state:
-        st.session_in_state.logged_in = False
+        st.session_state.logged_in = False
     
     if not st.session_state.logged_in:
         login_section()
