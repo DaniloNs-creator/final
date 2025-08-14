@@ -7,6 +7,7 @@ import random
 from typing import List, Tuple, Optional
 import io
 import contextlib
+from dateutil.relativedelta import relativedelta
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(
@@ -412,9 +413,10 @@ def init_db():
             CREATE TABLE IF NOT EXISTS atividades (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 cnpj TEXT,
-                razao_social TEXT,
-                classificacao TEXT,
-                tributacao TEXT,
+                razao_social TEXT NOT NULL,
+                olaiseto_folio_cliente TEXT,
+                tributacao TEXT NOT NULL,
+                empresa_responsavel TEXT,
                 responsavel TEXT NOT NULL,
                 atividade TEXT NOT NULL,
                 grupo TEXT,
@@ -426,12 +428,17 @@ def init_db():
                 contato TEXT,
                 possui_folha TEXT,
                 financeiro TEXT,
-                contas_bancarias INTEGER,
+                quadro_contas_bancarias INTEGER,
                 forma_entrega TEXT,
-                data_entrega TEXT,
-                feito INTEGER DEFAULT 0,
+                empresa_administrada TEXT,
+                protesta_no_bancario TEXT,
+                parcela_perto TEXT,
+                catrato TEXT,
+                saldo_anterior TEXT,
+                extrato TEXT,
                 data_criacao TEXT NOT NULL,
-                mes_referencia TEXT
+                mes_referencia TEXT,
+                feito INTEGER DEFAULT 0
             )
         ''')
         conn.commit()
@@ -443,10 +450,10 @@ def init_db():
 def gerar_atividades_mensais(conn: sqlite3.Connection):
     """Gera atividades mensais para todos os clientes até dezembro de 2025."""
     clientes = [
-        ("00.000.000/0001-01", "Cliente A", "Razão Social A", "B", "Simples Nacional", "Responsável 1"),
-        ("00.000.000/0001-02", "Cliente B", "Razão Social B", "A", "Lucro Presumido", "Responsável 2"),
-        ("00.000.000/0001-03", "Cliente C", "Razão Social C", "C", "Lucro Real", "Responsável 1"),
-        ("00.000.000/0001-04", "Cliente D", "Razão Social D", "B", "Simples Nacional", "Responsável 3"),
+        ("00.000.000/0001-00", "Cliente A", "OL12345", "Simples Nacional", "Empresa A", "Responsável 1"),
+        ("11.111.111/0001-11", "Cliente B", "OL67890", "Lucro Presumido", "Empresa B", "Responsável 2"),
+        ("22.222.222/0001-22", "Cliente C", "OL54321", "Lucro Real", "Empresa C", "Responsável 1"),
+        ("33.333.333/0001-33", "Cliente D", "OL09876", "Simples Nacional", "Empresa D", "Responsável 3"),
     ]
     
     atividades = [
@@ -468,15 +475,17 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
             campos = (
                 cliente[0], cliente[1], cliente[2], cliente[3], cliente[4], cliente[5], atividade,
                 "Grupo 1", "São Paulo", "01/2020", "Ativo", "email@cliente.com", "(11) 99999-9999", "Contato Financeiro",
-                "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), feito, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), hoje.strftime('%m/%Y')
+                "Sim", "Em dia", 2, "E-mail", "Empresa Admin", "Não", "Parcela 1", "Contrato 123",
+                "R$ 10.000,00", "Disponível", datetime.now().strftime('%Y-%m-%d %H:%M:%S'), hoje.strftime('%m/%Y'), feito
             )
             
             c.execute('''
                 INSERT INTO atividades (
-                    cnpj, razao_social, classificacao, tributacao, responsavel, atividade, 
+                    cnpj, razao_social, olaiseto_folio_cliente, tributacao, empresa_responsavel, responsavel, atividade, 
                     grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                    financeiro, contas_bancarias, forma_entrega, data_entrega, feito, data_criacao, mes_referencia
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    financeiro, quadro_contas_bancarias, forma_entrega, empresa_administrada, protesta_no_bancario, 
+                    parcela_perto, catrato, saldo_anterior, extrato, data_criacao, mes_referencia, feito
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', campos)
         
         conn.commit()
@@ -493,10 +502,11 @@ def adicionar_atividade(campos: Tuple) -> bool:
             
             c.execute('''
                 INSERT INTO atividades (
-                    cnpj, razao_social, classificacao, tributacao, responsavel, atividade, 
+                    cnpj, razao_social, olaiseto_folio_cliente, tributacao, empresa_responsavel, responsavel, atividade, 
                     grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                    financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, data_criacao
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    financeiro, quadro_contas_bancarias, forma_entrega, empresa_administrada, protesta_no_bancario, 
+                    parcela_perto, catrato, saldo_anterior, extrato, data_criacao, mes_referencia
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', campos_completos)
             conn.commit()
             st.session_state.atualizar_lista = True  # Flag para atualizar a lista
@@ -523,10 +533,11 @@ def adicionar_atividades_em_lote(dados: List[Tuple]) -> bool:
             try:
                 c.executemany('''
                     INSERT INTO atividades (
-                        cnpj, razao_social, classificacao, tributacao, responsavel, atividade, 
+                        cnpj, razao_social, olaiseto_folio_cliente, tributacao, empresa_responsavel, responsavel, atividade, 
                         grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                        financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, data_criacao
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        financeiro, quadro_contas_bancarias, forma_entrega, empresa_administrada, protesta_no_bancario, 
+                        parcela_perto, catrato, saldo_anterior, extrato, data_criacao, mes_referencia
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', dados_completos)
                 
                 conn.commit()
@@ -566,7 +577,7 @@ def marcar_feito(id: int, feito: bool) -> bool:
         st.error(f"Erro ao atualizar status: {e}")
         return False
 
-def get_atividades(filtro_mes: str = None, filtro_responsavel: str = None) -> List[Tuple]:
+def get_atividades(filtro_mes: str = None, filtro_responsavel: str = None, data_inicio: str = None, data_fim: str = None) -> List[Tuple]:
     """Retorna todas as atividades ordenadas por data de criação com filtros opcionais."""
     try:
         with get_db_connection() as conn:
@@ -581,6 +592,9 @@ def get_atividades(filtro_mes: str = None, filtro_responsavel: str = None) -> Li
             if filtro_responsavel and filtro_responsavel != "Todos":
                 conditions.append('responsavel = ?')
                 params.append(filtro_responsavel)
+            if data_inicio and data_fim:
+                conditions.append('data_criacao BETWEEN ? AND ?')
+                params.extend([data_inicio, data_fim])
             
             if conditions:
                 query += ' WHERE ' + ' AND '.join(conditions)
@@ -603,42 +617,8 @@ def get_responsaveis() -> List[str]:
     except sqlite3.Error as e:
         st.error(f"Erro ao recuperar responsáveis: {e}")
         return ["Todos"]
-        
-def get_entregas_gerais(start_date: str, end_date: str) -> pd.DataFrame:
-    """Retorna os dados de entregas gerais para um período selecionado."""
-    try:
-        with get_db_connection() as conn:
-            query = '''
-                SELECT 
-                    cnpj, 
-                    razao_social, 
-                    classificacao, 
-                    tributacao, 
-                    responsavel, 
-                    atividade, 
-                    grupo, 
-                    cidade, 
-                    desde, 
-                    status, 
-                    email, 
-                    telefone, 
-                    contato, 
-                    possui_folha, 
-                    financeiro, 
-                    contas_bancarias, 
-                    forma_entrega, 
-                    data_entrega
-                FROM atividades
-                WHERE data_entrega BETWEEN ? AND ?
-                ORDER BY data_entrega DESC
-            '''
-            df = pd.read_sql(query, conn, params=(start_date, end_date))
-            return df
-    except Exception as e:
-        st.error(f"Erro ao gerar dados de entregas gerais: {e}")
-        return pd.DataFrame()
 
-def get_dados_indicadores() -> pd.DataFrame:
+def get_dados_indicadores(data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
     """Retorna dados para os indicadores de entrega."""
     try:
         with get_db_connection() as conn:
@@ -649,15 +629,28 @@ def get_dados_indicadores() -> pd.DataFrame:
                     COUNT(*) as total,
                     (SUM(feito) * 100.0 / COUNT(*)) as percentual
                 FROM atividades
+            '''
+            params = []
+            
+            conditions = []
+            if data_inicio and data_fim:
+                conditions.append('data_criacao BETWEEN ? AND ?')
+                params.extend([data_inicio, data_fim])
+            
+            if conditions:
+                query += ' WHERE ' + ' AND '.join(conditions)
+            
+            query += '''
                 GROUP BY mes_referencia
                 ORDER BY SUBSTR(mes_referencia, 4) || SUBSTR(mes_referencia, 1, 2)
             '''
-            return pd.read_sql(query, conn)
+            
+            return pd.read_sql(query, conn, params=tuple(params) if params else None)
     except Exception as e:
         st.error(f"Erro ao gerar indicadores: {e}")
         return pd.DataFrame()
 
-def get_dados_responsaveis() -> pd.DataFrame:
+def get_dados_responsaveis(data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
     """Retorna dados para análise por responsável."""
     try:
         with get_db_connection() as conn:
@@ -668,12 +661,78 @@ def get_dados_responsaveis() -> pd.DataFrame:
                     COUNT(*) as total,
                     (SUM(feito) * 100.0 / COUNT(*)) as percentual
                 FROM atividades
+            '''
+            params = []
+            
+            conditions = []
+            if data_inicio and data_fim:
+                conditions.append('data_criacao BETWEEN ? AND ?')
+                params.extend([data_inicio, data_fim])
+            
+            if conditions:
+                query += ' WHERE ' + ' AND '.join(conditions)
+            
+            query += '''
                 GROUP BY responsavel
                 ORDER BY percentual DESC
             '''
-            return pd.read_sql(query, conn)
+            
+            return pd.read_sql(query, conn, params=tuple(params) if params else None)
     except Exception as e:
         st.error(f"Erro ao gerar dados por responsável: {e}")
+        return pd.DataFrame()
+
+def get_entregas_gerais(data_inicio: str = None, data_fim: str = None) -> pd.DataFrame:
+    """Retorna dados para a tabela de entregas gerais."""
+    try:
+        with get_db_connection() as conn:
+            query = '''
+                SELECT 
+                    id,
+                    cnpj AS "CNPJ",
+                    razao_social AS "RAZÃO SOCIAL",
+                    olaiseto_folio_cliente AS "OLAISETO FOLIO DO CLIENTE",
+                    tributacao AS "TRIBUTAÇÃO",
+                    empresa_responsavel AS "EMPRESA RESPONSÁVEL",
+                    responsavel AS "RESPONSÁVEL",
+                    atividade AS "ATIVIDADE",
+                    grupo AS "GRUPO",
+                    cidade AS "CIDADE",
+                    desde AS "DESDE",
+                    status AS "ESTATUS",
+                    email AS "E-MAIL",
+                    telefone AS "TELEFONE",
+                    contato AS "CONTATO",
+                    possui_folha AS "POSSUI FOLLIM",
+                    financeiro AS "FINANCEIRO",
+                    quadro_contas_bancarias AS "QUADR DE CONTAS BANCALAS",
+                    forma_entrega AS "FORMA DE ENTREVÊNCIA",
+                    empresa_administrada AS "EMPRESA ADMINISTRADA",
+                    protesta_no_bancario AS "PROFÉSITA NO BANCÁRIO",
+                    parcela_perto AS "PARCELA PERTO",
+                    catrato AS "CATRATO",
+                    saldo_anterior AS "SALANCI",
+                    extrato AS "EXTRATO",
+                    data_criacao AS "DATA CRIAÇÃO",
+                    mes_referencia AS "MÊS REFERÊNCIA",
+                    feito AS "CONCLUÍDO"
+                FROM atividades
+            '''
+            params = []
+            
+            conditions = []
+            if data_inicio and data_fim:
+                conditions.append('data_criacao BETWEEN ? AND ?')
+                params.extend([data_inicio, data_fim])
+            
+            if conditions:
+                query += ' WHERE ' + ' AND '.join(conditions)
+            
+            query += ' ORDER BY data_criacao DESC'
+            
+            return pd.read_sql(query, conn, params=tuple(params) if params else None)
+    except Exception as e:
+        st.error(f"Erro ao gerar dados de entregas gerais: {e}")
         return pd.DataFrame()
 
 # --- COMPONENTES DA INTERFACE ---
@@ -704,24 +763,13 @@ def upload_atividades():
             1. O arquivo deve conter as colunas obrigatórias:
                - `CNPJ` (texto)
                - `Razão Social` (texto)
-               - `Classificação do Cliente` (texto)
+               - `OLAISETO FOLIO DO CLIENTE` (texto)
                - `Tributação` (texto)
                - `Responsável` (texto)
-               - `Atividade` (texto)
-               - `Grupo` (texto)
-               - `Cidade` (texto)
-               - `Desde` (texto)
-               - `Status` (texto)
-               - `E-mail` (texto)
-               - `Telefone` (texto)
-               - `Contato` (texto)
-               - `Possui Folha` (texto)
-               - `Financeiro` (texto)
-               - `Contas Bancárias` (número inteiro)
-               - `Forma de Entrega` (texto)
-               - `Data de Entrega` (data no formato YYYY-MM-DD)
-               - `Mês de Referência` (texto no formato MM/YYYY)
-            2. Salve o arquivo no formato .xlsx ou .xls
+            2. Você pode incluir colunas adicionais se desejar
+            3. Salve o arquivo no formato .xlsx ou .xls
+            
+            **Dica:** Baixe nosso [modelo de planilha](#) para garantir o formato correto.
         """)
     
     uploaded_file = st.file_uploader(
@@ -736,33 +784,12 @@ def upload_atividades():
             # Lê o arquivo Excel
             df = pd.read_excel(uploaded_file)
             
-            # Mapeia os nomes das colunas da imagem para o banco de dados
-            column_mapping = {
-                'CNPJ': 'cnpj',
-                'RAZÃO SOCIAL': 'razao_social',
-                'CLASSIFICAÇÃO DO CLIENTE': 'classificacao',
-                'TRIBUTAÇÃO': 'tributacao',
-                'RESPONSÁVEL': 'responsavel',
-                'ATIVIDADE': 'atividade',
-                'GRUPO': 'grupo',
-                'CIDADE': 'cidade',
-                'DESDE': 'desde',
-                'STATUS': 'status',
-                'E-MAIL': 'email',
-                'TELEFONE': 'telefone',
-                'CONTATO': 'contato',
-                'POSSUI FOLHA': 'possui_folha',
-                'FINANCEIRO': 'financeiro',
-                'CONTAS BANCÁRIAS': 'contas_bancarias',
-                'FORMA DE ENTREGA': 'forma_entrega',
-                'DATA DE ENTREGA': 'data_entrega',
-                'MÊS DE REFERÊNCIA': 'mes_referencia' # Se você tiver esta coluna no seu arquivo
-            }
-
-            # Garante que as colunas existam no dataframe, usando um valor padrão se não
-            for col_excel, col_db in column_mapping.items():
-                if col_excel not in df.columns:
-                    df[col_excel] = None # ou um valor padrão adequado
+            # Verifica colunas obrigatórias
+            required_columns = {'CNPJ', 'Razão Social', 'OLAISETO FOLIO DO CLIENTE', 'Tributação', 'Responsável'}
+            if not required_columns.issubset(df.columns):
+                missing_cols = required_columns - set(df.columns)
+                st.error(f"Colunas obrigatórias faltando: {', '.join(missing_cols)}")
+                return
             
             # Mostra pré-visualização
             st.markdown("**Pré-visualização dos dados (5 primeiras linhas):**")
@@ -772,25 +799,31 @@ def upload_atividades():
             atividades = []
             for _, row in df.iterrows():
                 atividades.append((
-                    row['CNPJ'],
-                    row['RAZÃO SOCIAL'],
-                    row['CLASSIFICAÇÃO DO CLIENTE'],
-                    row['TRIBUTAÇÃO'],
-                    row['RESPONSÁVEL'],
-                    row['ATIVIDADE'],
-                    row['GRUPO'],
-                    row['CIDADE'],
-                    row['DESDE'],
-                    row['STATUS'],
-                    row['E-MAIL'],
-                    row['TELEFONE'],
-                    row['CONTATO'],
-                    row['POSSUI FOLHA'],
-                    row['FINANCEIRO'],
-                    row['CONTAS BANCÁRIAS'],
-                    row['FORMA DE ENTREGA'],
-                    row['DATA DE ENTREGA'],
-                    row['MÊS DE REFERÊNCIA']
+                    row.get('CNPJ', ''),  # cnpj
+                    row.get('Razão Social', ''),  # razao_social
+                    row.get('OLAISETO FOLIO DO CLIENTE', ''),  # olaiseto_folio_cliente
+                    row.get('Tributação', 'Simples Nacional'),  # tributacao
+                    row.get('Empresa Responsável', ''),  # empresa_responsavel
+                    row.get('Responsável', ''),  # responsavel
+                    row.get('Atividade', 'Atividade cadastrada em lote'),  # atividade
+                    row.get('Grupo', ''),  # grupo
+                    row.get('Cidade', ''),  # cidade
+                    row.get('Desde', datetime.now().strftime('%Y-%m-%d')),  # desde
+                    row.get('Status', 'Ativo'),  # status
+                    row.get('E-mail', ''),  # email
+                    row.get('Telefone', ''),  # telefone
+                    row.get('Contato', ''),  # contato
+                    row.get('Possui Folha', 'Sim'),  # possui_folha
+                    row.get('Financeiro', 'Em dia'),  # financeiro
+                    row.get('Quadro de Contas Bancárias', 1),  # quadro_contas_bancarias
+                    row.get('Forma de Entrega', 'E-mail'),  # forma_entrega
+                    row.get('Empresa Administrada', ''),  # empresa_administrada
+                    row.get('Protesta no Bancário', 'Não'),  # protesta_no_bancario
+                    row.get('Parcela Perto', ''),  # parcela_perto
+                    row.get('Contrato', ''),  # catrato
+                    row.get('Saldo Anterior', ''),  # saldo_anterior
+                    row.get('Extrato', ''),  # extrato
+                    datetime.now().strftime('%m/%Y')  # mes_referencia
                 ))
             
             # Botão para confirmar importação
@@ -811,39 +844,55 @@ def cadastro_atividade():
     
     with tab1:
         with st.form("nova_atividade", clear_on_submit=True):
-            st.markdown('<div class="form-label">Informações Básicas</div>', unsafe_allow_html=True)
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
+            
             with col1:
-                cnpj = st.text_input("CNPJ", placeholder="00.000.000/0001-00")
-                razao_social = st.text_input("Razão Social", placeholder="Razão social completa")
-                classificacao = st.selectbox("Classificação", ["A", "B", "C", "D"])
-                
-            with col2:
-                tributacao = st.selectbox("Tributação", ["Simples Nacional", "Lucro Presumido", "Lucro Real"])
+                st.markdown('<div class="form-label">Informações Básicas</div>', unsafe_allow_html=True)
+                cnpj = st.text_input("CNPJ*", placeholder="00.000.000/0000-00")
+                razao_social = st.text_input("Razão Social*", placeholder="Razão social completa")
+                olaiseto_folio = st.text_input("OLAISETO FOLIO DO CLIENTE", placeholder="Código do cliente")
+                tributacao = st.selectbox("Tributação*", ["Simples Nacional", "Lucro Presumido", "Lucro Real"])
+                empresa_responsavel = st.text_input("Empresa Responsável", placeholder="Nome da empresa responsável")
                 responsavel = st.text_input("Responsável*", placeholder="Nome do responsável")
                 atividade = st.text_input("Atividade*", placeholder="Descrição da atividade")
-
-            with col3:
+                
+            with col2:
+                st.markdown('<div class="form-label">Informações Adicionais</div>', unsafe_allow_html=True)
                 grupo = st.text_input("Grupo", placeholder="Grupo do cliente")
                 cidade = st.text_input("Cidade", placeholder="Cidade do cliente")
                 desde = st.date_input("Cliente desde", value=datetime.now())
-            
-            st.markdown('<div class="form-label">Detalhes de Contato e Financeiros</div>', unsafe_allow_html=True)
-            col4, col5, col6 = st.columns(3)
-            with col4:
                 status = st.selectbox("Status", ["Ativo", "Inativo", "Potencial", "Perdido"])
                 email = st.text_input("E-mail", placeholder="E-mail de contato")
                 telefone = st.text_input("Telefone", placeholder="Telefone de contato")
+                contato = st.text_input("Contato", placeholder="Nome do contato")
                 
-            with col5:
-                contato = st.text_input("Contato Financeiro", placeholder="Nome do contato")
+            st.markdown('<div class="form-label">Detalhes Financeiros</div>', unsafe_allow_html=True)
+            col3, col4, col5 = st.columns(3)
+            
+            with col3:
                 possui_folha = st.selectbox("Possui Folha?", ["Sim", "Não", "Não se aplica"])
                 financeiro = st.text_input("Financeiro", placeholder="Informações financeiras")
-
-            with col6:
-                contas_bancarias = st.number_input("Contas Bancárias", min_value=0, value=1)
+                
+            with col4:
+                quadro_contas_bancarias = st.number_input("Quadro de Contas Bancárias", min_value=0, value=1)
                 forma_entrega = st.selectbox("Forma de Entrega", ["E-mail", "Correio", "Pessoalmente", "Outros"])
-                data_entrega = st.date_input("Data de Entrega", value=datetime.now())
+                
+            with col5:
+                empresa_administrada = st.text_input("Empresa Administrada", placeholder="Nome da empresa administrada")
+                protesta_no_bancario = st.selectbox("Protesta no Bancário?", ["Sim", "Não"])
+                
+            st.markdown('<div class="form-label">Outras Informações</div>', unsafe_allow_html=True)
+            col6, col7, col8 = st.columns(3)
+            
+            with col6:
+                parcela_perto = st.text_input("Parcela Perto", placeholder="Informações sobre parcelas")
+                
+            with col7:
+                catrato = st.text_input("Contrato", placeholder="Número do contrato")
+                
+            with col8:
+                saldo_anterior = st.text_input("Saldo Anterior", placeholder="Saldo anterior")
+                extrato = st.text_input("Extrato", placeholder="Extrato disponível")
             
             mes_referencia = st.selectbox("Mês de Referência", [
                 f"{mes:02d}/{ano}" 
@@ -854,11 +903,12 @@ def cadastro_atividade():
             st.markdown("<small>Campos marcados com * são obrigatórios</small>", unsafe_allow_html=True)
             
             if st.form_submit_button("Adicionar Atividade", use_container_width=True, type="primary"):
-                if responsavel and atividade:
+                if cnpj and razao_social and responsavel and atividade:
                     campos = (
-                        cnpj, razao_social, classificacao, tributacao, responsavel, atividade,
+                        cnpj, razao_social, olaiseto_folio, tributacao, empresa_responsavel, responsavel, atividade,
                         grupo, cidade, desde.strftime('%Y-%m-%d'), status, email, telefone, contato,
-                        possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega.strftime('%Y-%m-%d'), mes_referencia
+                        possui_folha, financeiro, quadro_contas_bancarias, forma_entrega, empresa_administrada,
+                        protesta_no_bancario, parcela_perto, catrato, saldo_anterior, extrato, mes_referencia
                     )
                     if adicionar_atividade(campos):
                         st.success("Atividade cadastrada com sucesso!", icon="✅")
@@ -887,8 +937,10 @@ def lista_atividades():
         responsaveis = get_responsaveis()
         responsavel_selecionado = st.selectbox("Filtrar por responsável:", responsaveis)
     
-    atividades = get_atividades(mes_selecionado if mes_selecionado != "Todos" else None,
-                              responsavel_selecionado if responsavel_selecionado != "Todos" else None)
+    atividades = get_atividades(
+        mes_selecionado if mes_selecionado != "Todos" else None,
+        responsavel_selecionado if responsavel_selecionado != "Todos" else None
+    )
     
     if not atividades:
         st.info("Nenhuma atividade encontrada com os filtros selecionados.", icon="ℹ️")
@@ -896,10 +948,10 @@ def lista_atividades():
     
     for row in atividades:
         try:
-            (id, cnpj, razao_social, classificacao, tributacao, responsavel, 
-             atividade, grupo, cidade, desde, status, email, telefone, contato, 
-             possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega, 
-             feito, data_criacao, mes_referencia) = row
+            (id, cnpj, razao_social, olaiseto_folio, tributacao, empresa_responsavel, responsavel, 
+             atividade, grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
+             financeiro, quadro_contas_bancarias, forma_entrega, empresa_administrada, protesta_no_bancario,
+             parcela_perto, catrato, saldo_anterior, extrato, data_criacao, mes_referencia, feito) = row
         except ValueError as e:
             st.error(f"Erro ao processar atividade: {e}")
             continue
@@ -911,13 +963,21 @@ def lista_atividades():
             
             with col1:
                 st.markdown(f"**CNPJ:** {cnpj}")
-                st.markdown(f"**Responsável:** {responsavel}")
                 st.markdown(f"**Razão Social:** {razao_social}")
-                st.markdown(f"**Classificação/Tributação:** {classificacao} / {tributacao}")
+                st.markdown(f"**OLAISETO FOLIO:** {olaiseto_folio}")
+                st.markdown(f"**Tributação:** {tributacao}")
+                st.markdown(f"**Empresa Responsável:** {empresa_responsavel}")
+                st.markdown(f"**Responsável:** {responsavel}")
                 st.markdown(f"**Grupo/Cidade:** {grupo} / {cidade}")
                 st.markdown(f"**Contato:** {contato} ({telefone} - {email})")
-                st.markdown(f"**Financeiro:** {financeiro} | Folha: {possui_folha} | Contas: {contas_bancarias}")
-                st.markdown(f"**Entrega:** {forma_entrega} em {data_entrega}")
+                st.markdown(f"**Financeiro:** {financeiro} | Folha: {possui_folha} | Contas: {quadro_contas_bancarias}")
+                st.markdown(f"**Entrega:** {forma_entrega}")
+                st.markdown(f"**Empresa Administrada:** {empresa_administrada}")
+                st.markdown(f"**Protesta no Bancário:** {protesta_no_bancario}")
+                st.markdown(f"**Parcela Perto:** {parcela_perto}")
+                st.markdown(f"**Contrato:** {catrato}")
+                st.markdown(f"**Saldo Anterior:** {saldo_anterior}")
+                st.markdown(f"**Extrato:** {extrato}")
                 st.markdown(f"**Mês Referência:** {mes_referencia}")
                 st.markdown(f"**Data de Criação:** {data_criacao}")
                 
@@ -936,40 +996,36 @@ def lista_atividades():
             
             st.markdown('</div>', unsafe_allow_html=True)
 
-def mostrar_entregas_gerais():
-    """Exibe a tabela de entregas gerais com filtro de período."""
-    st.markdown('<div class="header">📦 Entregas Gerais</div>', unsafe_allow_html=True)
-
-    today = datetime.now()
-    start_date = st.date_input("Data de Início", value=today - timedelta(days=30))
-    end_date = st.date_input("Data de Fim", value=today)
-
-    if start_date > end_date:
-        st.error("A data de início não pode ser posterior à data de fim.")
-        return
-
-    df = get_entregas_gerais(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
-    
-    if df.empty:
-        st.info("Nenhuma entrega encontrada no período selecionado.")
-    else:
-        st.dataframe(df, use_container_width=True)
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Baixar como CSV",
-            data=csv,
-            file_name=f'entregas_gerais_{start_date}_{end_date}.csv',
-            mime='text/csv',
-        )
-
 def mostrar_indicadores():
     """Exibe os indicadores de entrega."""
     st.markdown('<div class="header">📊 Indicadores de Entrega</div>', unsafe_allow_html=True)
     
-    tab1, tab2 = st.tabs(["📅 Por Mês", "👤 Por Responsável"])
+    tab1, tab2, tab3 = st.tabs(["📅 Por Mês", "👤 Por Responsável", "📋 Entregas Gerais"])
     
     with tab1:
-        dados_mes = get_dados_indicadores()
+        st.subheader("Selecionar Período")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            data_inicio = st.date_input(
+                "Data Início",
+                value=datetime.now() - relativedelta(months=3),
+                min_value=datetime(2023, 1, 1),
+                max_value=datetime.now()
+            )
+        
+        with col2:
+            data_fim = st.date_input(
+                "Data Fim",
+                value=datetime.now(),
+                min_value=datetime(2023, 1, 1),
+                max_value=datetime.now()
+            )
+        
+        dados_mes = get_dados_indicadores(
+            data_inicio.strftime('%Y-%m-%d'),
+            data_fim.strftime('%Y-%m-%d')
+        )
         
         if dados_mes.empty:
             st.warning("Não há dados suficientes para exibir os indicadores por mês.")
@@ -1027,7 +1083,31 @@ def mostrar_indicadores():
             )
     
     with tab2:
-        dados_responsaveis = get_dados_responsaveis()
+        st.subheader("Selecionar Período")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            data_inicio = st.date_input(
+                "Data Início",
+                value=datetime.now() - relativedelta(months=3),
+                min_value=datetime(2023, 1, 1),
+                max_value=datetime.now(),
+                key="data_inicio_resp"
+            )
+        
+        with col2:
+            data_fim = st.date_input(
+                "Data Fim",
+                value=datetime.now(),
+                min_value=datetime(2023, 1, 1),
+                max_value=datetime.now(),
+                key="data_fim_resp"
+            )
+        
+        dados_responsaveis = get_dados_responsaveis(
+            data_inicio.strftime('%Y-%m-%d'),
+            data_fim.strftime('%Y-%m-%d')
+        )
         
         if dados_responsaveis.empty:
             st.warning("Não há dados suficientes para exibir os indicadores por responsável.")
@@ -1108,6 +1188,43 @@ def mostrar_indicadores():
                 use_container_width=True,
                 height=400
             )
+    
+    with tab3:
+        st.subheader("Selecionar Período")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            data_inicio = st.date_input(
+                "Data Início",
+                value=datetime.now() - relativedelta(months=3),
+                min_value=datetime(2023, 1, 1),
+                max_value=datetime.now(),
+                key="data_inicio_geral"
+            )
+        
+        with col2:
+            data_fim = st.date_input(
+                "Data Fim",
+                value=datetime.now(),
+                min_value=datetime(2023, 1, 1),
+                max_value=datetime.now(),
+                key="data_fim_geral"
+            )
+        
+        entregas_gerais = get_entregas_gerais(
+            data_inicio.strftime('%Y-%m-%d'),
+            data_fim.strftime('%Y-%m-%d')
+        )
+        
+        if entregas_gerais is None or entregas_gerais.empty:
+            st.warning("Não há dados suficientes para exibir as entregas gerais.")
+        else:
+            st.subheader("Tabela de Entregas Gerais")
+            st.dataframe(
+                entregas_gerais,
+                use_container_width=True,
+                height=600
+            )
 
 def mostrar_sidebar():
     """Exibe a barra lateral com estatísticas e próximas entregas."""
@@ -1144,20 +1261,20 @@ def mostrar_sidebar():
                 # Próximas entregas
                 hoje = datetime.now().strftime('%Y-%m-%d')
                 c.execute('''
-                    SELECT razao_social, atividade, data_entrega 
+                    SELECT razao_social, atividade, data_criacao 
                     FROM atividades 
-                    WHERE data_entrega >= ? AND feito = 0
-                    ORDER BY data_entrega ASC
+                    WHERE data_criacao >= ? AND feito = 0
+                    ORDER BY data_criacao ASC
                     LIMIT 5
                 ''', (hoje,))
                 proximas = c.fetchall()
                 
                 if proximas:
                     st.markdown("### Próximas Entregas")
-                    for razao_social, atividade, data in proximas:
+                    for cliente, atividade, data in proximas:
                         st.markdown(f"""
                             <div class="proxima-entrega">
-                                <strong>{razao_social}</strong><br>
+                                <strong>{cliente}</strong><br>
                                 {atividade}<br>
                                 <small>📅 {data}</small>
                             </div>
@@ -1177,7 +1294,7 @@ def main():
     if not st.session_state.logged_in:
         login_section()
     else:
-        tab1, tab2, tab3, tab4 = st.tabs(["📋 Lista de Atividades", "📝 Cadastrar Atividades", "📊 Indicadores de Entrega", "📦 Entregas Gerais"])
+        tab1, tab2, tab3 = st.tabs(["📋 Lista de Atividades", "📝 Cadastrar Atividades", "📊 Indicadores de Entrega"])
         
         with tab1:
             lista_atividades()
@@ -1187,12 +1304,8 @@ def main():
         
         with tab3:
             mostrar_indicadores()
-
-        with tab4:
-            mostrar_entregas_gerais()
-
+        
         mostrar_sidebar()
 
 if __name__ == "__main__":
     main()
-
