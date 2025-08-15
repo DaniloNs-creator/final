@@ -691,7 +691,7 @@ def get_atividades(filtro_mes: str = None, filtro_responsavel: str = None) -> Li
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
-            query = 'SELECT * FROM actividades'
+            query = 'SELECT * FROM atividades'
             params = []
             
             conditions = []
@@ -1271,3 +1271,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
