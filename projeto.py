@@ -184,32 +184,9 @@ def load_css():
                 box-shadow: 0 15px 30px rgba(0,0,0,0.15);
             }}
             
-            /* Estilo para atividades pendentes */
-            .pending {{
-                background-color: rgba(231, 76, 60, 0.1);
-                border-left: 5px solid #e74c3c;
-                position: relative;
-                overflow: hidden;
-            }}
-            
-            .pending::after {{
-                content: "❌ PENDENTE";
-                position: absolute;
-                top: 10px;
-                right: -30px;
-                background: #e74c3c;
-                color: white;
-                padding: 3px 30px;
-                font-size: 0.7rem;
-                font-weight: bold;
-                transform: rotate(45deg);
-                box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-            }}
-            
-            /* Estilo para atividades concluídas */
             .completed {{
                 background-color: rgba(46, 204, 113, 0.1);
-                border-left: 5px solid #2ecc71;
+                border-left: 5px solid var(--success-color);
                 position: relative;
                 overflow: hidden;
             }}
@@ -219,7 +196,7 @@ def load_css():
                 position: absolute;
                 top: 10px;
                 right: -30px;
-                background: #2ecc71;
+                background: var(--success-color);
                 color: white;
                 padding: 3px 30px;
                 font-size: 0.7rem;
@@ -709,6 +686,77 @@ def marcar_feito(id: int, feito: bool) -> bool:
         st.error(f"Erro ao atualizar status: {e}")
         return False
 
+def atualizar_data_entrega(id: int, nova_data: str) -> bool:
+    """Atualiza a data de entrega de uma atividade."""
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute('UPDATE atividades SET data_entrega = ? WHERE id = ?', (nova_data, id))
+            conn.commit()
+            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+            return c.rowcount > 0
+    except sqlite3.Error as e:
+        st.error(f"Erro ao atualizar data de entrega: {e}")
+        return False
+
+def atualizar_mes_referencia(id: int, novo_mes: str) -> bool:
+    """Atualiza o mês de referência de uma atividade."""
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute('UPDATE atividades SET mes_referencia = ? WHERE id = ?', (novo_mes, id))
+            conn.commit()
+            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+            return c.rowcount > 0
+    except sqlite3.Error as e:
+        st.error(f"Erro ao atualizar mês de referência: {e}")
+        return False
+
+def processar_proximo_mes(id: int) -> bool:
+    """Atualiza a data de entrega e o mês de referência para o próximo mês."""
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            
+            # Obter a atividade atual
+            c.execute('SELECT data_entrega, mes_referencia FROM atividades WHERE id = ?', (id,))
+            atividade = c.fetchone()
+            
+            if not atividade:
+                return False
+                
+            data_entrega = atividade[0]
+            mes_referencia = atividade[1]
+            
+            # Converter para objetos de data
+            if data_entrega:
+                data_obj = datetime.strptime(data_entrega, '%Y-%m-%d')
+                nova_data = (data_obj.replace(day=1) + timedelta(days=32)).replace(day=data_obj.day).strftime('%Y-%m-%d')
+            else:
+                nova_data = None
+            
+            if mes_referencia:
+                mes, ano = mes_referencia.split('/')
+                mes_obj = datetime.strptime(f"01/{mes}/{ano}", '%d/%m/%Y')
+                novo_mes_obj = mes_obj + timedelta(days=32)
+                novo_mes = novo_mes_obj.strftime('%m/%Y')
+            else:
+                novo_mes = None
+            
+            # Atualizar no banco de dados
+            c.execute('''
+                UPDATE atividades 
+                SET data_entrega = ?, mes_referencia = ? 
+                WHERE id = ?
+            ''', (nova_data, novo_mes, id))
+            
+            conn.commit()
+            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+            return c.rowcount > 0
+    except Exception as e:
+        st.error(f"Erro ao processar próximo mês: {e}")
+        return False
+
 def get_atividades(filtro_mes: str = None, filtro_responsavel: str = None) -> List[Tuple]:
     """Retorna todas as atividades ordenadas por data de criação com filtros opcionais."""
     try:
@@ -997,12 +1045,8 @@ def lista_atividades():
         feito = bool(row[6])
         data_criacao = row[7]
         
-        # Definindo a classe CSS com base no status
-        status_class = "completed" if feito else "pending"
-        status_text = "✅ CONCLUÍDO" if feito else "❌ PENDENTE"
-        
         with st.expander(f"{'✅' if feito else '📌'} {cliente} - {responsavel} - {atividade} - {mes_referencia}", expanded=False):
-            st.markdown(f'<div class="card {status_class}">', unsafe_allow_html=True)
+            st.markdown(f'<div class="card{" completed" if feito else ""}">', unsafe_allow_html=True)
             
             col1, col2 = st.columns([3, 1])
             
@@ -1010,8 +1054,39 @@ def lista_atividades():
                 st.markdown(f"**Cliente:** {cliente}")
                 st.markdown(f"**Responsável:** {responsavel}")
                 st.markdown(f"**Atividade:** {atividade}")
-                st.markdown(f"**Data de Entrega:** {data_entrega}")
-                st.markdown(f"**Mês Referência:** {mes_referencia}")
+                
+                # Edição da data de entrega
+                nova_data = st.date_input(
+                    "Data de Entrega",
+                    value=datetime.strptime(data_entrega, '%Y-%m-%d') if data_entrega else datetime.now(),
+                    key=f"data_{id}"
+                )
+                if st.button("Atualizar Data", key=f"update_data_{id}"):
+                    if atualizar_data_entrega(id, nova_data.strftime('%Y-%m-%d')):
+                        st.success("Data de entrega atualizada com sucesso!")
+                        time.sleep(1)
+                        st.rerun()
+                
+                # Edição do mês de referência
+                novo_mes = st.selectbox(
+                    "Mês de Referência",
+                    [f"{mes:02d}/{ano}" for ano in range(2023, 2026) for mes in range(1, 13)],
+                    index=[f"{mes:02d}/{ano}" for ano in range(2023, 2026) for mes in range(1, 13)].index(mes_referencia) if mes_referencia else 0,
+                    key=f"mes_{id}"
+                )
+                if st.button("Atualizar Mês", key=f"update_mes_{id}"):
+                    if atualizar_mes_referencia(id, novo_mes):
+                        st.success("Mês de referência atualizado com sucesso!")
+                        time.sleep(1)
+                        st.rerun()
+                
+                # Botão para processar próximo mês
+                if st.button("Processar Próximo Mês", key=f"process_{id}", type="primary"):
+                    if processar_proximo_mes(id):
+                        st.success("Atividade atualizada para o próximo mês!")
+                        time.sleep(1)
+                        st.rerun()
+                
                 st.markdown(f"**Data de Criação:** {data_criacao}")
                 
             with col2:
@@ -1022,21 +1097,6 @@ def lista_atividades():
                     key=f"feito_{id}",
                     on_change=lambda id=id, feito=feito: marcar_feito(id, not feito)
                 )
-                
-                # Exibe o status atual com estilo
-                st.markdown(f"""
-                    <div style="
-                        background-color: {'#2ecc71' if feito else '#e74c3c'};
-                        color: white;
-                        padding: 0.5rem;
-                        border-radius: 4px;
-                        text-align: center;
-                        font-weight: bold;
-                        margin: 0.5rem 0;
-                    ">
-                        {status_text}
-                    </div>
-                """, unsafe_allow_html=True)
                 
                 if st.button("Excluir", key=f"del_{id}", use_container_width=True):
                     if excluir_atividade(id):
