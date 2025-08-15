@@ -577,59 +577,80 @@ def processador_txt():
             st.info("Tente novamente ou verifique o arquivo.")
 
 # =============================================
-# FUNÇÕES DO PROCESSADOR DE ARQUIVOS XML (NF-e)
+# FUNÇÕES DO PROCESSADOR DE XML (NF-e)
 # =============================================
 
-def extrair_dados_xml(xml_file):
-    """Extrai dados relevantes de um arquivo XML de NF-e modelo 55"""
-    try:
-        tree = ET.parse(xml_file)
-        root = tree.getroot()
-        ns = {'nfe': 'http://www.portalfiscal.inf.br/nfe'}
-
-        # Extrair dados do destinatário
-        dest = root.find('.//nfe:dest', ns)
-        nome_dest = dest.find('nfe:xNome', ns).text if dest is not None and dest.find('nfe:xNome', ns) is not None else None
-        uf_dest = dest.find('nfe:enderDest/nfe:UF', ns).text if dest is not None and dest.find('nfe:enderDest/nfe:UF', ns) is not None else None
-
-        # Extrair valores de ICMS ST e DIFAL
-        icms_st = root.find('.//nfe:ICMS/nfe:ICMS10/nfe:vICMSST', ns)
-        icms_difal = root.find('.//nfe:ICMSUFDest/nfe:vICMSUFDest', ns)
-
-        dados = {
-            'Nome Destinatário': nome_dest,
-            'UF Destinatário': uf_dest,
-            'Valor ICMS ST': float(icms_st.text) if icms_st is not None else None,
-            'Valor ICMS DIFAL': float(icms_difal.text) if icms_difal is not None else None
-        }
-
-        return dados
-    except Exception as e:
-        st.error(f"Erro ao processar arquivo {xml_file.name}: {str(e)}")
-        return None
-
 def processador_xml():
-    st.title("📄 Processador de Arquivos XML (NF-e)")
+    st.title("📄 Processador de XML (NF-e Modelo 55)")
     st.markdown("""
     <div class="card">
-        Extrai informações de ICMS ST e DIFAL de arquivos XML de NF-e modelo 55. 
-        Carregue os arquivos XML para extrair os dados relevantes.
+        Extrai informações de ICMS ST e DIFAL de arquivos XML de NF-e modelo 55.
     </div>
     """, unsafe_allow_html=True)
+
+    def extrair_dados_xml(xml_file):
+        """Extrai os dados relevantes do arquivo XML da NF-e"""
+        try:
+            tree = ET.parse(xml_file)
+            root = tree.getroot()
+            
+            # Namespace da NF-e
+            ns = {'nfe': 'http://www.portalfiscal.inf.br/nfe'}
+            
+            # Informações do destinatário
+            dest = root.find('.//nfe:dest', ns)
+            nome_dest = dest.find('nfe:xNome', ns).text if dest is not None and dest.find('nfe:xNome', ns) is not None else None
+            uf_dest = dest.find('nfe:enderDest/nfe:UF', ns).text if dest is not None and dest.find('nfe:enderDest/nfe:UF', ns) is not None else None
+            
+            # Número da NF
+            nfe_num = root.find('.//nfe:nNF', ns).text if root.find('.//nfe:nNF', ns) is not None else None
+            
+            # Valor total da NF
+            v_nf = root.find('.//nfe:vNF', ns).text if root.find('.//nfe:vNF', ns) is not None else None
+            
+            # Totais de ICMS
+            icms_tot = root.find('.//nfe:ICMSTot', ns)
+            
+            # Valores de ICMS ST e DIFAL
+            v_icms_st = icms_tot.find('nfe:vICMSST', ns).text if icms_tot is not None and icms_tot.find('nfe:vICMSST', ns) is not None else None
+            v_icms_uf_dest = icms_tot.find('nfe:vICMSUFDest', ns).text if icms_tot is not None and icms_tot.find('nfe:vICMSUFDest', ns) is not None else None
+            
+            # Formatar os valores numéricos
+            try:
+                v_icms_st = float(v_icms_st) if v_icms_st else None
+                v_icms_uf_dest = float(v_icms_uf_dest) if v_icms_uf_dest else None
+                v_nf = float(v_nf) if v_nf else None
+            except (ValueError, TypeError):
+                v_icms_st = None
+                v_icms_uf_dest = None
+                v_nf = None
+            
+            dados = {
+                'Número NF': nfe_num,
+                'Nome Destinatário': nome_dest,
+                'UF Destinatário': uf_dest,
+                'Valor Total NF': v_nf,
+                'Valor ICMS ST': v_icms_st,
+                'Valor ICMS DIFAL': v_icms_uf_dest
+            }
+            
+            return dados
+        
+        except Exception as e:
+            st.error(f"Erro ao processar o arquivo XML: {str(e)}")
+            return None
 
     # Upload de múltiplos arquivos XML
     uploaded_files = st.file_uploader(
         "Selecione os arquivos XML de NF-e", 
         type=['xml'], 
-        accept_multiple_files=True,
-        help="Selecione um ou mais arquivos XML de NF-e modelo 55"
+        accept_multiple_files=True
     )
 
     if uploaded_files:
         dados_icms_st = []
         dados_icms_difal = []
-        arquivos_com_erro = []
-
+        
         for uploaded_file in uploaded_files:
             # Salva temporariamente o arquivo para processamento
             with open(uploaded_file.name, "wb") as f:
@@ -638,62 +659,85 @@ def processador_xml():
             # Processa o arquivo XML
             dados = extrair_dados_xml(uploaded_file.name)
             
+            if dados:
+                # Adiciona aos dados de ICMS ST se houver valor
+                if dados['Valor ICMS ST'] is not None:
+                    dados_icms_st.append(dados)
+                
+                # Adiciona aos dados de ICMS DIFAL se houver valor
+                if dados['Valor ICMS DIFAL'] is not None:
+                    dados_icms_difal.append(dados)
+            
             # Remove o arquivo temporário
             os.remove(uploaded_file.name)
+        
+        # Exibe os resultados em abas separadas
+        if dados_icms_st or dados_icms_difal:
+            tab1, tab2 = st.tabs(["ICMS ST", "ICMS DIFAL"])
             
-            if dados is None:
-                arquivos_com_erro.append(uploaded_file.name)
-                continue
+            with tab1:
+                if dados_icms_st:
+                    st.subheader("Notas com ICMS ST")
+                    df_st = pd.DataFrame(dados_icms_st)
+                    
+                    # Calcula totais
+                    total_st = df_st['Valor ICMS ST'].sum()
+                    total_nf_st = df_st['Valor Total NF'].sum()
+                    
+                    # Formata os valores
+                    df_st['Valor ICMS ST'] = df_st['Valor ICMS ST'].apply(lambda x: f"R$ {x:,.2f}" if pd.notnull(x) else "")
+                    df_st['Valor Total NF'] = df_st['Valor Total NF'].apply(lambda x: f"R$ {x:,.2f}" if pd.notnull(x) else "")
+                    
+                    st.dataframe(df_st, use_container_width=True)
+                    
+                    # Mostra totais
+                    col1, col2 = st.columns(2)
+                    col1.metric("Total ICMS ST", f"R$ {total_st:,.2f}")
+                    col2.metric("Total Valor NF", f"R$ {total_nf_st:,.2f}")
+                    
+                    # Botão para download
+                    csv_st = df_st.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+                    st.download_button(
+                        label="⬇️ Baixar dados ICMS ST (CSV)",
+                        data=csv_st,
+                        file_name="icms_st.csv",
+                        mime="text/csv"
+                    )
+                else:
+                    st.info("Nenhuma nota com ICMS ST encontrada.", icon="ℹ️")
             
-            # Adiciona aos conjuntos de dados apropriados
-            if dados['Valor ICMS ST'] is not None:
-                dados_icms_st.append(dados)
-            if dados['Valor ICMS DIFAL'] is not None:
-                dados_icms_difal.append(dados)
-
-        # Mostra estatísticas
-        st.success(f"""
-        **Processamento concluído!**  
-        ✔️ Arquivos processados: {len(uploaded_files)}  
-        ✔️ Arquivos com ICMS ST: {len(dados_icms_st)}  
-        ✔️ Arquivos com ICMS DIFAL: {len(dados_icms_difal)}  
-        ❌ Arquivos com erro: {len(arquivos_com_erro)}
-        """)
-
-        if arquivos_com_erro:
-            with st.expander("Ver arquivos com erro", expanded=False):
-                st.write("Os seguintes arquivos não puderam ser processados corretamente:")
-                for arquivo in arquivos_com_erro:
-                    st.write(f"- {arquivo}")
-
-        # Exibe tabelas com os dados extraídos
-        if dados_icms_st:
-            st.subheader("Tabela de ICMS ST")
-            df_st = pd.DataFrame(dados_icms_st)
-            st.dataframe(df_st)
-            
-            # Botão para download dos dados de ICMS ST
-            csv_st = df_st.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="⬇️ Baixar dados de ICMS ST",
-                data=csv_st,
-                file_name="icms_st.csv",
-                mime="text/csv"
-            )
-
-        if dados_icms_difal:
-            st.subheader("Tabela de ICMS DIFAL")
-            df_difal = pd.DataFrame(dados_icms_difal)
-            st.dataframe(df_difal)
-            
-            # Botão para download dos dados de ICMS DIFAL
-            csv_difal = df_difal.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="⬇️ Baixar dados de ICMS DIFAL",
-                data=csv_difal,
-                file_name="icms_difal.csv",
-                mime="text/csv"
-            )
+            with tab2:
+                if dados_icms_difal:
+                    st.subheader("Notas com ICMS DIFAL")
+                    df_difal = pd.DataFrame(dados_icms_difal)
+                    
+                    # Calcula totais
+                    total_difal = df_difal['Valor ICMS DIFAL'].sum()
+                    total_nf_difal = df_difal['Valor Total NF'].sum()
+                    
+                    # Formata os valores
+                    df_difal['Valor ICMS DIFAL'] = df_difal['Valor ICMS DIFAL'].apply(lambda x: f"R$ {x:,.2f}" if pd.notnull(x) else "")
+                    df_difal['Valor Total NF'] = df_difal['Valor Total NF'].apply(lambda x: f"R$ {x:,.2f}" if pd.notnull(x) else "")
+                    
+                    st.dataframe(df_difal, use_container_width=True)
+                    
+                    # Mostra totais
+                    col1, col2 = st.columns(2)
+                    col1.metric("Total ICMS DIFAL", f"R$ {total_difal:,.2f}")
+                    col2.metric("Total Valor NF", f"R$ {total_nf_difal:,.2f}")
+                    
+                    # Botão para download
+                    csv_difal = df_difal.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+                    st.download_button(
+                        label="⬇️ Baixar dados ICMS DIFAL (CSV)",
+                        data=csv_difal,
+                        file_name="icms_difal.csv",
+                        mime="text/csv"
+                    )
+                else:
+                    st.info("Nenhuma nota com ICMS DIFAL encontrada.", icon="ℹ️")
+        else:
+            st.warning("Nenhum dado relevante encontrado nos arquivos XML.", icon="⚠️")
 
 # --- BANCO DE DADOS ---
 def init_db():
@@ -1554,7 +1598,7 @@ def main():
             "📊 Indicadores de Entrega", 
             "📦 Entregas Gerais",
             "📄 Processador TXT",
-            "📑 Processador XML (NF-e)"
+            "📄 Processador XML"
         ])
         
         with tab1:
