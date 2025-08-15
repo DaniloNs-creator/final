@@ -593,56 +593,6 @@ def init_db():
             )
         ''')
         conn.commit()
-        
-        c.execute("SELECT COUNT(*) FROM atividades")
-        if c.fetchone()[0] == 0:
-            gerar_atividades_mensais(conn)
-
-def gerar_atividades_mensais(conn: sqlite3.Connection):
-    """Gera atividades mensais para todos os clientes até dezembro de 2025."""
-    clientes = ["Cliente A", "Cliente B", "Cliente C", "Cliente D"]
-    responsaveis = ["Responsável 1", "Responsável 2", "Responsável 3"]
-    
-    atividades = [
-        "Fechamento mensal",
-        "Relatório contábil",
-        "Conciliação bancária",
-        "Declarações fiscais"
-    ]
-    
-    hoje = datetime.now()
-    fim = datetime(2025, 12, 1)
-    
-    try:
-        c = conn.cursor()
-        
-        for _ in range(20):  # Gerar 20 atividades de exemplo
-            cliente = random.choice(clientes)
-            responsavel = random.choice(responsaveis)
-            atividade = random.choice(atividades)
-            feito = random.choice([0, 1])
-            data_entrega = hoje + timedelta(days=random.randint(1, 365))
-            mes_referencia = f"{data_entrega.month:02d}/{data_entrega.year}"
-            
-            campos = (
-                cliente,
-                responsavel,
-                atividade,
-                data_entrega.strftime('%Y-%m-%d'),
-                mes_referencia,
-                feito,
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            )
-            
-            c.execute('''
-                INSERT INTO atividades (
-                    cliente, responsavel, atividade, data_entrega, mes_referencia, feito, data_criacao
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', campos)
-        
-        conn.commit()
-    except sqlite3.Error as e:
-        st.error(f"Erro ao gerar atividades iniciais: {e}")
 
 # --- FUNÇÕES DO SISTEMA ---
 def adicionar_atividade(campos: Tuple) -> bool:
@@ -728,7 +678,7 @@ def marcar_feito(id: int, feito: bool) -> bool:
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
-            c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (int(feito), id))
+            c.execute('UPDATE atividades SET feito = ? WHERE id = ?', (1 if feito else 0, id))
             conn.commit()
             st.session_state.atualizar_lista = True  # Flag para atualizar a lista
             return c.rowcount > 0
@@ -741,7 +691,7 @@ def get_atividades(filtro_mes: str = None, filtro_responsavel: str = None) -> Li
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
-            query = 'SELECT * FROM atividades'
+            query = 'SELECT * FROM actividades'
             params = []
             
             conditions = []
@@ -1015,14 +965,13 @@ def lista_atividades():
         return
     
     for row in atividades:
-        # Usando índices numéricos para acessar os valores da tupla
         id = row[0]
         cliente = row[1]
         responsavel = row[2]
         atividade = row[3]
         data_entrega = row[4]
         mes_referencia = row[5]
-        feito = row[6]
+        feito = bool(row[6])
         data_criacao = row[7]
         
         with st.expander(f"{'✅' if feito else '📌'} {cliente} - {responsavel} - {atividade} - {mes_referencia}", expanded=False):
@@ -1039,12 +988,12 @@ def lista_atividades():
                 st.markdown(f"**Data de Criação:** {data_criacao}")
                 
             with col2:
-                st.checkbox(
-                    "Marcar como concluído", 
-                    value=bool(feito),
+                # Checkbox para marcar/desmarcar como concluído
+                novo_status = st.checkbox(
+                    "Marcar como concluído",
+                    value=feito,
                     key=f"feito_{id}",
-                    on_change=marcar_feito,
-                    args=(id, not feito)
+                    on_change=lambda id=id, feito=feito: marcar_feito(id, not feito)
                 )
                 
                 if st.button("Excluir", key=f"del_{id}", use_container_width=True):
