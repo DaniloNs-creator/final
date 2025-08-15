@@ -14,7 +14,7 @@ import time
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(
-    page_title="Carteira de Clientes",
+    page_title="Controle de atividades",
     page_icon="https://www.hafele.com.br/INTERSHOP/static/WFS/Haefele-HBR-Site/-/-/pt_BR/images/favicons/apple-touch-icon.png",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -1299,4 +1299,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
