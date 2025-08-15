@@ -687,7 +687,7 @@ def marcar_feito(id: int, feito: bool) -> bool:
         return False
 
 def atualizar_data_entrega(id: int, nova_data: str) -> bool:
-    """Atualiza a data de entrega de uma atividade."""
+    """Atualiza la data de entrega de uma actividad."""
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
@@ -755,6 +755,68 @@ def processar_proximo_mes(id: int) -> bool:
             return c.rowcount > 0
     except Exception as e:
         st.error(f"Erro ao processar próximo mês: {e}")
+        return False
+
+def fechar_periodo(mes_atual: str) -> bool:
+    """Fecha o período atual criando cópias de todas as atividades para o próximo mês."""
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            
+            # Determinar o próximo mês
+            mes, ano = mes_atual.split('/')
+            mes_obj = datetime.strptime(f"01/{mes}/{ano}", '%d/%m/%Y')
+            proximo_mes_obj = mes_obj + timedelta(days=32)
+            proximo_mes = proximo_mes_obj.strftime('%m/%Y')
+            
+            # Obter todas as atividades do mês atual
+            c.execute('SELECT * FROM atividades WHERE mes_referencia = ?', (mes_atual,))
+            atividades = c.fetchall()
+            
+            if not atividades:
+                st.warning(f"Nenhuma atividade encontrada para o mês {mes_atual}")
+                return False
+            
+            # Preparar os dados para inserção
+            novas_atividades = []
+            for atividade in atividades:
+                # Extrair os dados da atividade
+                cliente = atividade[1]
+                responsavel = atividade[2]
+                descricao = atividade[3]
+                data_entrega = atividade[4]
+                
+                # Calcular nova data de entrega para o próximo mês
+                if data_entrega:
+                    data_obj = datetime.strptime(data_entrega, '%Y-%m-%d')
+                    nova_data = (data_obj.replace(day=1) + timedelta(days=32)).replace(day=data_obj.day).strftime('%Y-%m-%d')
+                else:
+                    nova_data = None
+                
+                # Adicionar à lista de novas atividades
+                novas_atividades.append((
+                    cliente,
+                    responsavel,
+                    descricao,
+                    nova_data,
+                    proximo_mes,
+                    0,  # Não concluído
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                ))
+            
+            # Inserir as novas atividades em lote
+            c.executemany('''
+                INSERT INTO atividades (
+                    cliente, responsavel, atividade, data_entrega, mes_referencia, feito, data_criacao
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', novas_atividades)
+            
+            conn.commit()
+            st.session_state.atualizar_lista = True
+            return True
+            
+    except Exception as e:
+        st.error(f"Erro ao fechar período: {e}")
         return False
 
 def get_atividades(filtro_mes: str = None, filtro_responsavel: str = None) -> List[Tuple]:
@@ -1006,13 +1068,32 @@ def lista_atividades():
     """Exibe a lista de atividades cadastradas com filtros."""
     st.markdown('<div class="header">📋 Lista de Atividades</div>', unsafe_allow_html=True)
     
-    # Botão para excluir todas as atividades
-    if st.button("🗑️ Excluir Todas as Atividades", type="primary", use_container_width=True, key="delete_all", 
-               help="CUIDADO: Esta ação não pode ser desfeita!"):
-        if excluir_todas_atividades():
-            st.success("Todas as atividades foram excluídas com sucesso!")
-            time.sleep(1)
-            st.rerun()
+    # Botões para ações em massa
+    col_buttons1, col_buttons2 = st.columns(2)
+    
+    with col_buttons1:
+        if st.button("🗑️ Excluir Todas as Atividades", type="primary", use_container_width=True, key="delete_all", 
+                   help="CUIDADO: Esta ação não pode ser desfeita!"):
+            if excluir_todas_atividades():
+                st.success("Todas as atividades foram excluídas com sucesso!")
+                time.sleep(1)
+                st.rerun()
+    
+    with col_buttons2:
+        # Selecionar o mês para fechar
+        meses = sorted([
+            f"{mes:02d}/{ano}" 
+            for ano in range(2023, 2026) 
+            for mes in range(1, 13)
+        ], reverse=True)
+        mes_para_fechar = st.selectbox("Mês para fechar:", meses, key="mes_fechamento")
+        
+        if st.button("📅 Fechar Período", type="primary", use_container_width=True, 
+                    help="Copia todas as atividades do mês selecionado para o próximo mês"):
+            if fechar_periodo(mes_para_fechar):
+                st.success(f"Período {mes_para_fechar} fechado com sucesso! Atividades copiadas para o próximo mês.")
+                time.sleep(1)
+                st.rerun()
     
     col1, col2 = st.columns(2)
     
@@ -1022,11 +1103,11 @@ def lista_atividades():
             for ano in range(2023, 2026) 
             for mes in range(1, 13)
         ], reverse=True)
-        mes_selecionado = st.selectbox("Filtrar por mês de referência:", ["Todos"] + meses)
+        mes_selecionado = st.selectbox("Filtrar por mês de referência:", ["Todos"] + meses, key="filtro_mes")
     
     with col2:
         responsaveis = get_responsaveis()
-        responsavel_selecionado = st.selectbox("Filtrar por responsável:", responsaveis)
+        responsavel_selecionado = st.selectbox("Filtrar por responsável:", responsaveis, key="filtro_responsavel")
     
     atividades = get_atividades(mes_selecionado if mes_selecionado != "Todos" else None,
                               responsavel_selecionado if responsavel_selecionado != "Todos" else None)
