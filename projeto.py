@@ -10,11 +10,12 @@ import contextlib
 import chardet
 from io import BytesIO
 import base64
+import time
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(
     page_title="Carteira de Clientes",
-    page_icon="https://www.realiconsultoria.com.br/wp-content/uploads/2022/02/cropped-fav_Prancheta-1-150x150.png",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -37,157 +38,117 @@ def get_db_connection():
 
 # --- CSS PROFISSIONAL ANIMADO ---
 def load_css():
-    st.markdown("""
+    st.markdown(f"""
         <style>
-            :root {
-                --primary-color: #3498db;
-                --secondary-color: #2ecc71;
+            :root {{
+                --primary-color: #2c3e50;
+                --secondary-color: #3498db;
+                --accent-color: #e74c3c;
+                --success-color: #2ecc71;
+                --warning-color: #f39c12;
                 --dark-color: #2c3e50;
                 --light-color: #ecf0f1;
-                --accent-color: #e74c3c;
-                --background-gradient: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+                --background-gradient: linear-gradient(135deg, #f5f7fa 0%, #e4e8ed 100%);
                 --card-shadow: 0 10px 20px rgba(0,0,0,0.1), 0 6px 6px rgba(0,0,0,0.05);
                 --transition: all 0.3s cubic-bezier(.25,.8,.25,1);
-                --menu-active: #3498db;
-                --menu-hover: #2980b9;
-                --menu-text: #ffffff;
-            }
+                --sidebar-bg: linear-gradient(180deg, #2c3e50 0%, #1a252f 100%);
+            }}
             
-            /* Capa profissional */
-            .cover-container {
-                background: linear-gradient(135deg, #2c3e50, #3498db);
-                color: white;
-                padding: 3rem 2rem;
+            /* Estilo da capa profissional */
+            .cover-container {{
+                background: var(--background-gradient);
+                padding: 3rem;
                 border-radius: 12px;
                 margin-bottom: 2rem;
                 box-shadow: var(--card-shadow);
+                text-align: center;
                 position: relative;
                 overflow: hidden;
-                animation: fadeIn 1s ease-out;
-            }
+            }}
             
-            .cover-container::before {
+            .cover-container::before {{
                 content: "";
                 position: absolute;
-                top: -50%;
-                left: -50%;
-                width: 200%;
-                height: 200%;
-                background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
-                animation: rotate 20s linear infinite;
-                z-index: 0;
-            }
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 5px;
+                background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+            }}
             
-            .cover-title {
-                font-size: 3.5rem;
+            .cover-logo {{
+                max-width: 300px;
+                margin: 0 auto 1.5rem;
+                display: block;
+            }}
+            
+            .cover-title {{
+                color: var(--dark-color);
+                font-size: 2.8rem;
                 font-weight: 800;
                 margin-bottom: 1rem;
-                position: relative;
-                z-index: 1;
-                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-                background: linear-gradient(90deg, #ffffff, #e0f7fa);
+                background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
-            }
+                text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+                animation: fadeIn 1s ease-in-out;
+            }}
             
-            .cover-subtitle {
-                font-size: 1.5rem;
-                font-weight: 400;
-                margin-bottom: 2rem;
-                position: relative;
-                z-index: 1;
-                opacity: 0.9;
-            }
+            .cover-subtitle {{
+                color: var(--dark-color);
+                font-size: 1.2rem;
+                opacity: 0.8;
+                margin-bottom: 1.5rem;
+            }}
             
-            .cover-logo {
-                position: absolute;
-                top: 20px;
-                right: 20px;
-                width: 80px;
-                height: 80px;
-                background: white;
-                border-radius: 50%;
-                padding: 10px;
-                box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-                z-index: 1;
-            }
+            @keyframes fadeIn {{
+                from {{ opacity: 0; transform: translateY(-20px); }}
+                to {{ opacity: 1; transform: translateY(0); }}
+            }}
             
-            @keyframes rotate {
-                from { transform: rotate(0deg); }
-                to { transform: rotate(360deg); }
-            }
-            
-            /* Menu moderno */
-            .stTabs [data-baseweb="tab-list"] {
+            /* Menu de navegação profissional */
+            .stTabs [data-baseweb="tab-list"] {{
                 gap: 0;
-                background: var(--dark-color);
+                background: var(--light-color);
                 padding: 0.5rem;
                 border-radius: 12px;
                 margin-bottom: 2rem;
-            }
+                box-shadow: var(--card-shadow);
+            }}
             
-            .stTabs [data-baseweb="tab"] {
+            .stTabs [data-baseweb="tab"] {{
                 padding: 0.75rem 1.5rem;
                 border-radius: 8px !important;
                 background-color: transparent !important;
                 transition: var(--transition);
                 border: none !important;
                 font-weight: 600;
-                color: var(--menu-text) !important;
+                color: var(--dark-color) !important;
                 margin: 0 !important;
-            }
+            }}
             
-            .stTabs [data-baseweb="tab"]:hover {
-                background-color: var(--menu-hover) !important;
-            }
+            .stTabs [data-baseweb="tab"]:hover {{
+                background-color: rgba(52, 152, 219, 0.1) !important;
+            }}
             
-            .stTabs [aria-selected="true"] {
-                background: linear-gradient(135deg, var(--menu-active), var(--menu-hover)) !important;
+            .stTabs [aria-selected="true"] {{
+                background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)) !important;
                 color: white !important;
                 box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            }
+            }}
             
-            .stTabs [aria-selected="true"] [data-testid="stMarkdownContainer"] p {
+            .stTabs [aria-selected="true"] [data-testid="stMarkdownContainer"] p {{
                 color: white !important;
-            }
+            }}
             
-            /* Botão de excluir todas */
-            .danger-button {
-                background: linear-gradient(135deg, #e74c3c, #c0392b) !important;
-                color: white !important;
-            }
-            
-            .danger-button:hover {
-                background: linear-gradient(135deg, #c0392b, #e74c3c) !important;
-                transform: translateY(-2px) !important;
-            }
-            
-            /* Restante do CSS */
-            .main {
+            /* Estilos gerais */
+            .main {{
                 background: var(--background-gradient);
                 color: var(--dark-color);
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            }
+            }}
             
-            .title {
-                color: var(--dark-color);
-                font-size: 2.8rem;
-                font-weight: 800;
-                margin-bottom: 1.5rem;
-                padding-bottom: 0.5rem;
-                background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
-                animation: fadeIn 1s ease-in-out;
-            }
-            
-            @keyframes fadeIn {
-                from { opacity: 0; transform: translateY(-20px); }
-                to { opacity: 1; transform: translateY(0); }
-            }
-            
-            .header {
+            .header {{
                 color: var(--dark-color);
                 font-size: 1.8rem;
                 font-weight: 700;
@@ -195,14 +156,14 @@ def load_css():
                 padding-left: 10px;
                 border-left: 5px solid var(--primary-color);
                 animation: slideIn 0.5s ease-out;
-            }
+            }}
             
-            @keyframes slideIn {
-                from { transform: translateX(-20px); opacity: 0; }
-                to { transform: translateX(0); opacity: 1; }
-            }
+            @keyframes slideIn {{
+                from {{ transform: translateX(-20px); opacity: 0; }}
+                to {{ transform: translateX(0); opacity: 1; }}
+            }}
             
-            .card {
+            .card {{
                 background: white;
                 border-radius: 12px;
                 box-shadow: var(--card-shadow);
@@ -211,89 +172,89 @@ def load_css():
                 transition: var(--transition);
                 border: none;
                 animation: popIn 0.4s ease-out;
-            }
+            }}
             
-            @keyframes popIn {
-                0% { transform: scale(0.95); opacity: 0; }
-                100% { transform: scale(1); opacity: 1; }
-            }
+            @keyframes popIn {{
+                0% {{ transform: scale(0.95); opacity: 0; }}
+                100% {{ transform: scale(1); opacity: 1; }}
+            }}
             
-            .card:hover {
+            .card:hover {{
                 transform: translateY(-5px);
                 box-shadow: 0 15px 30px rgba(0,0,0,0.15);
-            }
+            }}
             
-            .completed {
+            .completed {{
                 background-color: rgba(46, 204, 113, 0.1);
-                border-left: 5px solid var(--secondary-color);
+                border-left: 5px solid var(--success-color);
                 position: relative;
                 overflow: hidden;
-            }
+            }}
             
-            .completed::after {
+            .completed::after {{
                 content: "✓ CONCLUÍDO";
                 position: absolute;
                 top: 10px;
                 right: -30px;
-                background: var(--secondary-color);
+                background: var(--success-color);
                 color: white;
                 padding: 3px 30px;
                 font-size: 0.7rem;
                 font-weight: bold;
                 transform: rotate(45deg);
                 box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-            }
+            }}
             
             /* Sidebar styling */
-            [data-testid="stSidebar"] {
-                background: linear-gradient(180deg, var(--dark-color), #34495e) !important;
+            [data-testid="stSidebar"] {{
+                background: var(--sidebar-bg) !important;
                 color: white !important;
                 padding: 1.5rem !important;
-            }
+            }}
             
             /* Estilo para as métricas na sidebar */
-            .sidebar-metric {
+            .sidebar-metric {{
                 color: white !important;
-            }
+            }}
             
-            .sidebar-metric-label {
+            .sidebar-metric-label {{
                 color: white !important;
                 font-size: 1rem !important;
                 margin-bottom: 0.5rem !important;
-            }
+            }}
             
-            .sidebar-metric-value {
+            .sidebar-metric-value {{
                 color: white !important;
                 font-size: 1.5rem !important;
                 font-weight: bold !important;
-            }
+            }}
             
             /* Estilo específico para as próximas entregas */
-            .proxima-entrega {
+            .proxima-entrega {{
                 background: white;
                 padding: 10px;
                 border-radius: 8px;
                 margin-bottom: 10px;
                 box-shadow: 0 2px 5px rgba(0,0,0,0.1);
                 color: black !important;
-            }
+            }}
             
             .proxima-entrega strong, 
-            .proxima-entrega small {
+            .proxima-entrega small {{
                 color: black !important;
-            }
+            }}
             
-            /* Restante do CSS permanece igual */
-            .form-label {
+            /* Formulários */
+            .form-label {{
                 font-weight: 600;
                 margin-bottom: 0.5rem;
                 color: var(--dark-color);
                 display: block;
                 position: relative;
                 padding-left: 15px;
-            }
+            }}
             
-            .form-label::before {
+            .form-label::before {{
                 content: "";
                 position: absolute;
                 left: 0;
@@ -303,10 +264,11 @@ def load_css():
                 height: 8px;
                 background: var(--primary-color);
                 border-radius: 50%;
-            }
+            }}
             
-            .stButton>button {
-                background: linear-gradient(135deg, var(--primary-color), #2980b9);
+            /* Botões */
+            .stButton>button {{
+                background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
                 color: white;
                 font-weight: 600;
                 border: none;
@@ -315,58 +277,59 @@ def load_css():
                 transition: var(--transition);
                 box-shadow: 0 4px 6px rgba(0,0,0,0.1);
                 width: 100%;
-            }
+            }}
             
-            .stButton>button:hover {
+            .stButton>button:hover {{
                 transform: translateY(-2px);
                 box-shadow: 0 7px 14px rgba(0,0,0,0.15);
-                background: linear-gradient(135deg, #2980b9, var(--primary-color));
-            }
+                background: linear-gradient(135deg, var(--secondary-color), var(--primary-color));
+            }}
             
-            .stButton>button:active {
+            .stButton>button:active {{
                 transform: translateY(0);
                 box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            }
+            }}
             
+            .danger-button {{
+                background: linear-gradient(135deg, var(--accent-color), #c0392b) !important;
+            }}
+            
+            .danger-button:hover {{
+                background: linear-gradient(135deg, #c0392b, var(--accent-color)) !important;
+            }}
+            
+            /* Inputs */
             .stTextInput>div>div>input, 
             .stSelectbox>div>div>select,
             .stDateInput>div>div>input,
-            .stNumberInput>div>div>input {
+            .stNumberInput>div>div>input {{
                 background-color: white;
                 border: 2px solid #dfe6e9;
                 border-radius: 8px;
                 padding: 0.7rem 1rem;
                 transition: var(--transition);
-            }
+            }}
             
             .stTextInput>div>div>input:focus, 
             .stSelectbox>div>div>select:focus,
-            .stDateInput>div>div>input:focus {
+            .stDateInput>div>div>input:focus {{
                 border-color: var(--primary-color);
                 box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
                 outline: none;
-            }
+            }}
             
-            .stCheckbox>div>label {
-                font-weight: 500;
-                color: var(--dark-color);
-            }
-            
-            .stCheckbox>div>div>svg {
-                color: var(--secondary-color) !important;
-            }
-            
-            .success-message {
+            /* Mensagens */
+            .success-message {{
                 background-color: rgba(46, 204, 113, 0.2);
                 color: var(--dark-color);
                 padding: 1rem;
                 border-radius: 8px;
-                border-left: 5px solid var(--secondary-color);
+                border-left: 5px solid var(--success-color);
                 margin: 1rem 0;
                 animation: fadeIn 0.5s ease-in;
-            }
+            }}
             
-            .error-message {
+            .error-message {{
                 background-color: rgba(231, 76, 60, 0.2);
                 color: var(--dark-color);
                 padding: 1rem;
@@ -374,15 +337,15 @@ def load_css():
                 border-left: 5px solid var(--accent-color);
                 margin: 1rem 0;
                 animation: shake 0.5s ease-in;
-            }
+            }}
             
-            @keyframes shake {
-                0%, 100% { transform: translateX(0); }
-                20%, 60% { transform: translateX(-5px); }
-                40%, 80% { transform: translateX(5px); }
-            }
+            @keyframes shake {{
+                0%, 100% {{ transform: translateX(0); }}
+                20%, 60% {{ transform: translateX(-5px); }}
+                40%, 80% {{ transform: translateX(5px); }}
+            }}
             
-            .info-message {
+            .info-message {{
                 background-color: rgba(52, 152, 219, 0.2);
                 color: var(--dark-color);
                 padding: 1rem;
@@ -390,36 +353,38 @@ def load_css():
                 border-left: 5px solid var(--primary-color);
                 margin: 1rem 0;
                 animation: fadeIn 0.5s ease-in;
-            }
+            }}
             
-            .stExpander [data-testid="stExpander"] {
+            /* Expanders */
+            .stExpander [data-testid="stExpander"] {{
                 border: none !important;
                 box-shadow: var(--card-shadow);
                 border-radius: 12px !important;
                 margin-bottom: 1rem;
                 transition: var(--transition);
-            }
+            }}
             
-            .stExpander [data-testid="stExpander"]:hover {
+            .stExpander [data-testid="stExpander"]:hover {{
                 box-shadow: 0 15px 30px rgba(0,0,0,0.15);
-            }
+            }}
             
-            .stExpander [data-testid="stExpanderDetails"] {
+            .stExpander [data-testid="stExpanderDetails"] {{
                 padding: 1.5rem !important;
-            }
+            }}
             
-            .stDataFrame {
+            /* DataFrames */
+            .stDataFrame {{
                 border-radius: 12px !important;
                 box-shadow: var(--card-shadow) !important;
-            }
+            }}
             
             /* Efeito de onda nos botões */
-            .ripple {
+            .ripple {{
                 position: relative;
                 overflow: hidden;
-            }
+            }}
             
-            .ripple:after {
+            .ripple:after {{
                 content: "";
                 display: block;
                 position: absolute;
@@ -434,71 +399,64 @@ def load_css():
                 transform: scale(10, 10);
                 opacity: 0;
                 transition: transform .5s, opacity 1s;
-            }
+            }}
             
-            .ripple:active:after {
+            .ripple:active:after {{
                 transform: scale(0, 0);
                 opacity: 0.3;
                 transition: 0s;
-            }
+            }}
             
-            [data-testid="stSidebar"] .stButton>button {
-                background: linear-gradient(135deg, var(--secondary-color), #27ae60) !important;
-            }
+            /* Sidebar buttons */
+            [data-testid="stSidebar"] .stButton>button {{
+                background: linear-gradient(135deg, var(--secondary-color), #2980b9) !important;
+            }}
             
-            [data-testid="stSidebar"] .stButton>button:hover {
-                background: linear-gradient(135deg, #27ae60, var(--secondary-color)) !important;
-            }
+            [data-testid="stSidebar"] .stButton>button:hover {{
+                background: linear-gradient(135deg, #2980b9, var(--secondary-color)) !important;
+            }}
             
             /* Custom scrollbar */
-            ::-webkit-scrollbar {
+            ::-webkit-scrollbar {{
                 width: 8px;
                 height: 8px;
-            }
+            }}
             
-            ::-webkit-scrollbar-track {
+            ::-webkit-scrollbar-track {{
                 background: #f1f1f1;
                 border-radius: 10px;
-            }
+            }}
             
-            ::-webkit-scrollbar-thumb {
+            ::-webkit-scrollbar-thumb {{
                 background: var(--primary-color);
                 border-radius: 10px;
-            }
+            }}
             
-            ::-webkit-scrollbar-thumb:hover {
+            ::-webkit-scrollbar-thumb:hover {{
                 background: #2980b9;
-            }
+            }}
             
             /* Pulse animation for important elements */
-            @keyframes pulse {
-                0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(52, 152, 219, 0.7); }
-                70% { transform: scale(1.02); box-shadow: 0 0 0 10px rgba(52, 152, 219, 0); }
-                100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(52, 152, 219, 0); }
-            }
+            @keyframes pulse {{
+                0% {{ transform: scale(1); box-shadow: 0 0 0 0 rgba(52, 152, 219, 0.7); }}
+                70% {{ transform: scale(1.02); box-shadow: 0 0 0 10px rgba(52, 152, 219, 0); }}
+                100% {{ transform: scale(1); box-shadow: 0 0 0 0 rgba(52, 152, 219, 0); }}
+            }}
             
-            .pulse {
+            .pulse {{
                 animation: pulse 2s infinite;
-            }
+            }}
             
             /* Responsive adjustments */
-            @media (max-width: 768px) {
-                .title {
+            @media (max-width: 768px) {{
+                .title {{
                     font-size: 2rem;
-                }
+                }}
                 
-                .header {
+                .header {{
                     font-size: 1.5rem;
-                }
-                
-                .cover-title {
-                    font-size: 2.5rem;
-                }
-                
-                .cover-subtitle {
-                    font-size: 1.2rem;
-                }
-            }
+                }}
+            }}
         </style>
     """, unsafe_allow_html=True)
 
@@ -775,7 +733,7 @@ def excluir_todas_atividades() -> bool:
             c.execute('DELETE FROM atividades')
             conn.commit()
             st.session_state.atualizar_lista = True  # Flag para atualizar a lista
-            return c.rowcount > 0
+            return True
     except sqlite3.Error as e:
         st.error(f"Erro ao excluir atividades: {e}")
         return False
@@ -904,17 +862,21 @@ def get_dados_responsaveis() -> pd.DataFrame:
         return pd.DataFrame()
 
 # --- COMPONENTES DA INTERFACE ---
+def mostrar_capa():
+    """Exibe a capa profissional do sistema."""
+    st.markdown("""
+    <div class="cover-container">
+        <img src="https://raw.githubusercontent.com/DaniloNs-creator/final/7ea6ab2a610ef8f0c11be3c34f046e7ff2cdfc6a/haefele_logo.png" class="cover-logo">
+        <h1 class="cover-title">Carteira de Clientes</h1>
+        <p class="cover-subtitle">Painel de Gestão de Atividades e Entregas</p>
+    </div>
+    """, unsafe_allow_html=True)
+
 def login_section():
     """Exibe a seção de login."""
+    mostrar_capa()
+    
     with st.container():
-        st.markdown("""
-            <div class="cover-container">
-                <h1 class="cover-title">Carteira de Clientes</h1>
-                <p class="cover-subtitle">Painel de Atividades e Entregas</p>
-                <img src="https://www.realiconsultoria.com.br/wp-content/uploads/2022/02/cropped-fav_Prancheta-1-150x150.png" class="cover-logo">
-            </div>
-        """, unsafe_allow_html=True)
-        
         with st.form("login_form"):
             col1, col2 = st.columns(2)
             username = col1.text_input("Usuário", key="username")
@@ -1106,6 +1068,14 @@ def lista_atividades():
     """Exibe a lista de atividades cadastradas com filtros."""
     st.markdown('<div class="header">📋 Lista de Atividades</div>', unsafe_allow_html=True)
     
+    # Botão para excluir todas as atividades
+    if st.button("🗑️ Excluir Todas as Atividades", type="primary", use_container_width=True, key="delete_all", 
+               help="CUIDADO: Esta ação não pode ser desfeita!"):
+        if excluir_todas_atividades():
+            st.success("Todas as atividades foram excluídas com sucesso!")
+            time.sleep(1)
+            st.rerun()
+    
     col1, col2 = st.columns(2)
     
     with col1:
@@ -1126,20 +1096,6 @@ def lista_atividades():
     if not atividades:
         st.info("Nenhuma atividade encontrada com os filtros selecionados.", icon="ℹ️")
         return
-    
-    # Botão para excluir todas as atividades (com confirmação)
-    if st.button("🗑️ Excluir Todas as Atividades", type="primary", key="delete_all", 
-                use_container_width=True, help="CUIDADO: Esta ação não pode ser desfeita!"):
-        st.warning("⚠️ Você está prestes a excluir TODAS as atividades. Esta ação é irreversível!")
-        confirm = st.checkbox("Confirmar exclusão de todas as atividades")
-        
-        if confirm and st.button("CONFIRMAR EXCLUSÃO TOTAL", type="secondary", 
-                               use_container_width=True, key="confirm_delete_all"):
-            if excluir_todas_atividades():
-                st.success("Todas as atividades foram excluídas com sucesso!")
-                st.rerun()
-            else:
-                st.error("Ocorreu um erro ao excluir as atividades")
     
     for row in atividades:
         # Usando índices numéricos para acessar os valores da tupla
@@ -1439,16 +1395,7 @@ def main():
     if not st.session_state.logged_in:
         login_section()
     else:
-        # Capa profissional
-        st.markdown("""
-            <div class="cover-container">
-                <h1 class="cover-title">Carteira de Clientes</h1>
-                <p class="cover-subtitle">Painel de Atividades e Entregas</p>
-                <img src="https://www.realiconsultoria.com.br/wp-content/uploads/2022/02/cropped-fav_Prancheta-1-150x150.png" class="cover-logo">
-            </div>
-        """, unsafe_allow_html=True)
-        
-        # Menu moderno em abas
+        # Menu de navegação profissional
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📋 Lista de Atividades", 
             "📝 Cadastrar Atividades", 
