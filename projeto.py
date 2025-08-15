@@ -614,6 +614,63 @@ def adicionar_atividade(campos: Tuple) -> bool:
         st.error(f"Erro ao adicionar atividade: {e}")
         return False
 
+def atualizar_atividade(id: int, data_entrega: str, mes_referencia: str) -> bool:
+    """Atualiza a data de entrega e mês de referência de uma atividade."""
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute('''
+                UPDATE atividades 
+                SET data_entrega = ?, mes_referencia = ?
+                WHERE id = ?
+            ''', (data_entrega, mes_referencia, id))
+            conn.commit()
+            st.session_state.atualizar_lista = True
+            return c.rowcount > 0
+    except sqlite3.Error as e:
+        st.error(f"Erro ao atualizar atividade: {e}")
+        return False
+
+def processar_proximo_mes(id: int, mes_atual: str) -> bool:
+    """Avança a atividade para o próximo mês."""
+    try:
+        # Converte o mês atual para o próximo mês
+        mes, ano = mes_atual.split('/')
+        mes = int(mes)
+        ano = int(ano)
+        
+        if mes == 12:
+            mes = 1
+            ano += 1
+        else:
+            mes += 1
+        
+        novo_mes = f"{mes:02d}/{ano}"
+        
+        # Calcula a nova data de entrega (mantendo o mesmo dia do mês)
+        try:
+            dia_entrega = datetime.strptime(mes_atual, "%m/%Y").day
+            nova_data = datetime(ano, mes, dia_entrega).strftime('%Y-%m-%d')
+        except:
+            # Se o dia não for válido para o próximo mês (ex: 31/04), usa o último dia do mês
+            ultimo_dia = (datetime(ano, mes + 1, 1) - timedelta(days=1)
+            nova_data = ultimo_dia.strftime('%Y-%m-%d')
+        
+        # Atualiza no banco de dados
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute('''
+                UPDATE atividades 
+                SET data_entrega = ?, mes_referencia = ?
+                WHERE id = ?
+            ''', (nova_data, novo_mes, id))
+            conn.commit()
+            st.session_state.atualizar_lista = True
+            return c.rowcount > 0
+    except Exception as e:
+        st.error(f"Erro ao processar próximo mês: {e}")
+        return False
+
 def adicionar_atividades_em_lote(dados: List[Tuple]) -> bool:
     """Adiciona múltiplas atividades ao banco de dados em lote."""
     try:
@@ -684,77 +741,6 @@ def marcar_feito(id: int, feito: bool) -> bool:
             return c.rowcount > 0
     except sqlite3.Error as e:
         st.error(f"Erro ao atualizar status: {e}")
-        return False
-
-def atualizar_data_entrega(id: int, nova_data: str) -> bool:
-    """Atualiza a data de entrega de uma atividade."""
-    try:
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute('UPDATE atividades SET data_entrega = ? WHERE id = ?', (nova_data, id))
-            conn.commit()
-            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
-            return c.rowcount > 0
-    except sqlite3.Error as e:
-        st.error(f"Erro ao atualizar data de entrega: {e}")
-        return False
-
-def atualizar_mes_referencia(id: int, novo_mes: str) -> bool:
-    """Atualiza o mês de referência de uma atividade."""
-    try:
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute('UPDATE atividades SET mes_referencia = ? WHERE id = ?', (novo_mes, id))
-            conn.commit()
-            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
-            return c.rowcount > 0
-    except sqlite3.Error as e:
-        st.error(f"Erro ao atualizar mês de referência: {e}")
-        return False
-
-def processar_proximo_mes(id: int) -> bool:
-    """Atualiza a data de entrega e o mês de referência para o próximo mês."""
-    try:
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            
-            # Obter a atividade atual
-            c.execute('SELECT data_entrega, mes_referencia FROM atividades WHERE id = ?', (id,))
-            atividade = c.fetchone()
-            
-            if not atividade:
-                return False
-                
-            data_entrega = atividade[0]
-            mes_referencia = atividade[1]
-            
-            # Converter para objetos de data
-            if data_entrega:
-                data_obj = datetime.strptime(data_entrega, '%Y-%m-%d')
-                nova_data = (data_obj.replace(day=1) + timedelta(days=32)).replace(day=data_obj.day).strftime('%Y-%m-%d')
-            else:
-                nova_data = None
-            
-            if mes_referencia:
-                mes, ano = mes_referencia.split('/')
-                mes_obj = datetime.strptime(f"01/{mes}/{ano}", '%d/%m/%Y')
-                novo_mes_obj = mes_obj + timedelta(days=32)
-                novo_mes = novo_mes_obj.strftime('%m/%Y')
-            else:
-                novo_mes = None
-            
-            # Atualizar no banco de dados
-            c.execute('''
-                UPDATE atividades 
-                SET data_entrega = ?, mes_referencia = ? 
-                WHERE id = ?
-            ''', (nova_data, novo_mes, id))
-            
-            conn.commit()
-            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
-            return c.rowcount > 0
-    except Exception as e:
-        st.error(f"Erro ao processar próximo mês: {e}")
         return False
 
 def get_atividades(filtro_mes: str = None, filtro_responsavel: str = None) -> List[Tuple]:
@@ -959,6 +945,7 @@ def upload_atividades():
                     st.error("Ocorreu um erro ao importar as atividades")
         except Exception as e:
             st.error(f"Erro ao processar arquivo: {str(e)}")
+            st.info("Tente novamente ou verifique o arquivo.")
 
 def cadastro_atividade():
     """Exibe o formulário para cadastro de novas atividades."""
@@ -1055,37 +1042,25 @@ def lista_atividades():
                 st.markdown(f"**Responsável:** {responsavel}")
                 st.markdown(f"**Atividade:** {atividade}")
                 
-                # Edição da data de entrega
-                nova_data = st.date_input(
-                    "Data de Entrega",
-                    value=datetime.strptime(data_entrega, '%Y-%m-%d') if data_entrega else datetime.now(),
-                    key=f"data_{id}"
-                )
-                if st.button("Atualizar Data", key=f"update_data_{id}"):
-                    if atualizar_data_entrega(id, nova_data.strftime('%Y-%m-%d')):
-                        st.success("Data de entrega atualizada com sucesso!")
-                        time.sleep(1)
-                        st.rerun()
-                
-                # Edição do mês de referência
-                novo_mes = st.selectbox(
-                    "Mês de Referência",
-                    [f"{mes:02d}/{ano}" for ano in range(2023, 2026) for mes in range(1, 13)],
-                    index=[f"{mes:02d}/{ano}" for ano in range(2023, 2026) for mes in range(1, 13)].index(mes_referencia) if mes_referencia else 0,
-                    key=f"mes_{id}"
-                )
-                if st.button("Atualizar Mês", key=f"update_mes_{id}"):
-                    if atualizar_mes_referencia(id, novo_mes):
-                        st.success("Mês de referência atualizado com sucesso!")
-                        time.sleep(1)
-                        st.rerun()
-                
-                # Botão para processar próximo mês
-                if st.button("Processar Próximo Mês", key=f"process_{id}", type="primary"):
-                    if processar_proximo_mes(id):
-                        st.success("Atividade atualizada para o próximo mês!")
-                        time.sleep(1)
-                        st.rerun()
+                # Formulário para edição da data de entrega e mês de referência
+                with st.form(f"form_edit_{id}"):
+                    nova_data = st.date_input(
+                        "Data de Entrega", 
+                        value=datetime.strptime(data_entrega, '%Y-%m-%d').date() if data_entrega else datetime.now().date(),
+                        key=f"data_entrega_{id}"
+                    )
+                    novo_mes = st.selectbox(
+                        "Mês de Referência",
+                        [f"{mes:02d}/{ano}" for ano in range(2023, 2026) for mes in range(1, 13)],
+                        index=[f"{mes:02d}/{ano}" for ano in range(2023, 2026) for mes in range(1, 13)].index(mes_referencia) if mes_referencia else 0,
+                        key=f"mes_ref_{id}"
+                    )
+                    
+                    if st.form_submit_button("Atualizar Data e Mês"):
+                        if atualizar_atividade(id, nova_data.strftime('%Y-%m-%d'), novo_mes):
+                            st.success("Data e mês atualizados com sucesso!")
+                            time.sleep(1)
+                            st.rerun()
                 
                 st.markdown(f"**Data de Criação:** {data_criacao}")
                 
@@ -1097,6 +1072,13 @@ def lista_atividades():
                     key=f"feito_{id}",
                     on_change=lambda id=id, feito=feito: marcar_feito(id, not feito)
                 )
+                
+                # Botão para processar próximo mês
+                if st.button("Processar Próximo Mês", key=f"process_{id}", use_container_width=True):
+                    if processar_proximo_mes(id, mes_referencia):
+                        st.success("Atividade avançada para o próximo mês!")
+                        time.sleep(1)
+                        st.rerun()
                 
                 if st.button("Excluir", key=f"del_{id}", use_container_width=True):
                     if excluir_atividade(id):
