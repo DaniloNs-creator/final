@@ -184,9 +184,32 @@ def load_css():
                 box-shadow: 0 15px 30px rgba(0,0,0,0.15);
             }}
             
+            /* Estilo para atividades pendentes */
+            .pending {{
+                background-color: rgba(231, 76, 60, 0.1);
+                border-left: 5px solid #e74c3c;
+                position: relative;
+                overflow: hidden;
+            }}
+            
+            .pending::after {{
+                content: "❌ PENDENTE";
+                position: absolute;
+                top: 10px;
+                right: -30px;
+                background: #e74c3c;
+                color: white;
+                padding: 3px 30px;
+                font-size: 0.7rem;
+                font-weight: bold;
+                transform: rotate(45deg);
+                box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            }}
+            
+            /* Estilo para atividades concluídas */
             .completed {{
                 background-color: rgba(46, 204, 113, 0.1);
-                border-left: 5px solid var(--success-color);
+                border-left: 5px solid #2ecc71;
                 position: relative;
                 overflow: hidden;
             }}
@@ -196,7 +219,7 @@ def load_css():
                 position: absolute;
                 top: 10px;
                 right: -30px;
-                background: var(--success-color);
+                background: #2ecc71;
                 color: white;
                 padding: 3px 30px;
                 font-size: 0.7rem;
@@ -974,8 +997,12 @@ def lista_atividades():
         feito = bool(row[6])
         data_criacao = row[7]
         
+        # Definindo a classe CSS com base no status
+        status_class = "completed" if feito else "pending"
+        status_text = "✅ CONCLUÍDO" if feito else "❌ PENDENTE"
+        
         with st.expander(f"{'✅' if feito else '📌'} {cliente} - {responsavel} - {atividade} - {mes_referencia}", expanded=False):
-            st.markdown(f'<div class="card{" completed" if feito else ""}">', unsafe_allow_html=True)
+            st.markdown(f'<div class="card {status_class}">', unsafe_allow_html=True)
             
             col1, col2 = st.columns([3, 1])
             
@@ -995,6 +1022,21 @@ def lista_atividades():
                     key=f"feito_{id}",
                     on_change=lambda id=id, feito=feito: marcar_feito(id, not feito)
                 )
+                
+                # Exibe o status atual com estilo
+                st.markdown(f"""
+                    <div style="
+                        background-color: {'#2ecc71' if feito else '#e74c3c'};
+                        color: white;
+                        padding: 0.5rem;
+                        border-radius: 4px;
+                        text-align: center;
+                        font-weight: bold;
+                        margin: 0.5rem 0;
+                    ">
+                        {status_text}
+                    </div>
+                """, unsafe_allow_html=True)
                 
                 if st.button("Excluir", key=f"del_{id}", use_container_width=True):
                     if excluir_atividade(id):
@@ -1271,4 +1313,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
