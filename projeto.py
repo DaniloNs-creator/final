@@ -583,27 +583,12 @@ def init_db():
         c.execute('''
             CREATE TABLE IF NOT EXISTS atividades (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cnpj TEXT,
-                razao_social TEXT,
-                classificacao TEXT,
-                tributacao TEXT,
                 responsavel TEXT NOT NULL,
                 atividade TEXT NOT NULL,
-                grupo TEXT,
-                cidade TEXT,
-                desde TEXT,
-                status TEXT,
-                email TEXT,
-                telefone TEXT,
-                contato TEXT,
-                possui_folha TEXT,
-                financeiro TEXT,
-                contas_bancarias INTEGER,
-                forma_entrega TEXT,
                 data_entrega TEXT,
+                mes_referencia TEXT,
                 feito INTEGER DEFAULT 0,
-                data_criacao TEXT NOT NULL,
-                mes_referencia TEXT
+                data_criacao TEXT NOT NULL
             )
         ''')
         conn.commit()
@@ -614,12 +599,7 @@ def init_db():
 
 def gerar_atividades_mensais(conn: sqlite3.Connection):
     """Gera atividades mensais para todos os clientes até dezembro de 2025."""
-    clientes = [
-        ("00.000.000/0001-01", "Cliente A", "Razão Social A", "B", "Simples Nacional", "Responsável 1"),
-        ("00.000.000/0001-02", "Cliente B", "Razão Social B", "A", "Lucro Presumido", "Responsável 2"),
-        ("00.000.000/0001-03", "Cliente C", "Razão Social C", "C", "Lucro Real", "Responsável 1"),
-        ("00.000.000/0001-04", "Cliente D", "Razão Social D", "B", "Simples Nacional", "Responsável 3"),
-    ]
+    responsaveis = ["Responsável 1", "Responsável 2", "Responsável 3"]
     
     atividades = [
         "Fechamento mensal",
@@ -634,21 +614,26 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
     try:
         c = conn.cursor()
         
-        for cliente in clientes:
+        for _ in range(20):  # Gerar 20 atividades de exemplo
+            responsavel = random.choice(responsaveis)
             atividade = random.choice(atividades)
             feito = random.choice([0, 1])
+            data_entrega = hoje + timedelta(days=random.randint(1, 365))
+            mes_referencia = f"{data_entrega.month:02d}/{data_entrega.year}"
+            
             campos = (
-                cliente[0], cliente[1], cliente[2], cliente[3], cliente[4], cliente[5], atividade,
-                "Grupo 1", "São Paulo", "01/2020", "Ativo", "email@cliente.com", "(11) 99999-9999", "Contato Financeiro",
-                "Sim", "Em dia", 2, "E-mail", hoje.strftime('%Y-%m-%d'), feito, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), hoje.strftime('%m/%Y')
+                responsavel,
+                atividade,
+                data_entrega.strftime('%Y-%m-%d'),
+                mes_referencia,
+                feito,
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             )
             
             c.execute('''
                 INSERT INTO atividades (
-                    cnpj, razao_social, classificacao, tributacao, responsavel, atividade, 
-                    grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                    financeiro, contas_bancarias, forma_entrega, data_entrega, feito, data_criacao, mes_referencia
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    responsavel, atividade, data_entrega, mes_referencia, feito, data_criacao
+                ) VALUES (?, ?, ?, ?, ?, ?)
             ''', campos)
         
         conn.commit()
@@ -665,10 +650,8 @@ def adicionar_atividade(campos: Tuple) -> bool:
             
             c.execute('''
                 INSERT INTO atividades (
-                    cnpj, razao_social, classificacao, tributacao, responsavel, atividade, 
-                    grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                    financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, data_criacao
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    responsavel, atividade, data_entrega, mes_referencia, data_criacao
+                ) VALUES (?, ?, ?, ?, ?)
             ''', campos_completos)
             conn.commit()
             st.session_state.atualizar_lista = True  # Flag para atualizar a lista
@@ -695,10 +678,8 @@ def adicionar_atividades_em_lote(dados: List[Tuple]) -> bool:
             try:
                 c.executemany('''
                     INSERT INTO atividades (
-                        cnpj, razao_social, classificacao, tributacao, responsavel, atividade, 
-                        grupo, cidade, desde, status, email, telefone, contato, possui_folha, 
-                        financeiro, contas_bancarias, forma_entrega, data_entrega, mes_referencia, data_criacao
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        responsavel, atividade, data_entrega, mes_referencia, data_criacao
+                    ) VALUES (?, ?, ?, ?, ?)
                 ''', dados_completos)
                 
                 conn.commit()
@@ -795,24 +776,10 @@ def get_entregas_gerais(start_date: str, end_date: str) -> pd.DataFrame:
         with get_db_connection() as conn:
             query = '''
                 SELECT 
-                    cnpj, 
-                    razao_social, 
-                    classificacao, 
-                    tributacao, 
                     responsavel, 
                     atividade, 
-                    grupo, 
-                    cidade, 
-                    desde, 
-                    status, 
-                    email, 
-                    telefone, 
-                    contato, 
-                    possui_folha, 
-                    financeiro, 
-                    contas_bancarias, 
-                    forma_entrega, 
-                    data_entrega
+                    data_entrega,
+                    mes_referencia
                 FROM atividades
                 WHERE data_entrega BETWEEN ? AND ?
                 ORDER BY data_entrega DESC
@@ -897,23 +864,8 @@ def upload_atividades():
         st.markdown("""
             **Como preparar seu arquivo Excel:**
             1. O arquivo deve conter as colunas obrigatórias:
-               - `CNPJ` (texto)
-               - `Razão Social` (texto)
-               - `Classificação` (texto)
-               - `Tributação` (texto)
                - `Responsável` (texto)
                - `Atividade` (texto)
-               - `Grupo` (texto)
-               - `Cidade` (texto)
-               - `Desde` (texto)
-               - `Status` (texto)
-               - `E-mail` (texto)
-               - `Telefone` (texto)
-               - `Contato` (texto)
-               - `Possui Folha` (texto)
-               - `Financeiro` (texto)
-               - `Contas Bancárias` (número inteiro)
-               - `Forma de Entrega` (texto)
                - `Data de Entrega` (data no formato YYYY-MM-DD)
                - `Mês de Referência` (texto no formato MM/YYYY)
             2. Salve o arquivo no formato .xlsx ou .xls
@@ -931,25 +883,10 @@ def upload_atividades():
             # Lê o arquivo Excel
             df = pd.read_excel(uploaded_file)
             
-            # Mapeia os nomes das colunas da imagem para o banco de dados
+            # Mapeia os nomes das colunas
             column_mapping = {
-                'CNPJ': 'cnpj',
-                'RAZÃO SOCIAL': 'razao_social',
-                'CLASSIFICAÇÃO DO CLIENTE': 'classificacao',
-                'TRIBUTAÇÃO': 'tributacao',
                 'RESPONSÁVEL': 'responsavel',
                 'ATIVIDADE': 'atividade',
-                'GRUPO': 'grupo',
-                'CIDADE': 'cidade',
-                'DESDE': 'desde',
-                'STATUS': 'status',
-                'E-MAIL': 'email',
-                'TELEFONE': 'telefone',
-                'CONTATO': 'contato',
-                'POSSUI FOLHA': 'possui_folha',
-                'FINANCEIRO': 'financeiro',
-                'CONTAS BANCÁRIAS': 'contas_bancarias',
-                'FORMA DE ENTREGA': 'forma_entrega',
                 'DATA DE ENTREGA': 'data_entrega',
                 'MÊS DE REFERÊNCIA': 'mes_referencia'
             }
@@ -967,24 +904,9 @@ def upload_atividades():
             atividades = []
             for _, row in df.iterrows():
                 atividades.append((
-                    row['CNPJ'],
-                    row['RAZÃO SOCIAL'],
-                    row['CLASSIFICAÇÃO DO CLIENTE'],
-                    row['TRIBUTAÇÃO'],
                     row['RESPONSÁVEL'],
                     row['ATIVIDADE'],
-                    row['GRUPO'],
-                    row['CIDADE'],
-                    row['DESDE'],
-                    row['STATUS'],
-                    row['E-MAIL'],
-                    row['TELEFONE'],
-                    row['CONTATO'],
-                    row['POSSUI FOLHA'],
-                    row['FINANCEIRO'],
-                    row['CONTAS BANCÁRIAS'],
-                    row['FORMA DE ENTREGA'],
-                    row['DATA DE ENTREGA'],
+                    row['DATA DE ENTREGA'].strftime('%Y-%m-%d') if pd.notna(row['DATA DE ENTREGA']) else None,
                     row['MÊS DE REFERÊNCIA']
                 ))
             
@@ -1006,54 +928,28 @@ def cadastro_atividade():
     
     with tab1:
         with st.form("nova_atividade", clear_on_submit=True):
-            st.markdown('<div class="form-label">Informações Básicas</div>', unsafe_allow_html=True)
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
             with col1:
-                cnpj = st.text_input("CNPJ", placeholder="00.000.000/0001-00")
-                razao_social = st.text_input("Razão Social", placeholder="Razão social completa")
-                classificacao = st.selectbox("Classificação", ["A", "B", "C", "D"])
-                
-            with col2:
-                tributacao = st.selectbox("Tributação", ["Simples Nacional", "Lucro Presumido", "Lucro Real"])
                 responsavel = st.text_input("Responsável*", placeholder="Nome do responsável")
                 atividade = st.text_input("Atividade*", placeholder="Descrição da atividade")
-
-            with col3:
-                grupo = st.text_input("Grupo", placeholder="Grupo do cliente")
-                cidade = st.text_input("Cidade", placeholder="Cidade do cliente")
-                desde = st.date_input("Cliente desde", value=datetime.now())
-            
-            st.markdown('<div class="form-label">Detalhes de Contato e Financeiros</div>', unsafe_allow_html=True)
-            col4, col5, col6 = st.columns(3)
-            with col4:
-                status = st.selectbox("Status", ["Ativo", "Inativo", "Potencial", "Perdido"])
-                email = st.text_input("E-mail", placeholder="E-mail de contato")
-                telefone = st.text_input("Telefone", placeholder="Telefone de contato")
                 
-            with col5:
-                contato = st.text_input("Contato Financeiro", placeholder="Nome do contato")
-                possui_folha = st.selectbox("Possui Folha?", ["Sim", "Não", "Não se aplica"])
-                financeiro = st.text_input("Financeiro", placeholder="Informações financeiras")
-
-            with col6:
-                contas_bancarias = st.number_input("Contas Bancárias", min_value=0, value=1)
-                forma_entrega = st.selectbox("Forma de Entrega", ["E-mail", "Correio", "Pessoalmente", "Outros"])
+            with col2:
                 data_entrega = st.date_input("Data de Entrega", value=datetime.now())
-            
-            mes_referencia = st.selectbox("Mês de Referência", [
-                f"{mes:02d}/{ano}" 
-                for ano in range(2023, 2026) 
-                for mes in range(1, 13)
-            ])
+                mes_referencia = st.selectbox("Mês de Referência", [
+                    f"{mes:02d}/{ano}" 
+                    for ano in range(2023, 2026) 
+                    for mes in range(1, 13)
+                ])
             
             st.markdown("<small>Campos marcados com * são obrigatórios</small>", unsafe_allow_html=True)
             
             if st.form_submit_button("Adicionar Atividade", use_container_width=True, type="primary"):
                 if responsavel and atividade:
                     campos = (
-                        cnpj, razao_social, classificacao, tributacao, responsavel, atividade,
-                        grupo, cidade, desde.strftime('%Y-%m-%d'), status, email, telefone, contato,
-                        possui_folha, financeiro, contas_bancarias, forma_entrega, data_entrega.strftime('%Y-%m-%d'), mes_referencia
+                        responsavel, 
+                        atividade,
+                        data_entrega.strftime('%Y-%m-%d'),
+                        mes_referencia
                     )
                     if adicionar_atividade(campos):
                         st.success("Atividade cadastrada com sucesso!", icon="✅")
@@ -1100,42 +996,22 @@ def lista_atividades():
     for row in atividades:
         # Usando índices numéricos para acessar os valores da tupla
         id = row[0]
-        cnpj = row[1]
-        razao_social = row[2]
-        classificacao = row[3]
-        tributacao = row[4]
-        responsavel = row[5]
-        atividade = row[6]
-        grupo = row[7]
-        cidade = row[8]
-        desde = row[9]
-        status = row[10]
-        email = row[11]
-        telefone = row[12]
-        contato = row[13]
-        possui_folha = row[14]
-        financeiro = row[15]
-        contas_bancarias = row[16]
-        forma_entrega = row[17]
-        data_entrega = row[18]
-        feito = row[19]
-        data_criacao = row[20]
-        mes_referencia = row[21] if len(row) > 21 else ""
+        responsavel = row[1]
+        atividade = row[2]
+        data_entrega = row[3]
+        mes_referencia = row[4]
+        feito = row[5]
+        data_criacao = row[6]
         
-        with st.expander(f"{'✅' if feito else '📌'} {razao_social} - {atividade} ({status}) - {mes_referencia}", expanded=False):
+        with st.expander(f"{'✅' if feito else '📌'} {responsavel} - {atividade} - {mes_referencia}", expanded=False):
             st.markdown(f'<div class="card{" completed" if feito else ""}">', unsafe_allow_html=True)
             
             col1, col2 = st.columns([3, 1])
             
             with col1:
-                st.markdown(f"**CNPJ:** {cnpj}")
                 st.markdown(f"**Responsável:** {responsavel}")
-                st.markdown(f"**Razão Social:** {razao_social}")
-                st.markdown(f"**Classificação/Tributação:** {classificacao} / {tributacao}")
-                st.markdown(f"**Grupo/Cidade:** {grupo} / {cidade}")
-                st.markdown(f"**Contato:** {contato} ({telefone} - {email})")
-                st.markdown(f"**Financeiro:** {financeiro} | Folha: {possui_folha} | Contas: {contas_bancarias}")
-                st.markdown(f"**Entrega:** {forma_entrega} em {data_entrega}")
+                st.markdown(f"**Atividade:** {atividade}")
+                st.markdown(f"**Data de Entrega:** {data_entrega}")
                 st.markdown(f"**Mês Referência:** {mes_referencia}")
                 st.markdown(f"**Data de Criação:** {data_criacao}")
                 
@@ -1362,7 +1238,7 @@ def mostrar_sidebar():
                 # Próximas entregas
                 hoje = datetime.now().strftime('%Y-%m-%d')
                 c.execute('''
-                    SELECT razao_social, atividade, data_entrega 
+                    SELECT responsavel, atividade, data_entrega 
                     FROM atividades 
                     WHERE data_entrega >= ? AND feito = 0
                     ORDER BY data_entrega ASC
@@ -1372,10 +1248,10 @@ def mostrar_sidebar():
                 
                 if proximas:
                     st.markdown("### Próximas Entregas")
-                    for razao_social, atividade, data in proximas:
+                    for responsavel, atividade, data in proximas:
                         st.markdown(f"""
                             <div class="proxima-entrega">
-                                <strong>{razao_social}</strong><br>
+                                <strong>{responsavel}</strong><br>
                                 {atividade}<br>
                                 <small>📅 {data}</small>
                             </div>
