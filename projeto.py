@@ -583,6 +583,7 @@ def init_db():
         c.execute('''
             CREATE TABLE IF NOT EXISTS atividades (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cliente TEXT NOT NULL,
                 responsavel TEXT NOT NULL,
                 atividade TEXT NOT NULL,
                 data_entrega TEXT,
@@ -599,6 +600,7 @@ def init_db():
 
 def gerar_atividades_mensais(conn: sqlite3.Connection):
     """Gera atividades mensais para todos os clientes até dezembro de 2025."""
+    clientes = ["Cliente A", "Cliente B", "Cliente C", "Cliente D"]
     responsaveis = ["Responsável 1", "Responsável 2", "Responsável 3"]
     
     atividades = [
@@ -615,6 +617,7 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
         c = conn.cursor()
         
         for _ in range(20):  # Gerar 20 atividades de exemplo
+            cliente = random.choice(clientes)
             responsavel = random.choice(responsaveis)
             atividade = random.choice(atividades)
             feito = random.choice([0, 1])
@@ -622,6 +625,7 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
             mes_referencia = f"{data_entrega.month:02d}/{data_entrega.year}"
             
             campos = (
+                cliente,
                 responsavel,
                 atividade,
                 data_entrega.strftime('%Y-%m-%d'),
@@ -632,8 +636,8 @@ def gerar_atividades_mensais(conn: sqlite3.Connection):
             
             c.execute('''
                 INSERT INTO atividades (
-                    responsavel, atividade, data_entrega, mes_referencia, feito, data_criacao
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    cliente, responsavel, atividade, data_entrega, mes_referencia, feito, data_criacao
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', campos)
         
         conn.commit()
@@ -650,8 +654,8 @@ def adicionar_atividade(campos: Tuple) -> bool:
             
             c.execute('''
                 INSERT INTO atividades (
-                    responsavel, atividade, data_entrega, mes_referencia, data_criacao
-                ) VALUES (?, ?, ?, ?, ?)
+                    cliente, responsavel, atividade, data_entrega, mes_referencia, data_criacao
+                ) VALUES (?, ?, ?, ?, ?, ?)
             ''', campos_completos)
             conn.commit()
             st.session_state.atualizar_lista = True  # Flag para atualizar a lista
@@ -678,8 +682,8 @@ def adicionar_atividades_em_lote(dados: List[Tuple]) -> bool:
             try:
                 c.executemany('''
                     INSERT INTO atividades (
-                        responsavel, atividade, data_entrega, mes_referencia, data_criacao
-                    ) VALUES (?, ?, ?, ?, ?)
+                        cliente, responsavel, atividade, data_entrega, mes_referencia, data_criacao
+                    ) VALUES (?, ?, ?, ?, ?, ?)
                 ''', dados_completos)
                 
                 conn.commit()
@@ -759,6 +763,17 @@ def get_atividades(filtro_mes: str = None, filtro_responsavel: str = None) -> Li
         st.error(f"Erro ao recuperar atividades: {e}")
         return []
 
+def get_clientes() -> List[str]:
+    """Retorna a lista de clientes únicos."""
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute('SELECT DISTINCT cliente FROM atividades ORDER BY cliente')
+            return ["Todos"] + [row[0] for row in c.fetchall()]
+    except sqlite3.Error as e:
+        st.error(f"Erro ao recuperar clientes: {e}")
+        return ["Todos"]
+
 def get_responsaveis() -> List[str]:
     """Retorna a lista de responsáveis únicos."""
     try:
@@ -776,6 +791,7 @@ def get_entregas_gerais(start_date: str, end_date: str) -> pd.DataFrame:
         with get_db_connection() as conn:
             query = '''
                 SELECT 
+                    cliente,
                     responsavel, 
                     atividade, 
                     data_entrega,
@@ -864,6 +880,7 @@ def upload_atividades():
         st.markdown("""
             **Como preparar seu arquivo Excel:**
             1. O arquivo deve conter as colunas obrigatórias:
+               - `Cliente` (texto)
                - `Responsável` (texto)
                - `Atividade` (texto)
                - `Data de Entrega` (data no formato YYYY-MM-DD)
@@ -885,6 +902,7 @@ def upload_atividades():
             
             # Mapeia os nomes das colunas
             column_mapping = {
+                'CLIENTE': 'cliente',
                 'RESPONSÁVEL': 'responsavel',
                 'ATIVIDADE': 'atividade',
                 'DATA DE ENTREGA': 'data_entrega',
@@ -904,6 +922,7 @@ def upload_atividades():
             atividades = []
             for _, row in df.iterrows():
                 atividades.append((
+                    row['CLIENTE'],
                     row['RESPONSÁVEL'],
                     row['ATIVIDADE'],
                     row['DATA DE ENTREGA'].strftime('%Y-%m-%d') if pd.notna(row['DATA DE ENTREGA']) else None,
@@ -930,10 +949,11 @@ def cadastro_atividade():
         with st.form("nova_atividade", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
+                cliente = st.text_input("Cliente*", placeholder="Nome do cliente")
                 responsavel = st.text_input("Responsável*", placeholder="Nome do responsável")
-                atividade = st.text_input("Atividade*", placeholder="Descrição da atividade")
                 
             with col2:
+                atividade = st.text_input("Atividade*", placeholder="Descrição da atividade")
                 data_entrega = st.date_input("Data de Entrega", value=datetime.now())
                 mes_referencia = st.selectbox("Mês de Referência", [
                     f"{mes:02d}/{ano}" 
@@ -944,8 +964,9 @@ def cadastro_atividade():
             st.markdown("<small>Campos marcados com * são obrigatórios</small>", unsafe_allow_html=True)
             
             if st.form_submit_button("Adicionar Atividade", use_container_width=True, type="primary"):
-                if responsavel and atividade:
+                if cliente and responsavel and atividade:
                     campos = (
+                        cliente,
                         responsavel, 
                         atividade,
                         data_entrega.strftime('%Y-%m-%d'),
@@ -996,19 +1017,21 @@ def lista_atividades():
     for row in atividades:
         # Usando índices numéricos para acessar os valores da tupla
         id = row[0]
-        responsavel = row[1]
-        atividade = row[2]
-        data_entrega = row[3]
-        mes_referencia = row[4]
-        feito = row[5]
-        data_criacao = row[6]
+        cliente = row[1]
+        responsavel = row[2]
+        atividade = row[3]
+        data_entrega = row[4]
+        mes_referencia = row[5]
+        feito = row[6]
+        data_criacao = row[7]
         
-        with st.expander(f"{'✅' if feito else '📌'} {responsavel} - {atividade} - {mes_referencia}", expanded=False):
+        with st.expander(f"{'✅' if feito else '📌'} {cliente} - {responsavel} - {atividade} - {mes_referencia}", expanded=False):
             st.markdown(f'<div class="card{" completed" if feito else ""}">', unsafe_allow_html=True)
             
             col1, col2 = st.columns([3, 1])
             
             with col1:
+                st.markdown(f"**Cliente:** {cliente}")
                 st.markdown(f"**Responsável:** {responsavel}")
                 st.markdown(f"**Atividade:** {atividade}")
                 st.markdown(f"**Data de Entrega:** {data_entrega}")
@@ -1238,7 +1261,7 @@ def mostrar_sidebar():
                 # Próximas entregas
                 hoje = datetime.now().strftime('%Y-%m-%d')
                 c.execute('''
-                    SELECT responsavel, atividade, data_entrega 
+                    SELECT cliente, responsavel, atividade, data_entrega 
                     FROM atividades 
                     WHERE data_entrega >= ? AND feito = 0
                     ORDER BY data_entrega ASC
@@ -1248,10 +1271,10 @@ def mostrar_sidebar():
                 
                 if proximas:
                     st.markdown("### Próximas Entregas")
-                    for responsavel, atividade, data in proximas:
+                    for cliente, responsavel, atividade, data in proximas:
                         st.markdown(f"""
                             <div class="proxima-entrega">
-                                <strong>{responsavel}</strong><br>
+                                <strong>{cliente} - {responsavel}</strong><br>
                                 {atividade}<br>
                                 <small>📅 {data}</small>
                             </div>
@@ -1299,6 +1322,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
