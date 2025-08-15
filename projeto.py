@@ -834,7 +834,7 @@ def mostrar_capa():
     st.markdown("""
     <div class="cover-container">
         <img src="https://raw.githubusercontent.com/DaniloNs-creator/final/7ea6ab2a610ef8f0c11be3c34f046e7ff2cdfc6a/haefele_logo.png" class="cover-logo">
-        <h1 class="cover-title">Carteira de Clientes</h1>
+        <h1 class="cover-title">Controle de atividades</h1>
         <p class="cover-subtitle">Painel de Gestão de Atividades e Entregas</p>
     </div>
     """, unsafe_allow_html=True)
@@ -1299,5 +1299,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
