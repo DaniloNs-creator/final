@@ -48,8 +48,121 @@ def load_css():
                 --background-gradient: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
                 --card-shadow: 0 10px 20px rgba(0,0,0,0.1), 0 6px 6px rgba(0,0,0,0.05);
                 --transition: all 0.3s cubic-bezier(.25,.8,.25,1);
+                --menu-active: #3498db;
+                --menu-hover: #2980b9;
+                --menu-text: #ffffff;
             }
             
+            /* Capa profissional */
+            .cover-container {
+                background: linear-gradient(135deg, #2c3e50, #3498db);
+                color: white;
+                padding: 3rem 2rem;
+                border-radius: 12px;
+                margin-bottom: 2rem;
+                box-shadow: var(--card-shadow);
+                position: relative;
+                overflow: hidden;
+                animation: fadeIn 1s ease-out;
+            }
+            
+            .cover-container::before {
+                content: "";
+                position: absolute;
+                top: -50%;
+                left: -50%;
+                width: 200%;
+                height: 200%;
+                background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+                animation: rotate 20s linear infinite;
+                z-index: 0;
+            }
+            
+            .cover-title {
+                font-size: 3.5rem;
+                font-weight: 800;
+                margin-bottom: 1rem;
+                position: relative;
+                z-index: 1;
+                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+                background: linear-gradient(90deg, #ffffff, #e0f7fa);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }
+            
+            .cover-subtitle {
+                font-size: 1.5rem;
+                font-weight: 400;
+                margin-bottom: 2rem;
+                position: relative;
+                z-index: 1;
+                opacity: 0.9;
+            }
+            
+            .cover-logo {
+                position: absolute;
+                top: 20px;
+                right: 20px;
+                width: 80px;
+                height: 80px;
+                background: white;
+                border-radius: 50%;
+                padding: 10px;
+                box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+                z-index: 1;
+            }
+            
+            @keyframes rotate {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+            }
+            
+            /* Menu moderno */
+            .stTabs [data-baseweb="tab-list"] {
+                gap: 0;
+                background: var(--dark-color);
+                padding: 0.5rem;
+                border-radius: 12px;
+                margin-bottom: 2rem;
+            }
+            
+            .stTabs [data-baseweb="tab"] {
+                padding: 0.75rem 1.5rem;
+                border-radius: 8px !important;
+                background-color: transparent !important;
+                transition: var(--transition);
+                border: none !important;
+                font-weight: 600;
+                color: var(--menu-text) !important;
+                margin: 0 !important;
+            }
+            
+            .stTabs [data-baseweb="tab"]:hover {
+                background-color: var(--menu-hover) !important;
+            }
+            
+            .stTabs [aria-selected="true"] {
+                background: linear-gradient(135deg, var(--menu-active), var(--menu-hover)) !important;
+                color: white !important;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            }
+            
+            .stTabs [aria-selected="true"] [data-testid="stMarkdownContainer"] p {
+                color: white !important;
+            }
+            
+            /* Botão de excluir todas */
+            .danger-button {
+                background: linear-gradient(135deg, #e74c3c, #c0392b) !important;
+                color: white !important;
+            }
+            
+            .danger-button:hover {
+                background: linear-gradient(135deg, #c0392b, #e74c3c) !important;
+                transform: translateY(-2px) !important;
+            }
+            
+            /* Restante do CSS */
             .main {
                 background: var(--background-gradient);
                 color: var(--dark-color);
@@ -279,30 +392,6 @@ def load_css():
                 animation: fadeIn 0.5s ease-in;
             }
             
-            .stTabs [data-baseweb="tab-list"] {
-                gap: 10px;
-            }
-            
-            .stTabs [data-baseweb="tab"] {
-                padding: 0.5rem 1.5rem;
-                border-radius: 8px !important;
-                background-color: white !important;
-                transition: var(--transition);
-                border: 1px solid #dfe6e9 !important;
-                font-weight: 600;
-            }
-            
-            .stTabs [aria-selected="true"] {
-                background: linear-gradient(135deg, var(--primary-color), #2980b9) !important;
-                color: white !important;
-                border: none !important;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            }
-            
-            .stTabs [aria-selected="true"] [data-testid="stMarkdownContainer"] p {
-                color: white !important;
-            }
-            
             .stExpander [data-testid="stExpander"] {
                 border: none !important;
                 box-shadow: var(--card-shadow);
@@ -400,6 +489,14 @@ def load_css():
                 
                 .header {
                     font-size: 1.5rem;
+                }
+                
+                .cover-title {
+                    font-size: 2.5rem;
+                }
+                
+                .cover-subtitle {
+                    font-size: 1.2rem;
                 }
             }
         </style>
@@ -670,6 +767,19 @@ def excluir_atividade(id: int) -> bool:
         st.error(f"Erro ao excluir atividade: {e}")
         return False
 
+def excluir_todas_atividades() -> bool:
+    """Remove todas as atividades do banco de dados."""
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute('DELETE FROM atividades')
+            conn.commit()
+            st.session_state.atualizar_lista = True  # Flag para atualizar a lista
+            return c.rowcount > 0
+    except sqlite3.Error as e:
+        st.error(f"Erro ao excluir atividades: {e}")
+        return False
+
 def marcar_feito(id: int, feito: bool) -> bool:
     """Atualiza o status de conclusão de uma atividade."""
     try:
@@ -796,9 +906,15 @@ def get_dados_responsaveis() -> pd.DataFrame:
 # --- COMPONENTES DA INTERFACE ---
 def login_section():
     """Exibe a seção de login."""
-    st.markdown('<div class="title">Carteira de Clientes - Painel de Atividades</div>', unsafe_allow_html=True)
-    
     with st.container():
+        st.markdown("""
+            <div class="cover-container">
+                <h1 class="cover-title">Carteira de Clientes</h1>
+                <p class="cover-subtitle">Painel de Atividades e Entregas</p>
+                <img src="https://www.realiconsultoria.com.br/wp-content/uploads/2022/02/cropped-fav_Prancheta-1-150x150.png" class="cover-logo">
+            </div>
+        """, unsafe_allow_html=True)
+        
         with st.form("login_form"):
             col1, col2 = st.columns(2)
             username = col1.text_input("Usuário", key="username")
@@ -1010,6 +1126,20 @@ def lista_atividades():
     if not atividades:
         st.info("Nenhuma atividade encontrada com os filtros selecionados.", icon="ℹ️")
         return
+    
+    # Botão para excluir todas as atividades (com confirmação)
+    if st.button("🗑️ Excluir Todas as Atividades", type="primary", key="delete_all", 
+                use_container_width=True, help="CUIDADO: Esta ação não pode ser desfeita!"):
+        st.warning("⚠️ Você está prestes a excluir TODAS as atividades. Esta ação é irreversível!")
+        confirm = st.checkbox("Confirmar exclusão de todas as atividades")
+        
+        if confirm and st.button("CONFIRMAR EXCLUSÃO TOTAL", type="secondary", 
+                               use_container_width=True, key="confirm_delete_all"):
+            if excluir_todas_atividades():
+                st.success("Todas as atividades foram excluídas com sucesso!")
+                st.rerun()
+            else:
+                st.error("Ocorreu um erro ao excluir as atividades")
     
     for row in atividades:
         # Usando índices numéricos para acessar os valores da tupla
@@ -1309,6 +1439,16 @@ def main():
     if not st.session_state.logged_in:
         login_section()
     else:
+        # Capa profissional
+        st.markdown("""
+            <div class="cover-container">
+                <h1 class="cover-title">Carteira de Clientes</h1>
+                <p class="cover-subtitle">Painel de Atividades e Entregas</p>
+                <img src="https://www.realiconsultoria.com.br/wp-content/uploads/2022/02/cropped-fav_Prancheta-1-150x150.png" class="cover-logo">
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Menu moderno em abas
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📋 Lista de Atividades", 
             "📝 Cadastrar Atividades", 
