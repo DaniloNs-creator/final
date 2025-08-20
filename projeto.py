@@ -577,7 +577,7 @@ def processador_txt():
             st.info("Tente novamente ou verifique o arquivo.")
 
 # =============================================
-# FUNÇÕES DO PROCESSADOR DE XML (NF-e)
+# FUNÇÕES DO PROCESSADOR DE XML (NF-e) - CORRIGIDO
 # =============================================
 
 def processador_xml():
@@ -614,6 +614,35 @@ def processador_xml():
             # Valores de ICMS ST e DIFAL
             v_icms_st = icms_tot.find('nfe:vICMSST', ns).text if icms_tot is not None and icms_tot.find('nfe:vICMSST', ns) is not None else None
             v_icms_uf_dest = icms_tot.find('nfe:vICMSUFDest', ns).text if icms_tot is not None and icms_tot.find('nfe:vICMSUFDest', ns) is not None else None
+            
+            # Buscar ICMS ST por produto (caso não esteja no total)
+            if v_icms_st is None:
+                # Procurar ICMS ST nos itens
+                itens = root.findall('.//nfe:det', ns)
+                total_icms_st = 0.0
+                
+                for item in itens:
+                    imposto = item.find('nfe:imposto', ns)
+                    if imposto is not None:
+                        icms = imposto.find('nfe:ICMS', ns)
+                        if icms is not None:
+                            # Verificar diferentes tipos de ICMS
+                            for tipo_icms in icms:
+                                if tipo_icms.tag.endswith('ICMS20') or tipo_icms.tag.endswith('ICMS30') or \
+                                   tipo_icms.tag.endswith('ICMS60') or tipo_icms.tag.endswith('ICMS70') or \
+                                   tipo_icms.tag.endswith('ICMS90') or tipo_icms.tag.endswith('ICMSPart') or \
+                                   tipo_icms.tag.endswith('ICMSST'):
+                                    v_bc_st = tipo_icms.find('nfe:vBCST', ns)
+                                    v_icms_st_item = tipo_icms.find('nfe:vICMSST', ns)
+                                    
+                                    if v_icms_st_item is not None and v_icms_st_item.text:
+                                        try:
+                                            total_icms_st += float(v_icms_st_item.text)
+                                        except (ValueError, TypeError):
+                                            pass
+                
+                if total_icms_st > 0:
+                    v_icms_st = str(total_icms_st)
             
             # Formatar os valores numéricos
             try:
@@ -852,7 +881,7 @@ def marcar_feito(id: int, feito: bool) -> bool:
         return False
 
 def atualizar_data_entrega(id: int, nova_data: str) -> bool:
-    """Atualiza la data de entrega de uma actividad."""
+    """Atualiza la data de entrega de una actividad."""
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
@@ -878,7 +907,7 @@ def atualizar_mes_referencia(id: int, novo_mes: str) -> bool:
         return False
 
 def processar_proximo_mes(id: int) -> bool:
-    """Atualiza a data de entrega e o mês de referência para o próximo mês."""
+    """Atualiza la data de entrega e o mês de referência para o próximo mês."""
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
@@ -1461,7 +1490,7 @@ def mostrar_indicadores():
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
                 xaxis=dict(showgrid=False),
-                yaxis=dict(showgrid=True, gridcolor='#f1f1f1')
+                yaxis=dict(showgrid=True, gridcolor='f1f1f1')
             )
             st.plotly_chart(fig_bar_resp, use_container_width=True)
             
