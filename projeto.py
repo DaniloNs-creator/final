@@ -458,15 +458,18 @@ def load_css():
             }}
             
             .post-it {{
-                width: 300px;
-                min-height: 200px;
-                padding: 15px;
+                width: 320px;
+                min-height: 280px;
+                padding: 20px;
                 border-radius: 8px;
                 box-shadow: 0 4px 8px rgba(0,0,0,0.1);
                 position: relative;
                 transition: all 0.3s ease;
                 transform: rotate(-1deg);
                 cursor: pointer;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
             }}
             
             .post-it:hover {{
@@ -508,72 +511,78 @@ def load_css():
             .post-it-header {{
                 display: flex;
                 justify-content: space-between;
-                align-items: center;
-                margin-bottom: 10px;
-                border-bottom: 1px solid rgba(0,0,0,0.1);
-                padding-bottom: 5px;
+                align-items: flex-start;
+                margin-bottom: 15px;
+                border-bottom: 2px solid rgba(0,0,0,0.1);
+                padding-bottom: 10px;
             }}
             
             .post-it-cliente {{
                 font-weight: bold;
-                font-size: 1.1em;
+                font-size: 1.2em;
                 color: #2c3e50;
+                flex: 1;
             }}
             
             .post-it-responsavel {{
                 font-size: 0.9em;
                 color: #7f8c8d;
                 background: rgba(255,255,255,0.5);
-                padding: 2px 8px;
+                padding: 4px 10px;
                 border-radius: 12px;
+                white-space: nowrap;
             }}
             
             .post-it-atividade {{
                 margin: 10px 0;
-                font-size: 0.95em;
+                font-size: 1em;
                 line-height: 1.4;
                 color: #34495e;
+                flex: 1;
+                overflow-wrap: break-word;
             }}
             
             .post-it-footer {{
-                position: absolute;
-                bottom: 10px;
-                left: 15px;
-                right: 15px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                font-size: 0.8em;
-                color: #7f8c8d;
+                margin-top: 15px;
             }}
             
             .post-it-data {{
                 font-weight: bold;
+                font-size: 0.9em;
+                color: #2c3e50;
+                margin-bottom: 5px;
             }}
             
             .post-it-mes {{
                 background: rgba(0,0,0,0.1);
-                padding: 2px 6px;
+                padding: 4px 8px;
                 border-radius: 4px;
+                font-size: 0.8em;
+                color: #7f8c8d;
+                display: inline-block;
             }}
             
             .post-it-actions {{
                 display: flex;
-                gap: 5px;
+                flex-direction: column;
+                gap: 8px;
                 margin-top: 15px;
             }}
             
             .post-it-action-btn {{
-                padding: 3px 8px;
+                padding: 6px 12px;
                 font-size: 0.8em;
                 border: none;
                 border-radius: 4px;
                 cursor: pointer;
                 transition: all 0.2s ease;
+                background: rgba(255,255,255,0.8);
+                color: #2c3e50;
             }}
             
             .post-it-action-btn:hover {{
                 transform: scale(1.05);
+                background: rgba(255,255,255,1);
             }}
             
             .post-it-checkbox {{
@@ -581,6 +590,18 @@ def load_css():
                 top: 10px;
                 right: 10px;
                 transform: scale(1.2);
+            }}
+            
+            .post-it-status {{
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                background: rgba(46, 204, 113, 0.9);
+                color: white;
+                padding: 2px 8px;
+                border-radius: 4px;
+                font-size: 0.7em;
+                font-weight: bold;
             }}
             
             /* Responsive adjustments */
@@ -1234,7 +1255,7 @@ def get_dados_indicadores() -> pd.DataFrame:
                     (SUM(feito) * 100.0 / COUNT(*)) as percentual
                 FROM atividades
                 GROUP BY mes_referencia
-                ORDER BY SUBSTR(mes_referencia, 4) || SUBSTR(mes_referencia, 1, 2)
+                ORDER BY mes_referencia DESC
             '''
             return pd.read_sql(query, conn)
     except Exception as e:
@@ -1301,7 +1322,7 @@ def upload_atividades():
                - `Atividade` (texto)
                - `Data de Entrega` (data no formato YYYY-MM-DD)
                - `Mês de Referência` (texto no formato MM/YYYY)
-            2. Salve o arquivo no formato .xlsx or .xls
+            2. Salve o arquivo no formato .xlsx ou .xls
         """)
     
     uploaded_file = st.file_uploader(
@@ -1322,7 +1343,7 @@ def upload_atividades():
                 'RESPONSÁVEL': 'responsavel',
                 'ATIVIDADE': 'atividade',
                 'DATA DE ENTREGA': 'data_entrega',
-                'MÊS DE REFERÊNCIA': 'mes_referencia'
+                'MÊS DE REFERência': 'mes_referencia'
             }
 
             # Garante que as colunas existam no dataframe, usando um valor padrão se não
@@ -1480,62 +1501,40 @@ def lista_atividades():
         else:
             data_formatada = "Sem data"
         
-        # Cria o post-it
-        st.markdown(f"""
-        <div class="post-it {color_class}">
-            <div class="post-it-header">
-                <div class="post-it-cliente">{cliente}</div>
-                <div class="post-it-responsavel">{responsavel}</div>
+        # Cria o post-it com todas as informações e ações
+        with st.container():
+            st.markdown(f"""
+            <div class="post-it {color_class}">
+                <div class="post-it-header">
+                    <div class="post-it-cliente">{cliente}</div>
+                    <div class="post-it-responsavel">{responsavel}</div>
+                </div>
+                <div class="post-it-atividade">{atividade}</div>
+                <div class="post-it-footer">
+                    <div class="post-it-data">📅 {data_formatada}</div>
+                    <div class="post-it-mes">{mes_referencia}</div>
+                </div>
             </div>
-            <div class="post-it-atividade">{atividade}</div>
-            <div class="post-it-footer">
-                <div class="post-it-data">📅 {data_formatada}</div>
-                <div class="post-it-mes">{mes_referencia}</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Botões de ação em um expander para não poluir o visual
-        with st.expander(f"Ações para {cliente}", expanded=False):
-            col_a, col_b = st.columns(2)
+            """, unsafe_allow_html=True)
+            
+            # Ações diretamente abaixo de cada post-it
+            col_a, col_b, col_c = st.columns([1, 1, 1])
             
             with col_a:
                 # Checkbox para marcar/desmarcar como concluído
-                novo_status = st.checkbox(
-                    "Marcar como concluído",
-                    value=feito,
-                    key=f"feito_{id}",
-                    on_change=lambda id=id, feito=feito: marcar_feito(id, not feito)
-                )
-                
-                # Edição da data de entrega
-                nova_data = st.date_input(
-                    "Data de Entrega",
-                    value=datetime.strptime(data_entrega, '%Y-%m-%d') if data_entrega else datetime.now(),
-                    key=f"data_{id}"
-                )
-                if st.button("Atualizar Data", key=f"update_data_{id}"):
-                    if atualizar_data_entrega(id, nova_data.strftime('%Y-%m-%d')):
-                        st.success("Data de entrega atualizada com sucesso!")
-                        time.sleep(1)
-                        st.rerun()
+                if st.checkbox("Concluído", value=feito, key=f"feito_{id}"):
+                    marcar_feito(id, True)
+                else:
+                    marcar_feito(id, False)
             
             with col_b:
-                # Edição do mês de referência
-                novo_mes = st.selectbox(
-                    "Mês de Referência",
-                    [f"{mes:02d}/{ano}" for ano in range(2023, 2026) for mes in range(1, 13)],
-                    index=[f"{mes:02d}/{ano}" for ano in range(2023, 2026) for mes in range(1, 13)].index(mes_referencia) if mes_referencia else 0,
-                    key=f"mes_{id}"
-                )
-                if st.button("Atualizar Mês", key=f"update_mes_{id}"):
-                    if atualizar_mes_referencia(id, novo_mes):
-                        st.success("Mês de referência atualizado com sucesso!")
-                        time.sleep(1)
-                        st.rerun()
-                
-                if st.button("Excluir", key=f"del_{id}", use_container_width=True):
+                if st.button("🗑️", key=f"del_{id}", help="Excluir atividade"):
                     if excluir_atividade(id):
+                        st.rerun()
+            
+            with col_c:
+                if st.button("➡️", key=f"next_{id}", help="Próximo mês"):
+                    if processar_proximo_mes(id):
                         st.rerun()
     
     st.markdown('</div>', unsafe_allow_html=True)
@@ -1651,7 +1650,7 @@ def mostrar_indicadores():
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
                 xaxis=dict(showgrid=False),
-                yaxis=dict(showgrid=True, gridcolor='f1f1f1')
+                yaxis=dict(showgrid=True, gridcolor='#f1f1f1')
             )
             st.plotly_chart(fig_bar_resp, use_container_width=True)
             
