@@ -451,15 +451,15 @@ def load_css():
             
             /* Estilo Post-it para atividades */
             .post-it-container {{
-                display: flex;
-                flex-wrap: wrap;
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
                 gap: 20px;
                 margin-top: 20px;
             }}
             
             .post-it {{
-                width: 320px;
-                min-height: 280px;
+                width: 100%;
+                min-height: 200px;
                 padding: 20px;
                 border-radius: 8px;
                 box-shadow: 0 4px 8px rgba(0,0,0,0.1);
@@ -562,36 +562,6 @@ def load_css():
                 display: inline-block;
             }}
             
-            .post-it-actions {{
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-                margin-top: 15px;
-            }}
-            
-            .post-it-action-btn {{
-                padding: 6px 12px;
-                font-size: 0.8em;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                transition: all 0.2s ease;
-                background: rgba(255,255,255,0.8);
-                color: #2c3e50;
-            }}
-            
-            .post-it-action-btn:hover {{
-                transform: scale(1.05);
-                background: rgba(255,255,255,1);
-            }}
-            
-            .post-it-checkbox {{
-                position: absolute;
-                top: 10px;
-                right: 10px;
-                transform: scale(1.2);
-            }}
-            
             .post-it-status {{
                 position: absolute;
                 top: 10px;
@@ -602,6 +572,15 @@ def load_css():
                 border-radius: 4px;
                 font-size: 0.7em;
                 font-weight: bold;
+            }}
+            
+            /* Modal style for post-it details */
+            .post-it-modal {{
+                background: white;
+                padding: 20px;
+                border-radius: 12px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+                margin: 10px 0;
             }}
             
             /* Responsive adjustments */
@@ -617,6 +596,10 @@ def load_css():
                 .post-it {{
                     width: 100%;
                     transform: rotate(0deg);
+                }}
+                
+                .post-it-container {{
+                    grid-template-columns: 1fr;
                 }}
             }}
         </style>
@@ -1329,8 +1312,7 @@ def upload_atividades():
         "Selecione o arquivo Excel com as atividades", 
         type=["xlsx", "xls"],
         accept_multiple_files=False,
-        help="Arraste e solte ou clique para selecionar o arquivo"
-    )
+        help="Arraste e solte ou clique para selecionar o arquile")
     
     if uploaded_file is not None:
         try:
@@ -1343,7 +1325,7 @@ def upload_atividades():
                 'RESPONSÁVEL': 'responsavel',
                 'ATIVIDADE': 'atividade',
                 'DATA DE ENTREGA': 'data_entrega',
-                'MÊS DE REFERência': 'mes_referencia'
+                'MÊS DE REFERÊNCIA': 'mes_referencia'
             }
 
             # Garante que as colunas existam no dataframe, usando um valor padrão se não
@@ -1501,8 +1483,9 @@ def lista_atividades():
         else:
             data_formatada = "Sem data"
         
-        # Cria o post-it com todas as informações e ações
-        with st.container():
+        # Cria o post-it
+        with st.expander(f"", expanded=False):
+            # Post-it visual
             st.markdown(f"""
             <div class="post-it {color_class}">
                 <div class="post-it-header">
@@ -1514,28 +1497,68 @@ def lista_atividades():
                     <div class="post-it-data">📅 {data_formatada}</div>
                     <div class="post-it-mes">{mes_referencia}</div>
                 </div>
+                {"<div class='post-it-status'>CONCLUÍDO</div>" if feito else ""}
             </div>
             """, unsafe_allow_html=True)
             
-            # Ações diretamente abaixo de cada post-it
-            col_a, col_b, col_c = st.columns([1, 1, 1])
+            # Área de edição (dentro do expander)
+            st.markdown('<div class="post-it-modal">', unsafe_allow_html=True)
+            
+            col_a, col_b = st.columns(2)
             
             with col_a:
+                st.markdown("**Editar Atividade**")
+                
                 # Checkbox para marcar/desmarcar como concluído
-                if st.checkbox("Concluído", value=feito, key=f"feito_{id}"):
-                    marcar_feito(id, True)
-                else:
-                    marcar_feito(id, False)
+                novo_status = st.checkbox(
+                    "Marcar como concluído",
+                    value=feito,
+                    key=f"feito_{id}"
+                )
+                if novo_status != feito:
+                    marcar_feito(id, novo_status)
+                    st.rerun()
+                
+                # Edição da data de entrega
+                nova_data = st.date_input(
+                    "Data de Entrega",
+                    value=datetime.strptime(data_entrega, '%Y-%m-%d') if data_entrega else datetime.now(),
+                    key=f"data_{id}"
+                )
+                if st.button("Atualizar Data", key=f"update_data_{id}"):
+                    if atualizar_data_entrega(id, nova_data.strftime('%Y-%m-%d')):
+                        st.success("Data de entrega atualizada com sucesso!")
+                        time.sleep(1)
+                        st.rerun()
             
             with col_b:
-                if st.button("🗑️", key=f"del_{id}", help="Excluir atividade"):
+                st.markdown("**Ações**")
+                
+                # Edição do mês de referência
+                novo_mes = st.selectbox(
+                    "Mês de Referência",
+                    [f"{mes:02d}/{ano}" for ano in range(2023, 2026) for mes in range(1, 13)],
+                    index=[f"{mes:02d}/{ano}" for ano in range(2023, 2026) for mes in range(1, 13)].index(mes_referencia) if mes_referencia else 0,
+                    key=f"mes_{id}"
+                )
+                if st.button("Atualizar Mês", key=f"update_mes_{id}"):
+                    if atualizar_mes_referencia(id, novo_mes):
+                        st.success("Mês de referência atualizado com sucesso!")
+                        time.sleep(1)
+                        st.rerun()
+                
+                # Botão para processar próximo mês
+                if st.button("Processar Próximo Mês", key=f"process_{id}", type="primary"):
+                    if processar_proximo_mes(id):
+                        st.success("Atividade atualizada para o próximo mês!")
+                        time.sleep(1)
+                        st.rerun()
+                
+                if st.button("Excluir Atividade", key=f"del_{id}", use_container_width=True):
                     if excluir_atividade(id):
                         st.rerun()
             
-            with col_c:
-                if st.button("➡️", key=f"next_{id}", help="Próximo mês"):
-                    if processar_proximo_mes(id):
-                        st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
     
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1548,7 +1571,7 @@ def mostrar_entregas_gerais():
     end_date = st.date_input("Data de Fim", value=today)
 
     if start_date > end_date:
-        st.error("A data de início não pode ser posterior à data de fim.")
+        st.error("A data de início não pode be posterior à data de fim.")
         return
 
     df = get_entregas_gerais(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
