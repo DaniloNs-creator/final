@@ -449,6 +449,140 @@ def load_css():
                 animation: pulse 2s infinite;
             }}
             
+            /* Estilo Post-it para atividades */
+            .post-it-container {{
+                display: flex;
+                flex-wrap: wrap;
+                gap: 20px;
+                margin-top: 20px;
+            }}
+            
+            .post-it {{
+                width: 300px;
+                min-height: 200px;
+                padding: 15px;
+                border-radius: 8px;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+                position: relative;
+                transition: all 0.3s ease;
+                transform: rotate(-1deg);
+                cursor: pointer;
+            }}
+            
+            .post-it:hover {{
+                transform: rotate(0deg) scale(1.02);
+                box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+            }}
+            
+            .post-it.yellow {{
+                background: linear-gradient(135deg, #fff8c9 0%, #fff176 100%);
+                border-left: 5px solid #ffd54f;
+            }}
+            
+            .post-it.blue {{
+                background: linear-gradient(135deg, #bbdefb 0%, #90caf9 100%);
+                border-left: 5px solid #2196f3;
+            }}
+            
+            .post-it.green {{
+                background: linear-gradient(135deg, #c8e6c9 0%, #a5d6a7 100%);
+                border-left: 5px solid #4caf50;
+            }}
+            
+            .post-it.pink {{
+                background: linear-gradient(135deg, #f8bbd0 0%, #f48fb1 100%);
+                border-left: 5px solid #e91e63;
+            }}
+            
+            .post-it.purple {{
+                background: linear-gradient(135deg, #e1bee7 0%, #ce93d8 100%);
+                border-left: 5px solid #9c27b0;
+            }}
+            
+            .post-it.completed {{
+                opacity: 0.7;
+                background: linear-gradient(135deg, #e8f5e8 0%, #c8e6c9 100%);
+                border-left: 5px solid #4caf50;
+            }}
+            
+            .post-it-header {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 10px;
+                border-bottom: 1px solid rgba(0,0,0,0.1);
+                padding-bottom: 5px;
+            }}
+            
+            .post-it-cliente {{
+                font-weight: bold;
+                font-size: 1.1em;
+                color: #2c3e50;
+            }}
+            
+            .post-it-responsavel {{
+                font-size: 0.9em;
+                color: #7f8c8d;
+                background: rgba(255,255,255,0.5);
+                padding: 2px 8px;
+                border-radius: 12px;
+            }}
+            
+            .post-it-atividade {{
+                margin: 10px 0;
+                font-size: 0.95em;
+                line-height: 1.4;
+                color: #34495e;
+            }}
+            
+            .post-it-footer {{
+                position: absolute;
+                bottom: 10px;
+                left: 15px;
+                right: 15px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                font-size: 0.8em;
+                color: #7f8c8d;
+            }}
+            
+            .post-it-data {{
+                font-weight: bold;
+            }}
+            
+            .post-it-mes {{
+                background: rgba(0,0,0,0.1);
+                padding: 2px 6px;
+                border-radius: 4px;
+            }}
+            
+            .post-it-actions {{
+                display: flex;
+                gap: 5px;
+                margin-top: 15px;
+            }}
+            
+            .post-it-action-btn {{
+                padding: 3px 8px;
+                font-size: 0.8em;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                transition: all 0.2s ease;
+            }}
+            
+            .post-it-action-btn:hover {{
+                transform: scale(1.05);
+            }}
+            
+            .post-it-checkbox {{
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                transform: scale(1.2);
+            }}
+            
             /* Responsive adjustments */
             @media (max-width: 768px) {{
                 .title {{
@@ -457,6 +591,11 @@ def load_css():
                 
                 .header {{
                     font-size: 1.5rem;
+                }}
+                
+                .post-it {{
+                    width: 100%;
+                    transform: rotate(0deg);
                 }}
             }}
         </style>
@@ -1162,7 +1301,7 @@ def upload_atividades():
                - `Atividade` (texto)
                - `Data de Entrega` (data no formato YYYY-MM-DD)
                - `Mês de Referência` (texto no formato MM/YYYY)
-            2. Salve o arquivo no formato .xlsx ou .xls
+            2. Salve o arquivo no formato .xlsx or .xls
         """)
     
     uploaded_file = st.file_uploader(
@@ -1259,7 +1398,7 @@ def cadastro_atividade():
         upload_atividades()
 
 def lista_atividades():
-    """Exibe a lista de atividades cadastradas com filtros."""
+    """Exibe a lista de atividades cadastradas com filtros no estilo post-it."""
     st.markdown('<div class="header">📋 Lista de Atividades</div>', unsafe_allow_html=True)
     
     # Botões para ações em massa
@@ -1310,6 +1449,12 @@ def lista_atividades():
         st.info("Nenhuma atividade encontrada com os filtros selecionados.", icon="ℹ️")
         return
     
+    # Container para os post-its
+    st.markdown('<div class="post-it-container">', unsafe_allow_html=True)
+    
+    # Cores para os post-its
+    colors = ['yellow', 'blue', 'green', 'pink', 'purple']
+    
     for row in atividades:
         id = row[0]
         cliente = row[1]
@@ -1320,15 +1465,48 @@ def lista_atividades():
         feito = bool(row[6])
         data_criacao = row[7]
         
-        with st.expander(f"{'✅' if feito else '📌'} {cliente} - {responsavel} - {atividade} - {mes_referencia}", expanded=False):
-            st.markdown(f'<div class="card{" completed" if feito else ""}">', unsafe_allow_html=True)
+        # Escolhe uma cor aleatória ou usa verde para concluídas
+        if feito:
+            color_class = "completed"
+        else:
+            color_class = random.choice(colors)
+        
+        # Formata a data
+        if data_entrega:
+            try:
+                data_formatada = datetime.strptime(data_entrega, '%Y-%m-%d').strftime('%d/%m/%Y')
+            except:
+                data_formatada = data_entrega
+        else:
+            data_formatada = "Sem data"
+        
+        # Cria o post-it
+        st.markdown(f"""
+        <div class="post-it {color_class}">
+            <div class="post-it-header">
+                <div class="post-it-cliente">{cliente}</div>
+                <div class="post-it-responsavel">{responsavel}</div>
+            </div>
+            <div class="post-it-atividade">{atividade}</div>
+            <div class="post-it-footer">
+                <div class="post-it-data">📅 {data_formatada}</div>
+                <div class="post-it-mes">{mes_referencia}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Botões de ação em um expander para não poluir o visual
+        with st.expander(f"Ações para {cliente}", expanded=False):
+            col_a, col_b = st.columns(2)
             
-            col1, col2 = st.columns([3, 1])
-            
-            with col1:
-                st.markdown(f"**Cliente:** {cliente}")
-                st.markdown(f"**Responsável:** {responsavel}")
-                st.markdown(f"**Atividade:** {atividade}")
+            with col_a:
+                # Checkbox para marcar/desmarcar como concluído
+                novo_status = st.checkbox(
+                    "Marcar como concluído",
+                    value=feito,
+                    key=f"feito_{id}",
+                    on_change=lambda id=id, feito=feito: marcar_feito(id, not feito)
+                )
                 
                 # Edição da data de entrega
                 nova_data = st.date_input(
@@ -1341,7 +1519,8 @@ def lista_atividades():
                         st.success("Data de entrega atualizada com sucesso!")
                         time.sleep(1)
                         st.rerun()
-                
+            
+            with col_b:
                 # Edição do mês de referência
                 novo_mes = st.selectbox(
                     "Mês de Referência",
@@ -1355,29 +1534,11 @@ def lista_atividades():
                         time.sleep(1)
                         st.rerun()
                 
-                # Botão para processar próximo mês
-                if st.button("Processar Próximo Mês", key=f"process_{id}", type="primary"):
-                    if processar_proximo_mes(id):
-                        st.success("Atividade atualizada para o próximo mês!")
-                        time.sleep(1)
-                        st.rerun()
-                
-                st.markdown(f"**Data de Criação:** {data_criacao}")
-                
-            with col2:
-                # Checkbox para marcar/desmarcar como concluído
-                novo_status = st.checkbox(
-                    "Marcar como concluído",
-                    value=feito,
-                    key=f"feito_{id}",
-                    on_change=lambda id=id, feito=feito: marcar_feito(id, not feito)
-                )
-                
                 if st.button("Excluir", key=f"del_{id}", use_container_width=True):
                     if excluir_atividade(id):
                         st.rerun()
-            
-            st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
 def mostrar_entregas_gerais():
     """Exibe a tabela de entregas gerais com filtro de período."""
