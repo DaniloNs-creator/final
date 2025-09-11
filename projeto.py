@@ -583,6 +583,34 @@ def load_css():
                 margin: 10px 0;
             }}
             
+            /* Post-it expandido com funcionalidades */
+            .post-it-expanded {{
+                position: relative;
+                z-index: 100;
+                transform: scale(1.05) !important;
+                box-shadow: 0 15px 30px rgba(0,0,0,0.3) !important;
+                min-height: 400px;
+            }}
+            
+            .post-it-content {{
+                display: flex;
+                flex-direction: column;
+                height: 100%;
+            }}
+            
+            .post-it-actions {{
+                margin-top: 15px;
+                padding-top: 15px;
+                border-top: 1px solid rgba(0,0,0,0.1);
+            }}
+            
+            .action-buttons {{
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+                margin-top: 15px;
+            }}
+            
             /* Responsive adjustments */
             @media (max-width: 768px) {{
                 .title {{
@@ -599,6 +627,10 @@ def load_css():
                 }}
                 
                 .post-it-container {{
+                    grid-template-columns: 1fr;
+                }}
+                
+                .action-buttons {{
                     grid-template-columns: 1fr;
                 }}
             }}
@@ -1206,7 +1238,7 @@ def get_responsaveis() -> List[str]:
         return ["Todos"]
         
 def get_entregas_gerais(start_date: str, end_date: str) -> pd.DataFrame:
-    """Retorna os dados de entregas gerais para um período selecionado."""
+    """Retorna os dados de entregas gerais para a período selecionado."""
     try:
         with get_db_connection() as conn:
             query = '''
@@ -1305,14 +1337,14 @@ def upload_atividades():
                - `Atividade` (texto)
                - `Data de Entrega` (data no formato YYYY-MM-DD)
                - `Mês de Referência` (texto no formato MM/YYYY)
-            2. Salve o arquivo no formato .xlsx ou .xls
+            2. Salve o arquivo no formato .xlsx or .xls
         """)
     
     uploaded_file = st.file_uploader(
         "Selecione o arquivo Excel com as atividades", 
         type=["xlsx", "xls"],
         accept_multiple_files=False,
-        help="Arraste e solte ou clique para selecionar o arquile")
+        help="Arraste e solte or clique para selecionar o arquile")
     
     if uploaded_file is not None:
         try:
@@ -1483,26 +1515,32 @@ def lista_atividades():
         else:
             data_formatada = "Sem data"
         
+        # Estado para controlar se o post-it está expandido
+        if f'expanded_{id}' not in st.session_state:
+            st.session_state[f'expanded_{id}'] = False
+        
         # Cria o post-it
-        with st.expander(f"", expanded=False):
-            # Post-it visual
+        if st.session_state[f'expanded_{id}']:
+            # Post-it expandido com funcionalidades
             st.markdown(f"""
-            <div class="post-it {color_class}">
-                <div class="post-it-header">
-                    <div class="post-it-cliente">{cliente}</div>
-                    <div class="post-it-responsavel">{responsavel}</div>
+            <div class="post-it {color_class} post-it-expanded">
+                <div class="post-it-content">
+                    <div class="post-it-header">
+                        <div class="post-it-cliente">{cliente}</div>
+                        <div class="post-it-responsavel">{responsavel}</div>
+                    </div>
+                    <div class="post-it-atividade">{atividade}</div>
+                    <div class="post-it-footer">
+                        <div class="post-it-data">📅 {data_formatada}</div>
+                        <div class="post-it-mes">{mes_referencia}</div>
+                    </div>
+                    {"<div class='post-it-status'>CONCLUÍDO</div>" if feito else ""}
                 </div>
-                <div class="post-it-atividade">{atividade}</div>
-                <div class="post-it-footer">
-                    <div class="post-it-data">📅 {data_formatada}</div>
-                    <div class="post-it-mes">{mes_referencia}</div>
-                </div>
-                {"<div class='post-it-status'>CONCLUÍDO</div>" if feito else ""}
             </div>
             """, unsafe_allow_html=True)
             
-            # Área de edição (dentro do expander)
-            st.markdown('<div class="post-it-modal">', unsafe_allow_html=True)
+            # Área de edição (dentro do post-it expandido)
+            st.markdown('<div class="post-it-actions">', unsafe_allow_html=True)
             
             col_a, col_b = st.columns(2)
             
@@ -1558,7 +1596,33 @@ def lista_atividades():
                     if excluir_atividade(id):
                         st.rerun()
             
+            # Botão para fechar o post-it expandido
+            if st.button("Fechar", key=f"close_{id}"):
+                st.session_state[f'expanded_{id}'] = False
+                st.rerun()
+            
             st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            # Post-it normal (não expandido)
+            st.markdown(f"""
+            <div class="post-it {color_class}" onclick="alert('Clicou no post-it {id}')">
+                <div class="post-it-header">
+                    <div class="post-it-cliente">{cliente}</div>
+                    <div class="post-it-responsavel">{responsavel}</div>
+                </div>
+                <div class="post-it-atividade">{atividade}</div>
+                <div class="post-it-footer">
+                    <div class="post-it-data">📅 {data_formatada}</div>
+                    <div class="post-it-mes">{mes_referencia}</div>
+                </div>
+                {"<div class='post-it-status'>CONCLUÍDO</div>" if feito else ""}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Botão para expandir o post-it
+            if st.button("Abrir", key=f"open_{id}"):
+                st.session_state[f'expanded_{id}'] = True
+                st.rerun()
     
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1571,7 +1635,7 @@ def mostrar_entregas_gerais():
     end_date = st.date_input("Data de Fim", value=today)
 
     if start_date > end_date:
-        st.error("A data de início não pode be posterior à data de fim.")
+        st.error("A data de início não pode ser posterior à data de fim.")
         return
 
     df = get_entregas_gerais(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
