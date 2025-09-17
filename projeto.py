@@ -14,25 +14,28 @@ import traceback
 
 # Configuração da página
 st.set_page_config(
-    page_title="Sistema de Armazenamento de XML",
+    page_title="Sistema de CT-e",
     page_icon="📄",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# Namespaces para CT-e
+CTE_NAMESPACES = {
+    'cte': 'http://www.portalfiscal.inf.br/cte'
+}
+
 # Inicialização do estado da sessão
 if 'selected_xml' not in st.session_state:
     st.session_state.selected_xml = None
-if 'current_tab' not in st.session_state:
-    st.session_state.current_tab = "Upload"
 
-class XMLDatabase:
-    def __init__(self, db_name="xml_database.db"):
+class CTeDatabase:
+    def __init__(self, db_name="cte_database.db"):
         self.db_name = db_name
         self.init_database()
     
     def init_database(self):
-        """Inicializa o banco de dados com as tabelas necessárias"""
+        """Inicializa o banco de dados com as tabelas necessárias para CT-e"""
         try:
             conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
@@ -46,8 +49,7 @@ class XMLDatabase:
                     file_size INTEGER,
                     content_hash TEXT,
                     upload_date TIMESTAMP,
-                    processed BOOLEAN DEFAULT FALSE,
-                    metadata TEXT
+                    processed BOOLEAN DEFAULT FALSE
                 )
             ''')
             
@@ -60,46 +62,44 @@ class XMLDatabase:
                 )
             ''')
             
-            # Tabela para dados estruturados extraídos dos XMLs (para Power BI)
+            # Tabela para dados estruturados específicos do CT-e
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS xml_structured_data (
+                CREATE TABLE IF NOT EXISTS cte_structured_data (
                     id INTEGER PRIMARY KEY,
                     xml_id INTEGER,
-                    chave_acesso TEXT,
-                    emitente_cnpj TEXT,
-                    emitente_nome TEXT,
-                    destinatario_cnpj TEXT,
-                    destinatario_nome TEXT,
-                    data_emissao DATE,
-                    valor_total DECIMAL(15, 2),
-                    natureza_operacao TEXT,
+                    nCT TEXT,
+                    dhEmi DATE,
+                    cMunIni TEXT,
+                    UFIni TEXT,
+                    cMunFim TEXT,
+                    UFFim TEXT,
+                    emit_xNome TEXT,
+                    vTPrest DECIMAL(15, 2),
+                    rem_xNome TEXT,
+                    infNFe_chave TEXT,
                     FOREIGN KEY (xml_id) REFERENCES xml_files (id)
                 )
             ''')
             
             conn.commit()
             conn.close()
-            st.success("Banco de dados inicializado com sucesso!")
             return True
         except Exception as e:
             st.error(f"Erro ao inicializar banco de dados: {str(e)}")
             return False
     
     def insert_xml(self, filename, file_path, file_size, content_hash, xml_content=None):
-        """Insere um novo XML no banco de dados"""
+        """Insere um novo XML de CT-e no banco de dados"""
         conn = None
         try:
             conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
             
-            # Extrai metadados básicos do XML
-            metadata = self.extract_basic_metadata(xml_content)
-            
             cursor.execute('''
                 INSERT OR IGNORE INTO xml_files 
-                (filename, file_path, file_size, content_hash, upload_date, metadata)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (filename, file_path, file_size, content_hash, datetime.now(), metadata))
+                (filename, file_path, file_size, content_hash, upload_date)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (filename, file_path, file_size, content_hash, datetime.now()))
             
             file_id = cursor.lastrowid
             
@@ -115,8 +115,8 @@ class XMLDatabase:
                     VALUES (?, ?)
                 ''', (file_id, xml_content))
                 
-                # Extrai e armazena dados estruturados para Power BI
-                self.extract_structured_data(file_id, xml_content, conn)
+                # Extrai e armazena dados estruturados específicos do CT-e
+                self.extract_cte_data(file_id, xml_content, conn)
             
             conn.commit()
             return file_id
@@ -124,115 +124,76 @@ class XMLDatabase:
         except sqlite3.IntegrityError:
             return None
         except Exception as e:
-            st.error(f"Erro ao inserir XML: {str(e)}")
+            st.error(f"Erro ao inserir CT-e: {str(e)}")
             return None
         finally:
             if conn:
                 conn.close()
     
-    def extract_basic_metadata(self, xml_content):
-        """Extrai metadados básicos do XML"""
-        if not xml_content:
-            return "{}"
-        
-        try:
-            root = ET.fromstring(xml_content)
-            metadata = {
-                'root_tag': root.tag,
-                'attributes': dict(root.attrib),
-                'child_count': len(list(root))
-            }
-            return str(metadata)
-        except Exception as e:
-            return f"{{\"error\": \"{str(e)}\"}}"
-    
-    def extract_structured_data(self, xml_id, xml_content, conn):
-        """Extrai dados estruturados do XML para análise no Power BI"""
+    def extract_cte_data(self, xml_id, xml_content, conn):
+        """Extrai dados específicos do CT-e para análise no Power BI"""
         try:
             root = ET.fromstring(xml_content)
             
-            # Tenta encontrar a chave de acesso
-            chave_acesso = None
-            inf_nfe = root.find(".//{http://www.portalfiscal.inf.br/nfe}infNFe")
-            if inf_nfe is not None:
-                chave_acesso = inf_nfe.attrib.get('Id', '').replace('NFe', '')
+            # Registra namespaces
+            for prefix, uri in CTE_NAMESPACES.items():
+                ET.register_namespace(prefix, uri)
             
-            # Tenta encontrar dados do emitente
-            emitente = root.find(".//{http://www.portalfiscal.inf.br/nfe}emit")
-            emitente_cnpj = None
-            emitente_nome = None
-            if emitente is not None:
-                cnpj_elem = emitente.find("{http://www.portalfiscal.inf.br/nfe}CNPJ")
-                if cnpj_elem is not None:
-                    emitente_cnpj = cnpj_elem.text
-                else:
-                    cpf_elem = emitente.find("{http://www.portalfiscal.inf.br/nfe}CPF")
-                    if cpf_elem is not None:
-                        emitente_cnpj = cpf_elem.text
-                nome_elem = emitente.find("{http://www.portalfiscal.inf.br/nfe}xNome")
-                if nome_elem is not None:
-                    emitente_nome = nome_elem.text
+            # Extrai dados específicos do CT-e com base nos campos solicitados
+            nCT = self.find_text(root, './/cte:nCT')
+            dhEmi = self.find_text(root, './/cte:dhEmi')
+            cMunIni = self.find_text(root, './/cte:cMunIni')
+            UFIni = self.find_text(root, './/cte:UFIni')
+            cMunFim = self.find_text(root, './/cte:cMunFim')
+            UFFim = self.find_text(root, './/cte:UFFim')
+            emit_xNome = self.find_text(root, './/cte:emit/cte:xNome')
+            vTPrest = self.find_text(root, './/cte:vTPrest')
+            rem_xNome = self.find_text(root, './/cte:rem/cte:xNome')
             
-            # Tenta encontrar dados do destinatário
-            destinatario = root.find(".//{http://www.portalfiscal.inf.br/nfe}dest")
-            destinatario_cnpj = None
-            destinatario_nome = None
-            if destinatario is not None:
-                cnpj_elem = destinatario.find("{http://www.portalfiscal.inf.br/nfe}CNPJ")
-                if cnpj_elem is not None:
-                    destinatario_cnpj = cnpj_elem.text
-                else:
-                    cpf_elem = destinatario.find("{http://www.portalfiscal.inf.br/nfe}CPF")
-                    if cpf_elem is not None:
-                        destinatario_cnpj = cpf_elem.text
-                nome_elem = destinatario.find("{http://www.portalfiscal.inf.br/nfe}xNome")
-                if nome_elem is not None:
-                    destinatario_nome = nome_elem.text
+            # Extrai chave da NFe associada (se existir)
+            infNFe_chave = self.find_text(root, './/cte:infNFe/cte:chave')
             
-            # Tenta encontrar data de emissão
-            data_emissao = None
-            ide = root.find(".//{http://www.portalfiscal.inf.br/nfe}ide")
-            if ide is not None:
-                dh_emi_elem = ide.find("{http://www.portalfiscal.inf.br/nfe}dhEmi")
-                if dh_emi_elem is not None:
-                    data_emissao = dh_emi_elem.text[:10]  # Pega apenas a data (YYYY-MM-DD)
-                else:
-                    d_emi_elem = ide.find("{http://www.portalfiscal.inf.br/nfe}dEmi")
-                    if d_emi_elem is not None:
-                        data_emissao = d_emi_elem.text
+            # Formata data se encontrada
+            if dhEmi:
+                dhEmi = dhEmi[:10]  # Pega apenas a data (YYYY-MM-DD)
             
-            # Tenta encontrar valor total
-            valor_total = None
-            total = root.find(".//{http://www.portalfiscal.inf.br/nfe}total")
-            if total is not None:
-                icms_tot = total.find("{http://www.portalfiscal.inf.br/nfe}ICMSTot")
-                if icms_tot is not None:
-                    v_nf_elem = icms_tot.find("{http://www.portalfiscal.inf.br/nfe}vNF")
-                    if v_nf_elem is not None:
-                        try:
-                            valor_total = float(v_nf_elem.text)
-                        except:
-                            valor_total = None
+            # Converte valor para decimal
+            try:
+                vTPrest = float(vTPrest) if vTPrest else None
+            except (ValueError, TypeError):
+                vTPrest = None
             
-            # Tenta encontrar natureza da operação
-            natureza_operacao = None
-            if ide is not None:
-                nat_op_elem = ide.find("{http://www.portalfiscal.inf.br/nfe}natOp")
-                if nat_op_elem is not None:
-                    natureza_operacao = nat_op_elem.text
-            
-            # Insere os dados estruturados
+            # Insere os dados estruturados do CT-e
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT OR REPLACE INTO xml_structured_data 
-                (xml_id, chave_acesso, emitente_cnpj, emitente_nome, destinatario_cnpj, 
-                 destinatario_nome, data_emissao, valor_total, natureza_operacao)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (xml_id, chave_acesso, emitente_cnpj, emitente_nome, destinatario_cnpj,
-                 destinatario_nome, data_emissao, valor_total, natureza_operacao))
+                INSERT OR REPLACE INTO cte_structured_data 
+                (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim, 
+                 emit_xNome, vTPrest, rem_xNome, infNFe_chave)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim,
+                 emit_xNome, vTPrest, rem_xNome, infNFe_chave))
             
         except Exception as e:
-            st.error(f"Erro ao extrair dados estruturados: {str(e)}")
+            st.error(f"Erro ao extrair dados do CT-e: {str(e)}")
+    
+    def find_text(self, element, xpath):
+        """Encontra texto usando XPath com namespaces"""
+        try:
+            # Para cada namespace registrado, tentar encontrar o elemento
+            for prefix, uri in CTE_NAMESPACES.items():
+                full_xpath = xpath.replace('cte:', f'{{{uri}}}')
+                found = element.find(full_xpath)
+                if found is not None and found.text:
+                    return found.text
+            
+            # Tentativa alternativa sem namespace
+            found = element.find(xpath.replace('cte:', ''))
+            if found is not None and found.text:
+                return found.text
+                
+            return None
+        except Exception:
+            return None
     
     def get_all_files(self):
         """Retorna todos os arquivos do banco de dados"""
@@ -299,8 +260,8 @@ class XMLDatabase:
             st.error(f"Erro ao buscar conteúdo do XML: {str(e)}")
             return None
     
-    def get_structured_data(self):
-        """Retorna todos os dados estruturados para Power BI"""
+    def get_cte_data(self):
+        """Retorna todos os dados estruturados de CT-e para Power BI"""
         try:
             conn = sqlite3.connect(self.db_name)
             
@@ -309,28 +270,30 @@ class XMLDatabase:
                     xf.id,
                     xf.filename,
                     xf.upload_date,
-                    xsd.chave_acesso,
-                    xsd.emitente_cnpj,
-                    xsd.emitente_nome,
-                    xsd.destinatario_cnpj,
-                    xsd.destinatario_nome,
-                    xsd.data_emissao,
-                    xsd.valor_total,
-                    xsd.natureza_operacao
-                FROM xml_structured_data xsd
-                JOIN xml_files xf ON xsd.xml_id = xf.id
-                ORDER BY xsd.data_emissao DESC
+                    cte.nCT,
+                    cte.dhEmi,
+                    cte.cMunIni,
+                    cte.UFIni,
+                    cte.cMunFim,
+                    cte.UFFim,
+                    cte.emit_xNome,
+                    cte.vTPrest,
+                    cte.rem_xNome,
+                    cte.infNFe_chave
+                FROM cte_structured_data cte
+                JOIN xml_files xf ON cte.xml_id = xf.id
+                ORDER BY cte.dhEmi DESC
             '''
             
             df = pd.read_sql_query(query, conn)
             conn.close()
             return df
         except Exception as e:
-            st.error(f"Erro ao carregar dados estruturados: {str(e)}")
+            st.error(f"Erro ao carregar dados de CT-e: {str(e)}")
             return pd.DataFrame()
     
-    def get_structured_data_by_date_range(self, start_date, end_date):
-        """Retorna dados estruturados filtrados por intervalo de datas"""
+    def get_cte_data_by_date_range(self, start_date, end_date):
+        """Retorna dados de CT-e filtrados por intervalo de datas"""
         try:
             conn = sqlite3.connect(self.db_name)
             
@@ -339,18 +302,20 @@ class XMLDatabase:
                     xf.id,
                     xf.filename,
                     xf.upload_date,
-                    xsd.chave_acesso,
-                    xsd.emitente_cnpj,
-                    xsd.emitente_nome,
-                    xsd.destinatario_cnpj,
-                    xsd.destinatario_nome,
-                    xsd.data_emissao,
-                    xsd.valor_total,
-                    xsd.natureza_operacao
-                FROM xml_structured_data xsd
-                JOIN xml_files xf ON xsd.xml_id = xf.id
-                WHERE date(xsd.data_emissao) BETWEEN date(?) AND date(?)
-                ORDER BY xsd.data_emissao DESC
+                    cte.nCT,
+                    cte.dhEmi,
+                    cte.cMunIni,
+                    cte.UFIni,
+                    cte.cMunFim,
+                    cte.UFFim,
+                    cte.emit_xNome,
+                    cte.vTPrest,
+                    cte.rem_xNome,
+                    cte.infNFe_chave
+                FROM cte_structured_data cte
+                JOIN xml_files xf ON cte.xml_id = xf.id
+                WHERE date(cte.dhEmi) BETWEEN date(?) AND date(?)
+                ORDER BY cte.dhEmi DESC
             '''
             
             df = pd.read_sql_query(query, conn, params=(start_date, end_date))
@@ -360,8 +325,8 @@ class XMLDatabase:
             st.error(f"Erro ao carregar dados por intervalo: {str(e)}")
             return pd.DataFrame()
 
-class XMLProcessor:
-    def __init__(self, storage_path="storage/xml_files"):
+class CTeProcessor:
+    def __init__(self, storage_path="storage/cte_files"):
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
     
@@ -369,8 +334,8 @@ class XMLProcessor:
         """Calcula hash do conteúdo do arquivo para verificar duplicatas"""
         return hashlib.md5(file_content).hexdigest()
     
-    def save_xml_file(self, file_content, filename):
-        """Salva o arquivo XML no sistema de arquivos"""
+    def save_cte_file(self, file_content, filename):
+        """Salva o arquivo XML de CT-e no sistema de arquivos"""
         try:
             file_path = self.storage_path / filename
             
@@ -392,7 +357,7 @@ class XMLProcessor:
             return None, False
     
     def process_uploaded_file(self, uploaded_file, db):
-        """Processa um arquivo XML enviado"""
+        """Processa um arquivo XML de CT-e enviado"""
         try:
             file_content = uploaded_file.getvalue()
             filename = uploaded_file.name
@@ -401,11 +366,19 @@ class XMLProcessor:
             if not filename.lower().endswith('.xml'):
                 return False, "Arquivo não é XML"
             
+            # Verifica se é um CT-e pela estrutura do arquivo
+            try:
+                content_str = file_content.decode('utf-8', errors='ignore')
+                if 'CTe' not in content_str and 'conhecimento' not in content_str.lower():
+                    return False, "Arquivo não parece ser um CT-e"
+            except:
+                return False, "Erro ao verificar tipo do arquivo"
+            
             # Calcula hash
             content_hash = self.calculate_hash(file_content)
             
             # Salva arquivo
-            file_path, is_new = self.save_xml_file(file_content, filename)
+            file_path, is_new = self.save_cte_file(file_content, filename)
             
             if not is_new:
                 return False, "Arquivo duplicado"
@@ -417,18 +390,18 @@ class XMLProcessor:
                 file_path=str(file_path),
                 file_size=file_size,
                 content_hash=content_hash,
-                xml_content=file_content.decode('utf-8', errors='ignore')
+                xml_content=content_str
             )
             
             if file_id:
-                return True, f"Arquivo {filename} armazenado com sucesso! ID: {file_id}"
+                return True, f"CT-e {filename} armazenado com sucesso! ID: {file_id}"
             else:
                 return False, "Erro ao armazenar no banco de dados"
         except Exception as e:
             return False, f"Erro ao processar arquivo: {str(e)}"
     
     def process_directory(self, directory_path, db):
-        """Processa todos os XMLs de um diretório"""
+        """Processa todos os CT-es de um diretório"""
         results = {
             'success': 0,
             'errors': 0,
@@ -443,6 +416,7 @@ class XMLProcessor:
                 results['messages'].append("Diretório não encontrado")
                 return results
             
+            # Busca por arquivos XML
             xml_files = list(directory_path.glob("*.xml")) + list(directory_path.glob("*.XML"))
             
             for xml_file in xml_files:
@@ -450,8 +424,14 @@ class XMLProcessor:
                     file_content = xml_file.read_bytes()
                     filename = xml_file.name
                     
+                    # Verifica se é um CT-e
+                    content_str = file_content.decode('utf-8', errors='ignore')
+                    if 'CTe' not in content_str and 'conhecimento' not in content_str.lower():
+                        results['messages'].append(f"Ignorado (não é CT-e): {filename}")
+                        continue
+                    
                     content_hash = self.calculate_hash(file_content)
-                    file_path, is_new = self.save_xml_file(file_content, filename)
+                    file_path, is_new = self.save_cte_file(file_content, filename)
                     
                     if not is_new:
                         results['duplicates'] += 1
@@ -464,7 +444,7 @@ class XMLProcessor:
                         file_path=str(file_path),
                         file_size=file_size,
                         content_hash=content_hash,
-                        xml_content=file_content.decode('utf-8', errors='ignore')
+                        xml_content=content_str
                     )
                     
                     if file_id:
@@ -487,40 +467,40 @@ class XMLProcessor:
 # Inicialização
 @st.cache_resource
 def init_database():
-    return XMLDatabase()
+    return CTeDatabase()
 
 @st.cache_resource
 def init_processor():
-    return XMLProcessor()
+    return CTeProcessor()
 
 def main():
     # Inicializar componentes
     db = init_database()
     processor = init_processor()
     
-    st.title("📄 Sistema de Armazenamento de XML")
-    st.markdown("### Armazene, consulte e exporte seus XMLs para Power BI")
+    st.title("📄 Sistema de Armazenamento de CT-e")
+    st.markdown("### Armazene, consulte e exporte seus CT-es para Power BI")
     
     # Sidebar
     st.sidebar.header("Estatísticas")
     total_files = db.get_file_count()
-    st.sidebar.metric("Total de XMLs Armazenados", total_files)
+    st.sidebar.metric("Total de CT-es Armazenados", total_files)
     
     # Navegação por abas
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Upload", "Consultar XMLs", "Visualizar XML", "Dados para Power BI", "Sobre"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Upload", "Consultar CT-es", "Visualizar CT-e", "Dados para Power BI"])
     
     # Tab 1 - Upload
     with tab1:
-        st.header("Upload de XMLs")
+        st.header("Upload de CT-es")
         
         upload_option = st.radio("Selecione o tipo de upload:", 
                                 ["Upload Individual", "Upload em Lote", "Upload por Diretório"])
         
         if upload_option == "Upload Individual":
             uploaded_file = st.file_uploader(
-                "Selecione um arquivo XML", 
+                "Selecione um arquivo XML de CT-e", 
                 type=['xml'],
-                help="Selecione um arquivo XML para armazenar"
+                help="Selecione um arquivo XML de CT-e para armazenar"
             )
             
             if uploaded_file:
@@ -531,7 +511,7 @@ def main():
                     st.write(f"Tamanho: {len(uploaded_file.getvalue())} bytes")
                 
                 with col2:
-                    if st.button("🔄 Armazenar XML", use_container_width=True):
+                    if st.button("🔄 Armazenar CT-e", use_container_width=True):
                         with st.spinner("Processando arquivo..."):
                             success, message = processor.process_uploaded_file(uploaded_file, db)
                             
@@ -547,10 +527,10 @@ def main():
         
         elif upload_option == "Upload em Lote":
             uploaded_files = st.file_uploader(
-                "Selecione múltiplos arquivos XML", 
+                "Selecione múltiplos arquivos XML de CT-e", 
                 type=['xml'],
                 accept_multiple_files=True,
-                help="Selecione vários arquivos XML para armazenar"
+                help="Selecione vários arquivos XML de CT-e para armazenar"
             )
             
             if uploaded_files:
@@ -587,12 +567,12 @@ def main():
                     st.rerun()
         
         else:  # Upload por Diretório
-            st.subheader("Para grandes volumes (50k+ XMLs)")
-            st.info("Para processar 50 mil XMLs, recomendamos usar a opção de diretório")
+            st.subheader("Para grandes volumes (50k+ CT-es)")
+            st.info("Para processar 50 mil CT-es, recomendamos usar a opção de diretório")
             
             directory_path = st.text_input(
-                "Caminho do diretório com XMLs",
-                placeholder="Ex: C:/xml_files/ ou /home/usuario/xml_files/"
+                "Caminho do diretório com CT-es",
+                placeholder="Ex: C:/cte_files/ ou /home/usuario/cte_files/"
             )
             
             if st.button("📁 Processar Diretório", type="secondary"):
@@ -615,9 +595,9 @@ def main():
                 else:
                     st.error("Diretório não encontrado ou caminho inválido")
     
-    # Tab 2 - Consultar XMLs
+    # Tab 2 - Consultar CT-es
     with tab2:
-        st.header("Consultar XMLs Armazenados")
+        st.header("Consultar CT-es Armazenados")
         
         files = db.get_all_files()
         
@@ -672,7 +652,6 @@ def main():
                     # Botão para visualizar
                     if col4.button("👁️ Visualizar", key=f"view_{file_id}"):
                         st.session_state.selected_xml = file_id
-                        st.session_state.current_tab = "Visualizar XML"
                         st.rerun()
             
             # Botão para exportar lista
@@ -683,22 +662,22 @@ def main():
                 # Criar arquivo Excel em memória
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, sheet_name='XMLs', index=False)
+                    df.to_excel(writer, sheet_name='CT-es', index=False)
                 
                 # Preparar para download
                 output.seek(0)
                 b64 = base64.b64encode(output.read()).decode()
-                href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="lista_xmls.xlsx">📥 Baixar Lista de XMLs</a>'
+                href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="lista_ctes.xlsx">📥 Baixar Lista de CT-es</a>'
                 st.markdown(href, unsafe_allow_html=True)
                 
         else:
             st.info("Nenhum arquivo armazenado ainda.")
     
-    # Tab 3 - Visualizar XML
+    # Tab 3 - Visualizar CT-e
     with tab3:
-        st.header("Visualizar Conteúdo do XML")
+        st.header("Visualizar Conteúdo do CT-e")
         
-        # Se um XML foi selecionado para visualização
+        # Se um CT-e foi selecionado para visualização
         if st.session_state.selected_xml:
             xml_content = db.get_xml_content(st.session_state.selected_xml)
             
@@ -708,14 +687,14 @@ def main():
                     parsed_xml = xml.dom.minidom.parseString(xml_content)
                     pretty_xml = parsed_xml.toprettyxml()
                     
-                    st.text_area("Conteúdo do XML (formatado)", pretty_xml, height=500)
+                    st.text_area("Conteúdo do CT-e (formatado)", pretty_xml, height=500)
                     
                     # Botões de ação
                     col1, col2, col3 = st.columns(3)
                     
                     # Download do XML
                     b64_xml = base64.b64encode(xml_content.encode()).decode()
-                    href = f'<a href="data:application/xml;base64,{b64_xml}" download="xml_{st.session_state.selected_xml}.xml">📥 Baixar XML</a>'
+                    href = f'<a href="data:application/xml;base64,{b64_xml}" download="cte_{st.session_state.selected_xml}.xml">📥 Baixar CT-e</a>'
                     col1.markdown(href, unsafe_allow_html=True)
                     
                     # Copiar para área de transferência
@@ -729,23 +708,23 @@ def main():
                         st.rerun()
                         
                 except Exception as e:
-                    st.error(f"Erro ao formatar XML: {e}")
-                    st.text_area("Conteúdo do XML (original)", xml_content, height=500)
+                    st.error(f"Erro ao formatar CT-e: {e}")
+                    st.text_area("Conteúdo do CT-e (original)", xml_content, height=500)
             else:
-                st.error("Conteúdo do XML não encontrado.")
+                st.error("Conteúdo do CT-e não encontrado.")
                 if st.button("↩️ Voltar para Lista"):
                     st.session_state.selected_xml = None
                     st.rerun()
         else:
-            st.info("Selecione um XML na aba 'Consultar XMLs' para visualizar seu conteúdo.")
+            st.info("Selecione um CT-e na aba 'Consultar CT-es' para visualizar seu conteúdo.")
     
     # Tab 4 - Dados para Power BI
     with tab4:
         st.header("Dados Estruturados para Power BI")
         
         st.info("""
-        Esta seção fornece os dados estruturados extraídos dos XMLs para uso no Power BI.
-        Os dados incluem informações como chave de acesso, emitente, destinatário, valores e datas.
+        Esta seção fornece os dados estruturados extraídos dos CT-es para uso no Power BI.
+        Os dados incluem informações específicas de Conhecimento de Transporte Eletrônico.
         """)
         
         # Filtro por data
@@ -756,9 +735,9 @@ def main():
             end_date = st.date_input("Data final", value=date.today())
         
         # Carregar dados
-        if st.button("Carregar Dados", type="primary"):
-            with st.spinner("Carregando dados..."):
-                df = db.get_structured_data_by_date_range(
+        if st.button("Carregar Dados CT-e", type="primary"):
+            with st.spinner("Carregando dados de CT-e..."):
+                df = db.get_cte_data_by_date_range(
                     start_date.strftime('%Y-%m-%d'), 
                     end_date.strftime('%Y-%m-%d')
                 )
@@ -770,13 +749,13 @@ def main():
                     st.dataframe(df)
                     
                     # Estatísticas rápidas
-                    st.subheader("📈 Estatísticas")
+                    st.subheader("📈 Estatísticas de CT-e")
                     col1, col2, col3 = st.columns(3)
                     
-                    col1.metric("Total de Registros", len(df))
-                    if 'valor_total' in df.columns:
-                        col2.metric("Valor Total", f"R$ {df['valor_total'].sum():,.2f}")
-                        col3.metric("Valor Médio", f"R$ {df['valor_total'].mean():,.2f}" if len(df) > 0 else "R$ 0,00")
+                    col1.metric("Total de CT-es", len(df))
+                    if 'vTPrest' in df.columns:
+                        col2.metric("Valor Total", f"R$ {df['vTPrest'].sum():,.2f}")
+                        col3.metric("Valor Médio", f"R$ {df['vTPrest'].mean():,.2f}" if len(df) > 0 else "R$ 0,00")
                     else:
                         col2.metric("Valor Total", "N/A")
                         col3.metric("Valor Médio", "N/A")
@@ -787,17 +766,17 @@ def main():
                     # Exportar para Excel
                     output = BytesIO()
                     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        df.to_excel(writer, sheet_name='Dados_XML', index=False)
+                        df.to_excel(writer, sheet_name='Dados_CTe', index=False)
                     
                     output.seek(0)
                     b64 = base64.b64encode(output.read()).decode()
-                    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="dados_xml_powerbi.xlsx">📥 Baixar para Excel</a>'
+                    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="dados_cte_powerbi.xlsx">📥 Baixar para Excel</a>'
                     st.markdown(href, unsafe_allow_html=True)
                     
                     # Exportar para CSV
                     csv = df.to_csv(index=False)
                     b64_csv = base64.b64encode(csv.encode()).decode()
-                    href_csv = f'<a href="data:file/csv;base64,{b64_csv}" download="dados_xml_powerbi.csv">📥 Baixar para CSV</a>'
+                    href_csv = f'<a href="data:file/csv;base64,{b64_csv}" download="dados_cte_powerbi.csv">📥 Baixar para CSV</a>'
                     st.markdown(href_csv, unsafe_allow_html=True)
                     
                     # Instruções para Power BI
@@ -812,8 +791,8 @@ def main():
                         
                         2. **Método 2: Conexão direta com SQLite (Recomendado)**
                            - No Power BI, selecione "Obter Dados" > "Mais..." > "Banco de dados" > "SQLite"
-                           - No campo "Banco de dados", digite o caminho completo para o arquivo `xml_database.db`
-                           - Selecione a tabela `xml_structured_data`
+                           - No campo "Banco de dados", digite o caminho completo para o arquivo `cte_database.db`
+                           - Selecione a tabela `cte_structured_data`
                         
                         3. **Método 3: Conexão ODBC**
                            - Configure um driver ODBC para SQLite
@@ -823,58 +802,13 @@ def main():
                         **Vantagem dos métodos 2 e 3:** Atualizações em tempo real sem precisar reimportar arquivos.
                         """)
                 else:
-                    st.warning("Nenhum dado encontrado para o período selecionado.")
-    
-    # Tab 5 - Sobre
-    with tab5:
-        st.header("Sobre o Sistema")
-        
-        st.markdown("""
-        ## Sistema de Armazenamento e Análise de XMLs
-        
-        Este sistema foi desenvolvido para armazenar, gerenciar e analisar grandes volumes de arquivos XML,
-        com foco especial em integração com o Power BI para análise de dados.
-        
-        ### Funcionalidades Principais:
-        
-        - **Armazenamento seguro** de XMLs em banco de dados SQLite e sistema de arquivos
-        - **Verificação de duplicatas** para evitar armazenamento redundante
-        - **Extração automática** de dados estruturados para análise
-        - **Interface intuitiva** para consulta e visualização
-        - **Exportação para Power BI** via Excel, CSV ou conexão direta
-        
-        ### Como usar com Power BI:
-        
-        1. Armazene seus XMLs através das opções de upload
-        2. Acesse a aba "Dados para Power BI"
-        3. Filtre por período se necessário
-        4. Exporte os dados ou conecte-se diretamente ao banco de dados
-        
-        ### Estrutura do Banco de Dados:
-        
-        - `xml_files`: Metadados dos arquivos
-        - `xml_content`: Conteúdo completo dos XMLs
-        - `xml_structured_data`: Dados extraídos para análise (esta é a tabela principal para o Power BI)
-        
-        ### Tecnologias Utilizadas:
-        
-        - Python 3.x
-        - Streamlit para interface web
-        - SQLite para armazenamento
-        - Pandas para manipulação de dados
-        - XML.etree para processamento de XML
-        """)
-        
-        st.info("""
-        💡 **Dica:** Para grandes volumes (50k+ XMLs), use a opção de upload por diretório 
-        e conecte o Power BI diretamente ao banco de dados SQLite para melhor performance.
-        """)
+                    st.warning("Nenhum dado de CT-e encontrado para o período selecionado.")
     
     # Footer
     st.sidebar.divider()
     st.sidebar.info("""
     **💡 Dicas:**
-    - Para 50k XMLs, use a opção de diretório
+    - Para 50k CT-es, use a opção de diretório
     - Conecte o Power BI diretamente ao banco SQLite
     - Dados armazenados permanentemente
     """)
