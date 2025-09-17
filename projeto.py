@@ -79,6 +79,7 @@ class XMLDatabase:
             
             conn.commit()
             conn.close()
+            st.success("Banco de dados inicializado com sucesso!")
             return True
         except Exception as e:
             st.error(f"Erro ao inicializar banco de dados: {str(e)}")
@@ -86,6 +87,7 @@ class XMLDatabase:
     
     def insert_xml(self, filename, file_path, file_size, content_hash, xml_content=None):
         """Insere um novo XML no banco de dados"""
+        conn = None
         try:
             conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
@@ -125,10 +127,8 @@ class XMLDatabase:
             st.error(f"Erro ao inserir XML: {str(e)}")
             return None
         finally:
-            try:
+            if conn:
                 conn.close()
-            except:
-                pass
     
     def extract_basic_metadata(self, xml_content):
         """Extrai metadados básicos do XML"""
@@ -429,7 +429,6 @@ class XMLProcessor:
     
     def process_directory(self, directory_path, db):
         """Processa todos os XMLs de um diretório"""
-        directory_path = Path(directory_path)
         results = {
             'success': 0,
             'errors': 0,
@@ -437,46 +436,53 @@ class XMLProcessor:
             'messages': []
         }
         
-        if not directory_path.exists():
-            results['messages'].append("Diretório não encontrado")
-            return results
-        
-        xml_files = list(directory_path.glob("*.xml")) + list(directory_path.glob("*.XML"))
-        
-        for xml_file in xml_files:
-            try:
-                file_content = xml_file.read_bytes()
-                filename = xml_file.name
-                
-                content_hash = self.calculate_hash(file_content)
-                file_path, is_new = self.save_xml_file(file_content, filename)
-                
-                if not is_new:
-                    results['duplicates'] += 1
-                    results['messages'].append(f"Duplicado: {filename}")
-                    continue
-                
-                file_size = len(file_content)
-                file_id = db.insert_xml(
-                    filename=filename,
-                    file_path=str(file_path),
-                    file_size=file_size,
-                    content_hash=content_hash,
-                    xml_content=file_content.decode('utf-8', errors='ignore')
-                )
-                
-                if file_id:
-                    results['success'] += 1
-                    results['messages'].append(f"Sucesso: {filename} (ID: {file_id})")
-                else:
-                    results['errors'] += 1
-                    results['messages'].append(f"Erro BD: {filename}")
+        try:
+            directory_path = Path(directory_path)
+            
+            if not directory_path.exists():
+                results['messages'].append("Diretório não encontrado")
+                return results
+            
+            xml_files = list(directory_path.glob("*.xml")) + list(directory_path.glob("*.XML"))
+            
+            for xml_file in xml_files:
+                try:
+                    file_content = xml_file.read_bytes()
+                    filename = xml_file.name
                     
-            except Exception as e:
-                results['errors'] += 1
-                results['messages'].append(f"Erro processando {xml_file.name}: {str(e)}")
-        
-        return results
+                    content_hash = self.calculate_hash(file_content)
+                    file_path, is_new = self.save_xml_file(file_content, filename)
+                    
+                    if not is_new:
+                        results['duplicates'] += 1
+                        results['messages'].append(f"Duplicado: {filename}")
+                        continue
+                    
+                    file_size = len(file_content)
+                    file_id = db.insert_xml(
+                        filename=filename,
+                        file_path=str(file_path),
+                        file_size=file_size,
+                        content_hash=content_hash,
+                        xml_content=file_content.decode('utf-8', errors='ignore')
+                    )
+                    
+                    if file_id:
+                        results['success'] += 1
+                        results['messages'].append(f"Sucesso: {filename} (ID: {file_id})")
+                    else:
+                        results['errors'] += 1
+                        results['messages'].append(f"Erro BD: {filename}")
+                        
+                except Exception as e:
+                    results['errors'] += 1
+                    results['messages'].append(f"Erro processando {xml_file.name}: {str(e)}")
+            
+            return results
+        except Exception as e:
+            results['errors'] += 1
+            results['messages'].append(f"Erro geral no processamento: {str(e)}")
+            return results
 
 # Inicialização
 @st.cache_resource
@@ -487,14 +493,13 @@ def init_database():
 def init_processor():
     return XMLProcessor()
 
-# Interface principal
 def main():
-    st.title("📄 Sistema de Armazenamento de XML")
-    st.markdown("### Armazene, consulte e exporte seus XMLs para Power BI")
-    
     # Inicializar componentes
     db = init_database()
     processor = init_processor()
+    
+    st.title("📄 Sistema de Armazenamento de XML")
+    st.markdown("### Armazene, consulte e exporte seus XMLs para Power BI")
     
     # Sidebar
     st.sidebar.header("Estatísticas")
@@ -502,10 +507,10 @@ def main():
     st.sidebar.metric("Total de XMLs Armazenados", total_files)
     
     # Navegação por abas
-    tabs = st.tabs(["Upload", "Consultar XMLs", "Visualizar XML", "Dados para Power BI", "Sobre"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Upload", "Consultar XMLs", "Visualizar XML", "Dados para Power BI", "Sobre"])
     
     # Tab 1 - Upload
-    with tabs[0]:
+    with tab1:
         st.header("Upload de XMLs")
         
         upload_option = st.radio("Selecione o tipo de upload:", 
@@ -537,6 +542,7 @@ def main():
                                 st.error(message)
                         
                         # Atualiza estatísticas
+                        time.sleep(2)
                         st.rerun()
         
         elif upload_option == "Upload em Lote":
@@ -568,7 +574,7 @@ def main():
                         else:
                             error_count += 1
                         
-                        time.sleep(0.1)  # Pequena pausa para visualização
+                        time.sleep(0.1)
                     
                     progress_bar.empty()
                     status_text.empty()
@@ -577,6 +583,7 @@ def main():
                     st.write(f"✅ Sucessos: {success_count}")
                     st.write(f"❌ Erros: {error_count}")
                     
+                    time.sleep(2)
                     st.rerun()
         
         else:  # Upload por Diretório
@@ -603,12 +610,13 @@ def main():
                             for msg in results['messages'][-10:]:
                                 st.write(msg)
                         
+                        time.sleep(2)
                         st.rerun()
                 else:
                     st.error("Diretório não encontrado ou caminho inválido")
     
     # Tab 2 - Consultar XMLs
-    with tabs[1]:
+    with tab2:
         st.header("Consultar XMLs Armazenados")
         
         files = db.get_all_files()
@@ -687,7 +695,7 @@ def main():
             st.info("Nenhum arquivo armazenado ainda.")
     
     # Tab 3 - Visualizar XML
-    with tabs[2]:
+    with tab3:
         st.header("Visualizar Conteúdo do XML")
         
         # Se um XML foi selecionado para visualização
@@ -718,7 +726,6 @@ def main():
                     # Voltar para a lista
                     if col3.button("↩️ Voltar para Lista"):
                         st.session_state.selected_xml = None
-                        st.session_state.current_tab = "Consultar XMLs"
                         st.rerun()
                         
                 except Exception as e:
@@ -728,13 +735,12 @@ def main():
                 st.error("Conteúdo do XML não encontrado.")
                 if st.button("↩️ Voltar para Lista"):
                     st.session_state.selected_xml = None
-                    st.session_state.current_tab = "Consultar XMLs"
                     st.rerun()
         else:
             st.info("Selecione um XML na aba 'Consultar XMLs' para visualizar seu conteúdo.")
     
     # Tab 4 - Dados para Power BI
-    with tabs[3]:
+    with tab4:
         st.header("Dados Estruturados para Power BI")
         
         st.info("""
@@ -820,7 +826,7 @@ def main():
                     st.warning("Nenhum dado encontrado para o período selecionado.")
     
     # Tab 5 - Sobre
-    with tabs[4]:
+    with tab5:
         st.header("Sobre o Sistema")
         
         st.markdown("""
