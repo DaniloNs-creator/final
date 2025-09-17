@@ -1,6 +1,6 @@
 import streamlit as st
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import pandas as pd
 import plotly.express as px
 import random
@@ -134,7 +134,7 @@ def load_css():
             .stTabs [data-baseweb="tab"] {{
                 padding: 0.75rem 1.5rem;
                 border-radius: 8px !important;
-                background-color: transparent !important;
+                background: transparent !important;
                 transition: var(--transition);
                 border: none !important;
                 font-weight: 600;
@@ -143,7 +143,7 @@ def load_css():
             }}
             
             .stTabs [data-baseweb="tab"]:hover {{
-                background-color: rgba(52, 152, 219, 0.1) !important;
+                background: rgba(52, 152, 219, 0.1) !important;
             }}
             
             .stTabs [aria-selected="true"] {{
@@ -200,7 +200,7 @@ def load_css():
             }}
             
             .completed {{
-                background-color: rgba(46, 204, 113, 0.1);
+                background: rgba(46, 204, 113, 0.1);
                 border-left: 5px solid var(--success-color);
                 position: relative;
                 overflow: hidden;
@@ -318,7 +318,7 @@ def load_css():
             .stSelectbox>div>div>select,
             .stDateInput>div>div>input,
             .stNumberInput>div>div>input {{
-                background-color: white;
+                background: white;
                 border: 2px solid #dfe6e9;
                 border-radius: 8px;
                 padding: 0.7rem 1rem;
@@ -335,7 +335,7 @@ def load_css():
             
             /* Mensagens */
             .success-message {{
-                background-color: rgba(46, 204, 113, 0.2);
+                background: rgba(46, 204, 113, 0.2);
                 color: var(--dark-color);
                 padding: 1rem;
                 border-radius: 8px;
@@ -345,7 +345,7 @@ def load_css():
             }}
             
             .error-message {{
-                background-color: rgba(231, 76, 60, 0.2);
+                background: rgba(231, 76, 60, 0.2);
                 color: var(--dark-color);
                 padding: 1rem;
                 border-radius: 8px;
@@ -361,7 +361,7 @@ def load_css():
             }}
             
             .info-message {{
-                background-color: rgba(52, 152, 219, 0.2);
+                background: rgba(52, 152, 219, 0.2);
                 color: var(--dark-color);
                 padding: 1rem;
                 border-radius: 8px;
@@ -427,7 +427,7 @@ def load_css():
                 background: linear-gradient(135deg, var(--secondary-color), #2980b9) !important;
             }}
             
-            [data.testid="stSidebar"] .stButton>button:hover {{
+            [data-testid="stSidebar"] .stButton>button:hover {{
                 background: linear-gradient(135deg, #2980b9, var(--secondary-color)) !important;
             }}
             
@@ -1082,7 +1082,7 @@ class CTeProcessor:
             )
             
             if file_id:
-                return True, f"CT-e {filename} armazenado com sucesso! ID: {file_id}
+                return True, f"CT-e {filename} armazenado com sucesso! ID: {file_id}"
             else:
                 return False, "Erro ao armazenar no banco de dados"
         except Exception as e:
@@ -1281,7 +1281,7 @@ def processador_cte():
                         time.sleep(2)
                         st.rerun()
                 else:
-                    st.error("Diretório não encontrado or caminho inválido")
+                    st.error("Diretório não encontrado ou caminho inválido")
     
     # Tab 2 - Consultar CT-es
     with tab2:
@@ -1487,7 +1487,7 @@ def processador_cte():
                            - No Power BI, selecione "Obter Dados" > "ODBC"
                            - Selecione a fonte de dados configurada
                         
-                        **Vantagem dos métodos 2 e 3:** Atualizações em tempo real sem precisar reimportar arquivos.
+                        **Vantagem dos métodos 2 and 3:** Atualizações em tempo real sem precisar reimportar arquivos.
                         """)
                 else:
                     st.warning("Nenhum dado de CT-e encontrado para o período selecionado.")
@@ -1801,7 +1801,7 @@ def get_entregas_gerais(start_date: str, end_date: str) -> pd.DataFrame:
                 WHERE data_entrega BETWEEN ? AND ?
                 ORDER BY data_entrega DESC
             '''
-            df = pd.read_sql(query, conn, params=(start_date, end_date))
+            df = pd.read_sql_query(query, conn, params=(start_date, end_date))
             return df
     except Exception as e:
         st.error(f"Erro ao gerar dados de entregas gerais: {e}")
@@ -1821,7 +1821,7 @@ def get_dados_indicadores() -> pd.DataFrame:
                 GROUP BY mes_referencia
                 ORDER BY SUBSTR(mes_referencia, 4) || SUBSTR(mes_referencia, 1, 2)
             '''
-            return pd.read_sql(query, conn)
+            return pd.read_sql_query(query, conn)
     except Exception as e:
         st.error(f"Erro ao gerar indicadores: {e}")
         return pd.DataFrame()
@@ -1840,7 +1840,7 @@ def get_dados_responsaveis() -> pd.DataFrame:
                 GROUP BY responsavel
                 ORDER BY percentual DESC
             '''
-            return pd.read_sql(query, conn)
+            return pd.read_sql_query(query, conn)
     except Exception as e:
         st.error(f"Erro ao gerar dados por responsável: {e}")
         return pd.DataFrame()
@@ -1907,7 +1907,7 @@ def upload_atividades():
                 'RESPONSÁVEL': 'responsavel',
                 'ATIVIDADE': 'atividade',
                 'DATA DE ENTREGA': 'data_entrega',
-                'MÊS DE REFERÊNCIA': 'mes_referencia'
+                'MÊS DE REFERência': 'mes_referencia'
             }
 
             # Garante que as colunas existam no dataframe, usando um valor padrão se não
@@ -2214,7 +2214,7 @@ def mostrar_indicadores():
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
                 xaxis=dict(showgrid=False),
-                yaxis=dict(showgrid=True, gridcolor='#f1f1f1')
+                yaxis=dict(showgrid=True, gridcolor='f1f1f1')
             )
             st.plotly_chart(fig_bar_resp, use_container_width=True)
             
