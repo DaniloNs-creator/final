@@ -3,7 +3,7 @@ import sqlite3
 import os
 import hashlib
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 import time
 import pandas as pd
@@ -130,9 +130,7 @@ class XMLDatabase:
             
             # Namespaces comuns em XMLs fiscais
             namespaces = {
-                'nfe': 'http://www.portalfiscal.inf.br/nfe',
-                'ns2': 'http://www.w3.org/2000/09/xmldsig#',
-                'ns3': 'http://www.portalfiscal.inf.br/nfe'
+                'nfe': 'http://www.portalfiscal.inf.br/nfe'
             }
             
             # Tenta encontrar a chave de acesso
@@ -149,6 +147,10 @@ class XMLDatabase:
                 cnpj_elem = emitente.find("{http://www.portalfiscal.inf.br/nfe}CNPJ")
                 if cnpj_elem is not None:
                     emitente_cnpj = cnpj_elem.text
+                else:
+                    cpf_elem = emitente.find("{http://www.portalfiscal.inf.br/nfe}CPF")
+                    if cpf_elem is not None:
+                        emitente_cnpj = cpf_elem.text
                 nome_elem = emitente.find("{http://www.portalfiscal.inf.br/nfe}xNome")
                 if nome_elem is not None:
                     emitente_nome = nome_elem.text
@@ -161,6 +163,10 @@ class XMLDatabase:
                 cnpj_elem = destinatario.find("{http://www.portalfiscal.inf.br/nfe}CNPJ")
                 if cnpj_elem is not None:
                     destinatario_cnpj = cnpj_elem.text
+                else:
+                    cpf_elem = destinatario.find("{http://www.portalfiscal.inf.br/nfe}CPF")
+                    if cpf_elem is not None:
+                        destinatario_cnpj = cpf_elem.text
                 nome_elem = destinatario.find("{http://www.portalfiscal.inf.br/nfe}xNome")
                 if nome_elem is not None:
                     destinatario_nome = nome_elem.text
@@ -172,6 +178,10 @@ class XMLDatabase:
                 dh_emi_elem = ide.find("{http://www.portalfiscal.inf.br/nfe}dhEmi")
                 if dh_emi_elem is not None:
                     data_emissao = dh_emi_elem.text[:10]  # Pega apenas a data (YYYY-MM-DD)
+                else:
+                    d_emi_elem = ide.find("{http://www.portalfiscal.inf.br/nfe}dEmi")
+                    if d_emi_elem is not None:
+                        data_emissao = d_emi_elem.text
             
             # Tenta encontrar valor total
             valor_total = None
@@ -181,7 +191,10 @@ class XMLDatabase:
                 if icms_tot is not None:
                     v_nf_elem = icms_tot.find("{http://www.portalfiscal.inf.br/nfe}vNF")
                     if v_nf_elem is not None:
-                        valor_total = v_nf_elem.text
+                        try:
+                            valor_total = float(v_nf_elem.text)
+                        except:
+                            valor_total = None
             
             # Tenta encontrar natureza da operação
             natureza_operacao = None
@@ -297,11 +310,16 @@ class XMLDatabase:
                 xsd.natureza_operacao
             FROM xml_structured_data xsd
             JOIN xml_files xf ON xsd.xml_id = xf.id
-            WHERE xsd.data_emissao BETWEEN ? AND ?
+            WHERE date(xsd.data_emissao) BETWEEN date(?) AND date(?)
             ORDER BY xsd.data_emissao DESC
         '''
         
-        df = pd.read_sql_query(query, conn, params=(start_date, end_date))
+        try:
+            df = pd.read_sql_query(query, conn, params=(start_date, end_date))
+        except Exception as e:
+            st.error(f"Erro ao carregar dados: {e}")
+            df = pd.DataFrame()
+        
         conn.close()
         return df
 
@@ -678,9 +696,9 @@ with tab4:
     # Filtro por data
     col1, col2 = st.columns(2)
     with col1:
-        start_date = st.date_input("Data inicial", value=datetime.now().replace(day=1))
+        start_date = st.date_input("Data inicial", value=date.today().replace(day=1))
     with col2:
-        end_date = st.date_input("Data final", value=datetime.now())
+        end_date = st.date_input("Data final", value=date.today())
     
     # Carregar dados
     if st.button("Carregar Dados", type="primary"):
@@ -701,8 +719,8 @@ with tab4:
                 col1, col2, col3 = st.columns(3)
                 
                 col1.metric("Total de Registros", len(df))
-                col2.metric("Valor Total", f"R$ {df['valor_total'].sum():,.2f}")
-                col3.metric("Valor Médio", f"R$ {df['valor_total'].mean():,.2f}" if len(df) > 0 else "R$ 0,00")
+                col2.metric("Valor Total", f"R$ {df['valor_total'].sum():,.2f}" if 'valor_total' in df.columns else "N/A")
+                col3.metric("Valor Médio", f"R$ {df['valor_total'].mean():,.2f}" if 'valor_total' in df.columns and len(df) > 0 else "N/A")
                 
                 # Opções de exportação
                 st.subheader("📤 Exportar Dados")
