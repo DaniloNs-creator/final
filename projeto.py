@@ -819,4 +819,4 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         st.error(f"Ocorreu um erro inesperado: {str(e)}")
-        st.code(traceback.format_exc()) 
+        st.code(traceback.format_exc())
