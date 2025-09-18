@@ -13,11 +13,12 @@ from io import BytesIO
 import traceback
 import requests
 from PIL import Image
+import re
 
 # Configuração da página
 st.set_page_config(
     page_title="Sistema de CT-e",
-    page_icon="📄",
+    page_icon="https://www.hafele.com.br/INTERSHOP/static/WFS/Haefele-HBR-Site/-/-/pt_BR/images/favicons/apple-touch-icon.png",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -157,13 +158,23 @@ class CTeDatabase:
             
             # Formata data se encontrada
             if dhEmi:
-                dhEmi = dhEmi[:10]  # Pega apenas a data (YYYY-MM-DD)
+                try:
+                    # Converte para formato dd/mm/aa
+                    dt_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
+                    dhEmi = dt_obj.strftime('%d/%m/%y')
+                except:
+                    dhEmi = dhEmi[:10]  # Fallback para formato original
             
             # Converte valor para decimal
             try:
                 vTPrest = float(vTPrest) if vTPrest else None
             except (ValueError, TypeError):
                 vTPrest = None
+            
+            # Limpa a chave da NFe para mostrar apenas números
+            if infNFe_chave:
+                # Remove qualquer caractere não numérico
+                infNFe_chave = re.sub(r'\D', '', infNFe_chave)
             
             # Insere os dados estruturados do CT-e
             cursor = conn.cursor()
@@ -299,6 +310,10 @@ class CTeDatabase:
         try:
             conn = sqlite3.connect(self.db_name)
             
+            # Converte as datas para o formato do banco (YYYY-MM-DD)
+            start_date_str = start_date.strftime('%Y-%m-%d')
+            end_date_str = end_date.strftime('%Y-%m-%d')
+            
             query = '''
                 SELECT 
                     xf.id,
@@ -316,11 +331,12 @@ class CTeDatabase:
                     cte.infNFe_chave
                 FROM cte_structured_data cte
                 JOIN xml_files xf ON cte.xml_id = xf.id
-                WHERE date(cte.dhEmi) BETWEEN date(?) AND date(?)
+                WHERE date(substr(cte.dhEmi, 7, 4) || '-' || substr(cte.dhEmi, 4, 2) || '-' || substr(cte.dhEmi, 1, 2)) 
+                BETWEEN date(?) AND date(?)
                 ORDER BY cte.dhEmi DESC
             '''
             
-            df = pd.read_sql_query(query, conn, params=(start_date, end_date))
+            df = pd.read_sql_query(query, conn, params=(start_date_str, end_date_str))
             conn.close()
             return df
         except Exception as e:
@@ -759,10 +775,7 @@ def main():
         # Carregar dados
         if st.button("Carregar Dados CT-e", type="primary"):
             with st.spinner("Carregando dados de CT-e..."):
-                df = db.get_cte_data_by_date_range(
-                    start_date.strftime('%Y-%m-%d'), 
-                    end_date.strftime('%Y-%m-%d')
-                )
+                df = db.get_cte_data_by_date_range(start_date, end_date)
                 
                 if not df.empty:
                     st.success(f"Dados carregados: {len(df)} registros encontrados")
