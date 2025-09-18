@@ -11,6 +11,8 @@ import xml.dom.minidom
 import base64
 from io import BytesIO
 import traceback
+import requests
+from PIL import Image
 
 # Configuração da página
 st.set_page_config(
@@ -473,10 +475,30 @@ def init_database():
 def init_processor():
     return CTeProcessor()
 
+def load_haefele_logo():
+    """Carrega a logo da Haefele a partir do GitHub"""
+    try:
+        logo_url = "https://github.com/DaniloNs-creator/final/raw/main/haefele_logo.png"
+        response = requests.get(logo_url, stream=True)
+        if response.status_code == 200:
+            image = Image.open(response.raw)
+            return image
+        else:
+            st.error("Não foi possível carregar a logo da Haefele")
+            return None
+    except Exception as e:
+        st.error(f"Erro ao carregar logo: {str(e)}")
+        return None
+
 def main():
     # Inicializar componentes
     db = init_database()
     processor = init_processor()
+    
+    # Carregar e exibir logo da Haefele
+    logo = load_haefele_logo()
+    if logo:
+        st.sidebar.image(logo, use_column_width=True)
     
     st.title("📄 Sistema de Armazenamento de CT-e")
     st.markdown("### Armazene, consulte e exporte seus CT-es para Power BI")
