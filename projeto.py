@@ -108,7 +108,7 @@ class CTeDatabase:
             
             # Se não houve inserção (arquivo duplicado), obter o ID existente
             if file_id == 0:
-                cursor.execute('SELECT id FROM xml_files WHERE filename = ?', (filename,))
+                cursor.execute('SELECT id FROM xml_files WHERE content_hash = ?', (content_hash,))
                 result = cursor.fetchone()
                 file_id = result[0] if result else None
             
@@ -197,12 +197,12 @@ class CTeDatabase:
                 full_xpath = xpath.replace('cte:', f'{{{uri}}}')
                 found = element.find(full_xpath)
                 if found is not None and found.text:
-                    return found.text
+                    return found.text.strip()
             
             # Tentativa alternativa sem namespace
             found = element.find(xpath.replace('cte:', ''))
             if found is not None and found.text:
-                return found.text
+                return found.text.strip()
                 
             return None
         except Exception:
@@ -500,7 +500,8 @@ def load_haefele_logo():
             image = Image.open(response.raw)
             return image
         else:
-            st.error("Não foi possível carregar a logo da Haefele")
+            # Fallback para uma imagem local ou ícone padrão
+            st.warning("Não foi possível carregar a logo da Haefele")
             return None
     except Exception as e:
         st.error(f"Erro ao carregar logo: {str(e)}")
