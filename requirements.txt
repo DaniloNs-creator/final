@@ -8,7 +8,6 @@ python-magic==0.4.27
 python-magic-bin==0.4.14; sys_platform == 'win32'
 requests==2.31.0
 selenium==4.15.2
-sqlite3==0.0.1
 streamlit>=1.32.0
 waitress==2.1.2
 webdriver-manager==4.0.1
