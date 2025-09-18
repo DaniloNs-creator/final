@@ -156,41 +156,38 @@ class CTeDatabase:
             # Extrai chave da NFe associada (se existir)
             infNFe_chave = self.find_text(root, './/cte:infNFe/cte:chave')
             
-            # Formata data se encontrada
+            # Extrai apenas o número da NF-e da chave de acesso (modelo 55, 44 dígitos, posições 26-34)
+            numero_nfe = ""
+            if infNFe_chave:
+                chave_numerica = ''.join(filter(str.isdigit, infNFe_chave))
+                if len(chave_numerica) == 44:
+                    numero_nfe = chave_numerica[25:34]
+                else:
+                    numero_nfe = ""
+
+            # Formata data no padrão DD/MM/AA
+            data_formatada = None
             if dhEmi:
                 try:
-                    # Converte para formato dd/mm/aa
-                    dt_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
-                    dhEmi = dt_obj.strftime('%d/%m/%y')
+                    data_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
+                    data_formatada = data_obj.strftime('%d/%m/%y')
                 except:
-                    dhEmi = dhEmi[:10]  # Fallback para formato original
+                    data_formatada = dhEmi[:10]
             
             # Converte valor para decimal
             try:
                 vTPrest = float(vTPrest) if vTPrest else None
             except (ValueError, TypeError):
                 vTPrest = None
-            
-            # Limpa a chave da NFe para mostrar apenas o número da nota (NF-e)
-            if infNFe_chave:
-                chave_numerica = re.sub(r'\D', '', infNFe_chave)
-                if len(chave_numerica) == 44:
-                    # Número da NF-e: posições 26 a 34 (índice 25 a 34, 9 dígitos)
-                    infNFe_chave = chave_numerica[25:34]
-                else:
-                    # Se não for 44 dígitos, mantém vazio ou original
-                    infNFe_chave = ""
 
-            # Insere os dados estruturados do CT-e
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT OR REPLACE INTO cte_structured_data 
                 (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim, 
-                 emit_xNome, vTPrest, rem_xNome, infNFe_chave)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim,
-                 emit_xNome, vTPrest, rem_xNome, infNFe_chave))
-            
+                 emit_xNome, vTPrest, rem_xNome, infNFe_chave, numero_nfe)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (xml_id, nCT, data_formatada, cMunIni, UFIni, cMunFim, UFFim,
+                 emit_xNome, vTPrest, rem_xNome, infNFe_chave, numero_nfe))
         except Exception as e:
             st.error(f"Erro ao extrair dados do CT-e: {str(e)}")
     
