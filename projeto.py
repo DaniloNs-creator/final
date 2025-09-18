@@ -80,6 +80,7 @@ class CTeDatabase:
                     vTPrest DECIMAL(15, 2),
                     rem_xNome TEXT,
                     infNFe_chave TEXT,
+                    infNFe_numero TEXT,  # NOVO CAMPO: número da nota fiscal
                     FOREIGN KEY (xml_id) REFERENCES xml_files (id)
                 )
             ''')
@@ -156,6 +157,14 @@ class CTeDatabase:
             # Extrai chave da NFe associada (se existir)
             infNFe_chave = self.find_text(root, './/cte:infNFe/cte:chave')
             
+            # Extrai o número da nota fiscal da chave (NNNF - posições 25 a 34)
+            infNFe_numero = None
+            if infNFe_chave and len(infNFe_chave) >= 34:
+                # Remove caracteres não numéricos e pega as posições 25-34 (NNNF)
+                chave_limpa = re.sub(r'\D', '', infNFe_chave)
+                if len(chave_limpa) >= 34:
+                    infNFe_numero = chave_limpa[24:34]  # NNNF (9 dígitos)
+            
             # Formata data se encontrada
             if dhEmi:
                 try:
@@ -181,10 +190,10 @@ class CTeDatabase:
             cursor.execute('''
                 INSERT OR REPLACE INTO cte_structured_data 
                 (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim, 
-                 emit_xNome, vTPrest, rem_xNome, infNFe_chave)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 emit_xNome, vTPrest, rem_xNome, infNFe_chave, infNFe_numero)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim,
-                 emit_xNome, vTPrest, rem_xNome, infNFe_chave))
+                 emit_xNome, vTPrest, rem_xNome, infNFe_chave, infNFe_numero))
             
         except Exception as e:
             st.error(f"Erro ao extrair dados do CT-e: {str(e)}")
@@ -292,7 +301,8 @@ class CTeDatabase:
                     cte.emit_xNome,
                     cte.vTPrest,
                     cte.rem_xNome,
-                    cte.infNFe_chave
+                    cte.infNFe_chave,
+                    cte.infNFe_numero
                 FROM cte_structured_data cte
                 JOIN xml_files xf ON cte.xml_id = xf.id
                 ORDER BY cte.dhEmi DESC
@@ -328,7 +338,8 @@ class CTeDatabase:
                     cte.emit_xNome,
                     cte.vTPrest,
                     cte.rem_xNome,
-                    cte.infNFe_chave
+                    cte.infNFe_chave,
+                    cte.infNFe_numero
                 FROM cte_structured_data cte
                 JOIN xml_files xf ON cte.xml_id = xf.id
                 WHERE date(substr(cte.dhEmi, 7, 4) || '-' || substr(cte.dhEmi, 4, 2) || '-' || substr(cte.dhEmi, 1, 2)) 
@@ -515,7 +526,7 @@ def main():
     # Carregar e exibir logo da Haefele
     logo = load_haefele_logo()
     if logo:
-        st.sidebar.image(logo, use_container_width=True)  # Corrigido: use_container_width em vez de use_column_width
+        st.sidebar.image(logo, use_container_width=True)
     
     st.title("📄 Sistema de Armazenamento de CT-e")
     st.markdown("### Armazene, consulte e exporte seus CT-es para Power BI")
@@ -781,8 +792,14 @@ def main():
                 if not df.empty:
                     st.success(f"Dados carregados: {len(df)} registros encontrados")
                     
+                    # Renomear coluna para exibição mais amigável
+                    df_display = df.rename(columns={
+                        'infNFe_numero': 'Número NFe',
+                        'infNFe_chave': 'Chave NFe'
+                    })
+                    
                     # Exibir dataframe
-                    st.dataframe(df, use_container_width=True)  # Corrigido: use_container_width em vez de use_column_width
+                    st.dataframe(df_display, use_container_width=True)
                     
                     # Estatísticas rápidas
                     st.subheader("📈 Estatísticas de CT-e")
@@ -838,7 +855,7 @@ def main():
                         **Vantagem dos métodos 2 e 3:** Atualizações em tempo real sem precisar reimportar arquivos.
                         """)
                 else:
-                    st.warning("Nenhum dado de CT-e encontrado para o período selecionado.")
+                    st.warning("Nenhum dado de CT-e encontrado para o período seleconado.")
     
     # Footer
     st.sidebar.divider()
