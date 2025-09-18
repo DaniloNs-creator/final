@@ -17,8 +17,6 @@ import hashlib
 import xml.dom.minidom
 import traceback
 from pathlib import Path
-import threading
-import concurrent.futures
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(
@@ -27,16 +25,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Cache para melhor performance
-@st.cache_resource
-def init_databases():
-    """Inicializa os bancos de dados com cache para melhor performance"""
-    atividades_db = AtividadesDatabase()
-    atividades_db.init_database()
-    cte_db = CTeDatabase()
-    cte_db.init_database()
-    return atividades_db, cte_db
 
 # Namespaces para CT-e
 CTE_NAMESPACES = {
@@ -48,34 +36,19 @@ if 'selected_xml' not in st.session_state:
     st.session_state.selected_xml = None
 if 'selected_atividade' not in st.session_state:
     st.session_state.selected_atividade = None
-if 'cte_data_loaded' not in st.session_state:
-    st.session_state.cte_data_loaded = None
-if 'cte_dataframe' not in st.session_state:
-    st.session_state.cte_dataframe = None
+if 'cte_data' not in st.session_state:
+    st.session_state.cte_data = None
 
 # --- BANCO DE DADOS PARA ATIVIDADES ---
 class AtividadesDatabase:
     def __init__(self, db_name="atividades.db"):
         self.db_name = db_name
-        self._conn = None
-    
-    def get_connection(self):
-        """Obtém uma conexão com o banco de dados (com pooling simplificado)"""
-        if self._conn is None:
-            self._conn = sqlite3.connect(self.db_name, check_same_thread=False)
-            self._conn.row_factory = sqlite3.Row
-        return self._conn
-    
-    def close_connection(self):
-        """Fecha a conexão com o banco de dados"""
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        self.init_database()
     
     def init_database(self):
         """Inicializa o banco de dados com as tabelas necessárias para atividades"""
         try:
-            conn = self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
             
             # Tabela principal de atividades
@@ -136,6 +109,7 @@ class AtividadesDatabase:
             ''', categorias_padrao)
             
             conn.commit()
+            conn.close()
             return True
         except Exception as e:
             st.error(f"Erro ao inicializar banco de dados: {str(e)}")
@@ -144,7 +118,7 @@ class AtividadesDatabase:
     def insert_atividade(self, atividade_data):
         """Insere uma nova atividade no banco de dados"""
         try:
-            conn = self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
             
             cursor.execute('''
@@ -166,9 +140,7 @@ class AtividadesDatabase:
             
             atividade_id = cursor.lastrowid
             conn.commit()
-            
-            # Limpar cache após inserção
-            st.cache_data.clear()
+            conn.close()
             
             return atividade_id
         except Exception as e:
@@ -178,7 +150,7 @@ class AtividadesDatabase:
     def update_atividade(self, atividade_id, campo, novo_valor, usuario="Sistema"):
         """Atualiza uma atividade específica e registra no histórico"""
         try:
-            conn = self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
             
             # Obter valor anterior
@@ -200,10 +172,7 @@ class AtividadesDatabase:
             ''', (atividade_id, campo, str(valor_anterior), str(novo_valor), usuario))
             
             conn.commit()
-            
-            # Limpar cache após atualização
-            st.cache_data.clear()
-            
+            conn.close()
             return True
         except Exception as e:
             st.error(f"Erro ao atualizar atividade: {str(e)}")
@@ -212,26 +181,22 @@ class AtividadesDatabase:
     def delete_atividade(self, atividade_id):
         """Remove uma atividade do banco de dados"""
         try:
-            conn = self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
             
             cursor.execute('DELETE FROM atividades WHERE id = ?', (atividade_id,))
             
             conn.commit()
-            
-            # Limpar cache após exclusão
-            st.cache_data.clear()
-            
+            conn.close()
             return True
         except Exception as e:
             st.error(f"Erro ao excluir atividade: {str(e)}")
             return False
     
-    @st.cache_data(ttl=60)  # Cache por 60 segundos
-    def get_all_atividades(_self, filtros=None):
+    def get_all_atividades(self, filtros=None):
         """Retorna todas as atividades com filtros opcionais"""
         try:
-            conn = _self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             
             query = '''
                 SELECT 
@@ -271,6 +236,7 @@ class AtividadesDatabase:
             query += ' ORDER BY data_criacao DESC'
             
             df = pd.read_sql_query(query, conn, params=params)
+            conn.close()
             return df
         except Exception as e:
             st.error(f"Erro ao buscar atividades: {str(e)}")
@@ -279,7 +245,7 @@ class AtividadesDatabase:
     def get_atividade_by_id(self, atividade_id):
         """Retorna uma atividade específica pelo ID"""
         try:
-            conn = self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
             
             cursor.execute('''
@@ -289,6 +255,8 @@ class AtividadesDatabase:
             columns = [description[0] for description in cursor.description]
             atividade = cursor.fetchone()
             
+            conn.close()
+            
             if atividade:
                 return dict(zip(columns, atividade))
             return None
@@ -296,11 +264,10 @@ class AtividadesDatabase:
             st.error(f"Erro ao buscar atividade: {str(e)}")
             return None
     
-    @st.cache_data(ttl=120)  # Cache por 120 segundos
-    def get_estatisticas(_self):
+    def get_estatisticas(self):
         """Retorna estatísticas das atividades"""
         try:
-            conn = _self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             
             estatisticas = {}
             
@@ -328,7 +295,7 @@ class AtividadesDatabase:
                 SELECT status, COUNT(*) as count 
                 FROM atividades 
                 GROUP BY status 
-                ORDER BY count DESC
+                ORDER by count DESC
             ''')
             estatisticas['por_status'] = dict(cursor.fetchall())
             
@@ -352,36 +319,37 @@ class AtividadesDatabase:
             ''')
             estatisticas['proximas_entregas'] = cursor.fetchall()
             
+            conn.close()
             return estatisticas
         except Exception as e:
             st.error(f"Erro ao buscar estatísticas: {str(e)}")
             return {}
     
-    @st.cache_data(ttl=300)  # Cache por 5 minutos
-    def get_categorias(_self):
+    def get_categorias(self):
         """Retorna a lista de categorias"""
         try:
-            conn = _self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
             
             cursor.execute('SELECT nome FROM categorias ORDER BY nome')
             categorias = [row[0] for row in cursor.fetchall()]
             
+            conn.close()
             return ["Todos"] + categorias
         except Exception as e:
             st.error(f"Erro ao buscar categorias: {str(e)}")
             return ["Todos"]
     
-    @st.cache_data(ttl=300)  # Cache por 5 minutos
-    def get_responsaveis(_self):
+    def get_responsaveis(self):
         """Retorna a lista de responsáveis únicos"""
         try:
-            conn = _self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
             
             cursor.execute('SELECT DISTINCT responsavel FROM atividades ORDER BY responsavel')
             responsaveis = [row[0] for row in cursor.fetchall()]
             
+            conn.close()
             return ["Todos"] + responsaveis
         except Exception as e:
             st.error(f"Erro ao buscar responsáveis: {str(e)}")
@@ -395,25 +363,12 @@ class AtividadesDatabase:
 class CTeDatabase:
     def __init__(self, db_name="cte_database.db"):
         self.db_name = db_name
-        self._conn = None
-    
-    def get_connection(self):
-        """Obtém uma conexão com o banco de dados (com pooling simplificado)"""
-        if self._conn is None:
-            self._conn = sqlite3.connect(self.db_name, check_same_thread=False)
-            self._conn.row_factory = sqlite3.Row
-        return self._conn
-    
-    def close_connection(self):
-        """Fecha a conexão com o banco de dados"""
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        self.init_database()
     
     def init_database(self):
         """Inicializa o banco de dados com as tabelas necessárias para CT-e"""
         try:
-            conn = self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
             
             # Tabela para metadados dos XMLs
@@ -453,11 +408,13 @@ class CTeDatabase:
                     vTPrest DECIMAL(15, 2),
                     rem_xNome TEXT,
                     infNFe_chave TEXT,
+                    numero_nfe TEXT,
                     FOREIGN KEY (xml_id) REFERENCES xml_files (id)
                 )
             ''')
             
             conn.commit()
+            conn.close()
             return True
         except Exception as e:
             st.error(f"Erro ao inicializar banco de dados: {str(e)}")
@@ -467,7 +424,7 @@ class CTeDatabase:
         """Insere um novo XML de CT-e no banco de dados"""
         conn = None
         try:
-            conn = self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
             
             cursor.execute('''
@@ -494,10 +451,6 @@ class CTeDatabase:
                 self.extract_cte_data(file_id, xml_content, conn)
             
             conn.commit()
-            
-            # Limpar cache após inserção
-            st.cache_data.clear()
-            
             return file_id
             
         except sqlite3.IntegrityError:
@@ -505,6 +458,9 @@ class CTeDatabase:
         except Exception as e:
             st.error(f"Erro ao inserir CT-e: {str(e)}")
             return None
+        finally:
+            if conn:
+                conn.close()
     
     def extract_cte_data(self, xml_id, xml_content, conn):
         """Extrai dados específicos do CT-e para análise no Power BI"""
@@ -529,9 +485,21 @@ class CTeDatabase:
             # Extrai chave da NFe associada (se existir)
             infNFe_chave = self.find_text(root, './/cte:infNFe/cte:chave')
             
-            # Formata data se encontrada
+            # Extrai apenas o número da NFe da chave de acesso (últimos 9 dígitos)
+            numero_nfe = None
+            if infNFe_chave and len(infNFe_chave) >= 9:
+                numero_nfe = infNFe_chave[-9:]
+            
+            # Formata data no padrão DD/MM/AA
+            data_formatada = None
             if dhEmi:
-                dhEmi = dhEmi[:10]  # Pega apenas a data (YYYY-MM-DD)
+                try:
+                    # Converte para objeto datetime
+                    data_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
+                    # Formata para DD/MM/AA
+                    data_formatada = data_obj.strftime('%d/%m/%y')
+                except:
+                    data_formatada = dhEmi[:10]  # Fallback para formato original
             
             # Converte valor para decimal
             try:
@@ -544,10 +512,10 @@ class CTeDatabase:
             cursor.execute('''
                 INSERT OR REPLACE INTO cte_structured_data 
                 (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim, 
-                 emit_xNome, vTPrest, rem_xNome, infNFe_chave)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim,
-                 emit_xNome, vTPrest, rem_xNome, infNFe_chave))
+                 emit_xNome, vTPrest, rem_xNome, infNFe_chave, numero_nfe)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (xml_id, nCT, data_formatada, cMunIni, UFIni, cMunFim, UFFim,
+                 emit_xNome, vTPrest, rem_xNome, infNFe_chave, numero_nfe))
             
         except Exception as e:
             st.error(f"Erro ao extrair dados do CT-e: {str(e)}")
@@ -571,31 +539,31 @@ class CTeDatabase:
         except Exception:
             return None
     
-    @st.cache_data(ttl=60)  # Cache por 60 segundos
-    def get_all_files(_self):
+    def get_all_files(self):
         """Retorna todos os arquivos do banco de dados"""
         try:
-            conn = _self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
             
             cursor.execute('SELECT id, filename, file_size, upload_date FROM xml_files ORDER BY upload_date DESC')
             files = cursor.fetchall()
             
+            conn.close()
             return files
         except Exception as e:
             st.error(f"Erro ao buscar arquivos: {str(e)}")
             return []
     
-    @st.cache_data(ttl=60)  # Cache por 60 segundos
-    def get_file_count(_self):
+    def get_file_count(self):
         """Retorna o número total de arquivos"""
         try:
-            conn = _self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
             
             cursor.execute('SELECT COUNT(*) FROM xml_files')
             count = cursor.fetchone()[0]
             
+            conn.close()
             return count
         except Exception as e:
             st.error(f"Erro ao contar arquivos: {str(e)}")
@@ -604,7 +572,7 @@ class CTeDatabase:
     def search_files(self, search_term):
         """Busca arquivos por nome"""
         try:
-            conn = self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
             
             cursor.execute('''
@@ -615,6 +583,7 @@ class CTeDatabase:
             ''', (f'%{search_term}%',))
             
             files = cursor.fetchall()
+            conn.close()
             return files
         except Exception as e:
             st.error(f"Erro ao buscar arquivos: {str(e)}")
@@ -623,22 +592,22 @@ class CTeDatabase:
     def get_xml_content(self, file_id):
         """Retorna o conteúdo de um XML específico"""
         try:
-            conn = self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
             
             cursor.execute('SELECT xml_content FROM xml_content WHERE id = ?', (file_id,))
             result = cursor.fetchone()
             
+            conn.close()
             return result[0] if result else None
         except Exception as e:
             st.error(f"Erro ao buscar conteúdo do XML: {str(e)}")
             return None
     
-    @st.cache_data(ttl=60)  # Cache por 60 segundos
-    def get_cte_data(_self):
+    def get_cte_data(self):
         """Retorna todos os dados estruturados de CT-e para Power BI"""
         try:
-            conn = _self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             
             query = '''
                 SELECT 
@@ -654,35 +623,24 @@ class CTeDatabase:
                     cte.emit_xNome,
                     cte.vTPrest,
                     cte.rem_xNome,
-                    cte.infNFe_chave
+                    cte.infNFe_chave,
+                    cte.numero_nfe
                 FROM cte_structured_data cte
                 JOIN xml_files xf ON cte.xml_id = xf.id
                 ORDER BY cte.dhEmi DESC
             '''
             
             df = pd.read_sql_query(query, conn)
-            
-            # Formatar a data para DD/MM/AA
-            if 'dhEmi' in df.columns:
-                df['dhEmi'] = pd.to_datetime(df['dhEmi'], errors='coerce')
-                df['dhEmi'] = df['dhEmi'].dt.strftime('%d/%m/%y')
-            
-            # Extrair apenas o número da nota da chave de acesso
-            if 'infNFe_chave' in df.columns:
-                df['infNFe_chave'] = df['infNFe_chave'].apply(
-                    lambda x: x[25:34] if x and len(x) >= 44 else x
-                )
-            
+            conn.close()
             return df
         except Exception as e:
             st.error(f"Erro ao carregar dados de CT-e: {str(e)}")
             return pd.DataFrame()
     
-    @st.cache_data(ttl=60)  # Cache por 60 segundos
-    def get_cte_data_by_date_range(_self, start_date, end_date):
+    def get_cte_data_by_date_range(self, start_date, end_date):
         """Retorna dados de CT-e filtrados por intervalo de datas"""
         try:
-            conn = _self.get_connection()
+            conn = sqlite3.connect(self.db_name)
             
             query = '''
                 SELECT 
@@ -698,7 +656,8 @@ class CTeDatabase:
                     cte.emit_xNome,
                     cte.vTPrest,
                     cte.rem_xNome,
-                    cte.infNFe_chave
+                    cte.infNFe_chave,
+                    cte.numero_nfe
                 FROM cte_structured_data cte
                 JOIN xml_files xf ON cte.xml_id = xf.id
                 WHERE date(cte.dhEmi) BETWEEN date(?) AND date(?)
@@ -706,18 +665,7 @@ class CTeDatabase:
             '''
             
             df = pd.read_sql_query(query, conn, params=(start_date, end_date))
-            
-            # Formatar a data para DD/MM/AA
-            if 'dhEmi' in df.columns:
-                df['dhEmi'] = pd.to_datetime(df['dhEmi'], errors='coerce')
-                df['dhEmi'] = df['dhEmi'].dt.strftime('%d/%m/%y')
-            
-            # Extrair apenas o número da nota da chave de acesso
-            if 'infNFe_chave' in df.columns:
-                df['infNFe_chave'] = df['infNFe_chave'].apply(
-                    lambda x: x[25:34] if x and len(x) >= 44 else x
-                )
-            
+            conn.close()
             return df
         except Exception as e:
             st.error(f"Erro ao carregar dados por intervalo: {str(e)}")
@@ -899,7 +847,7 @@ def processador_txt():
             except UnicodeDecodeError:
                 texto = conteudo.decode('latin-1')
             
-            # Processa las linhas
+            # Processa as linhas
             linhas = texto.splitlines()
             linhas_processadas = []
             
@@ -1029,13 +977,7 @@ def processador_xml():
         dados_icms_difal = []
         arquivos_com_erro = []
 
-        # Barra de progresso para processamento
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-
-        for i, uploaded_file in enumerate(uploaded_files):
-            status_text.text(f"Processando arquivo {i+1} de {len(uploaded_files)}: {uploaded_file.name}")
-            
+        for uploaded_file in uploaded_files:
             # Salva temporariamente o arquivo para processamento
             with open(uploaded_file.name, "wb") as f:
                 f.write(uploaded_file.getbuffer())
@@ -1055,12 +997,6 @@ def processador_xml():
                 dados_icms_st.append(dados)
             if dados['Valor ICMS DIFAL'] is not None:
                 dados_icms_difal.append(dados)
-            
-            # Atualiza a barra de progresso
-            progress_bar.progress((i + 1) / len(uploaded_files))
-
-        status_text.empty()
-        progress_bar.empty()
 
         # Mostra estatísticas
         st.success(f"""
@@ -1073,7 +1009,7 @@ def processador_xml():
 
         if arquivos_com_erro:
             with st.expander("Ver arquivos com erro", expanded=False):
-                st.write("Os seguintes arquivos não puderam ser processados corretamente:")
+                st.write("Os seguintes arquivos não puderam be processados corretamente:")
                 for arquivo in arquivos_com_erro:
                     st.write(f"- {arquivo}")
 
@@ -1182,7 +1118,7 @@ def cadastro_atividade(db):
                 st.error("Preencha os campos obrigatórios!", icon="❌")
 
 def lista_atividades(db):
-    """Exibe la lista de atividades cadastradas com filtros."""
+    """Exibe a lista de atividades cadastradas com filtros."""
     st.markdown('<div class="header">📋 Lista de Atividades</div>', unsafe_allow_html=True)
     
     # Filtros
@@ -1215,9 +1151,8 @@ def lista_atividades(db):
     if categoria_selecionada != "Todos":
         filtros['categoria'] = categoria_selecionada
     
-    # Buscar atividades com cache
-    with st.spinner("Carregando atividades..."):
-        atividades_df = db.get_all_atividades(filtros)
+    # Buscar atividades
+    atividades_df = db.get_all_atividades(filtros)
     
     if not atividades_df.empty:
         st.write(f"Total de atividades encontradas: {len(atividades_df)}")
@@ -1290,9 +1225,7 @@ def mostrar_indicadores(db):
     """Exibe os indicadores de desempenho."""
     st.markdown('<div class="header">📊 Indicadores de Desempenho</div>', unsafe_allow_html=True)
     
-    # Carregar estatísticas com cache
-    with st.spinner("Carregando estatísticas..."):
-        estatisticas = db.get_estatisticas()
+    estatisticas = db.get_estatisticas()
     
     if estatisticas:
         # Métricas principais
@@ -1363,30 +1296,19 @@ def processador_cte():
         if upload_option == "Upload Individual":
             uploaded_file = st.file_uploader("Selecione um arquivo XML de CT-e", type=['xml'])
             if uploaded_file and st.button("🔄 Armazenar CT-e"):
-                with st.spinner("Processando arquivo..."):
-                    success, message = processor.process_uploaded_file(uploaded_file, db)
+                success, message = processor.process_uploaded_file(uploaded_file, db)
                 st.success(message) if success else st.error(message)
         
         elif upload_option == "Upload em Lote":
             uploaded_files = st.file_uploader("Selecione múltiplos arquivos XML de CT-e", type=['xml'], accept_multiple_files=True)
             if uploaded_files and st.button("🔄 Armazenar Todos"):
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                for i, uploaded_file in enumerate(uploaded_files):
-                    status_text.text(f"Processando {i+1} de {len(uploaded_files)}: {uploaded_file.name}")
+                for uploaded_file in uploaded_files:
                     success, message = processor.process_uploaded_file(uploaded_file, db)
-                    progress_bar.progress((i + 1) / len(uploaded_files))
-                
-                progress_bar.empty()
-                status_text.empty()
-                st.success(f"Processamento concluído! {len(uploaded_files)} arquivos processados.")
         
         else:
             directory_path = st.text_input("Caminho do diretório com CT-es")
             if directory_path and st.button("📁 Processar Diretório"):
-                with st.spinner("Processando diretório..."):
-                    results = processor.process_directory(directory_path, db)
+                results = processor.process_directory(directory_path, db)
                 st.write(f"✅ Sucessos: {results['success']}")
                 st.write(f"🔄 Duplicados: {results['duplicates']}")
                 st.write(f"❌ Erros: {results['errors']}")
@@ -1423,37 +1345,28 @@ def processador_cte():
         end_date = st.date_input("Data final", value=date.today())
         
         if st.button("Carregar Dados CT-e"):
-            with st.spinner("Carregando dados..."):
+            with st.spinner("Carregando dados de CT-e..."):
                 df = db.get_cte_data_by_date_range(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
-            
-            if not df.empty:
-                st.session_state.cte_data_loaded = True
-                st.session_state.cte_dataframe = df
-                st.dataframe(df)
                 
-                # Botão para exportar em Excel
-                def to_excel(df):
-                    output = BytesIO()
-                    writer = pd.ExcelWriter(output, engine='xlsxwriter')
-                    df.to_excel(writer, index=False, sheet_name='CTe_Dados')
-                    writer.close()
-                    processed_data = output.getvalue()
-                    return processed_data
-                
-                df_xlsx = to_excel(df)
-                st.download_button(
-                    label="📤 Exportar para Excel",
-                    data=df_xlsx,
-                    file_name=f"cte_dados_{start_date}_{end_date}.xlsx",
-                    mime="application/vnd.ms-excel"
-                )
-            else:
-                st.info("Nenhum dado encontrado para o período selecionado.")
-        
-        # Exibir dados já carregados se existirem
-        if st.session_state.cte_data_loaded and st.session_state.cte_dataframe is not None:
-            st.write("Dados carregados anteriormente:")
-            st.dataframe(st.session_state.cte_dataframe)
+                if not df.empty:
+                    st.session_state.cte_data = df
+                    st.success(f"Dados carregados: {len(df)} registros encontrados")
+                    
+                    # Exibir dataframe
+                    st.dataframe(df)
+                    
+                    # Botão de exportação
+                    if st.button("📊 Exportar para Excel"):
+                        output = BytesIO()
+                        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                            df.to_excel(writer, sheet_name='Dados_CTe', index=False)
+                        
+                        output.seek(0)
+                        b64 = base64.b64encode(output.read()).decode()
+                        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="dados_cte.xlsx">📥 Baixar arquivo Excel</a>'
+                        st.markdown(href, unsafe_allow_html=True)
+                else:
+                    st.warning("Nenhum dado de CT-e encontrado para o período selecionado.")
 
 # --- CSS E CONFIGURAÇÃO DE ESTILO ---
 def load_css():
@@ -1488,14 +1401,6 @@ def load_css():
             padding: 1.8rem;
             margin-bottom: 1.8rem;
         }
-        /* Otimiza a renderização de tabelas */
-        .stDataFrame {
-            font-size: 0.9rem;
-        }
-        /* Melhora o desempenho de elementos de formulário */
-        .stTextInput input, .stTextArea textarea, .stSelectbox select {
-            font-size: 0.9rem;
-        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -1504,8 +1409,9 @@ def main():
     """Função principal que gerencia o fluxo da aplicação."""
     load_css()
     
-    # Inicializar bancos de dados com cache
-    atividades_db, cte_db = init_databases()
+    # Inicializar bancos de dados
+    atividades_db = AtividadesDatabase()
+    atividades_db.init_database()
     
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
@@ -1553,9 +1459,6 @@ def main():
             
             if st.button("🚪 Sair", use_container_width=True):
                 st.session_state.logged_in = False
-                # Fechar conexões com o banco de dados
-                atividades_db.close_connection()
-                cte_db.close_connection()
                 st.rerun()
 
 if __name__ == "__main__":
