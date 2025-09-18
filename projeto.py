@@ -615,6 +615,18 @@ class CTeDatabase:
             '''
             
             df = pd.read_sql_query(query, conn)
+            
+            # Formatar a data para DD/MM/AA
+            if 'dhEmi' in df.columns:
+                df['dhEmi'] = pd.to_datetime(df['dhEmi'], errors='coerce')
+                df['dhEmi'] = df['dhEmi'].dt.strftime('%d/%m/%y')
+            
+            # Extrair apenas o número da nota da chave de acesso
+            if 'infNFe_chave' in df.columns:
+                df['infNFe_chave'] = df['infNFe_chave'].apply(
+                    lambda x: x[25:34] if x and len(x) >= 44 else x
+                )
+            
             conn.close()
             return df
         except Exception as e:
@@ -648,6 +660,18 @@ class CTeDatabase:
             '''
             
             df = pd.read_sql_query(query, conn, params=(start_date, end_date))
+            
+            # Formatar a data para DD/MM/AA
+            if 'dhEmi' in df.columns:
+                df['dhEmi'] = pd.to_datetime(df['dhEmi'], errors='coerce')
+                df['dhEmi'] = df['dhEmi'].dt.strftime('%d/%m/%y')
+            
+            # Extrair apenas o número da nota da chave de acesso
+            if 'infNFe_chave' in df.columns:
+                df['infNFe_chave'] = df['infNFe_chave'].apply(
+                    lambda x: x[25:34] if x and len(x) >= 44 else x
+                )
+            
             conn.close()
             return df
         except Exception as e:
@@ -830,7 +854,7 @@ def processador_txt():
             except UnicodeDecodeError:
                 texto = conteudo.decode('latin-1')
             
-            # Processa as linhas
+            # Processa las linhas
             linhas = texto.splitlines()
             linhas_processadas = []
             
@@ -1101,7 +1125,7 @@ def cadastro_atividade(db):
                 st.error("Preencha os campos obrigatórios!", icon="❌")
 
 def lista_atividades(db):
-    """Exibe a lista de atividades cadastradas com filtros."""
+    """Exibe la lista de atividades cadastradas com filtros."""
     st.markdown('<div class="header">📋 Lista de Atividades</div>', unsafe_allow_html=True)
     
     # Filtros
@@ -1331,7 +1355,25 @@ def processador_cte():
             df = db.get_cte_data_by_date_range(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
             if not df.empty:
                 st.dataframe(df)
-                # Opções de exportação aqui...
+                
+                # Botão para exportar em Excel
+                def to_excel(df):
+                    output = BytesIO()
+                    writer = pd.ExcelWriter(output, engine='xlsxwriter')
+                    df.to_excel(writer, index=False, sheet_name='CTe_Dados')
+                    writer.close()
+                    processed_data = output.getvalue()
+                    return processed_data
+                
+                df_xlsx = to_excel(df)
+                st.download_button(
+                    label="📤 Exportar para Excel",
+                    data=df_xlsx,
+                    file_name=f"cte_dados_{start_date}_{end_date}.xlsx",
+                    mime="application/vnd.ms-excel"
+                )
+            else:
+                st.info("Nenhum dado encontrado para o período selecionado.")
 
 # --- CSS E CONFIGURAÇÃO DE ESTILO ---
 def load_css():
