@@ -515,7 +515,7 @@ def main():
     # Carregar e exibir logo da Haefele
     logo = load_haefele_logo()
     if logo:
-        st.sidebar.image(logo, use_column_width=True)
+        st.sidebar.image(logo, use_container_width=True)  # Corrigido: use_container_width em vez de use_column_width
     
     st.title("📄 Sistema de Armazenamento de CT-e")
     st.markdown("### Armazene, consulte e exporte seus CT-es para Power BI")
@@ -575,7 +575,7 @@ def main():
             if uploaded_files:
                 st.info(f"{len(uploaded_files)} arquivo(s) selecionado(s)")
                 
-                if st.button("🔄 Armazenar Todos", type="primary"):
+                if st.button("🔄 Armazenar Todos", type="primary", use_container_width=True):
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
@@ -614,7 +614,7 @@ def main():
                 placeholder="Ex: C:/cte_files/ ou /home/usuario/cte_files/"
             )
             
-            if st.button("📁 Processar Diretório", type="secondary"):
+            if st.button("📁 Processar Diretório", type="secondary", use_container_width=True):
                 if directory_path and os.path.exists(directory_path):
                     with st.spinner("Processando diretório... Isso pode demorar para muitos arquivos"):
                         results = processor.process_directory(directory_path, db)
@@ -689,12 +689,12 @@ def main():
                     col3.write(f"**Data Upload:** {upload_date}")
                     
                     # Botão para visualizar
-                    if col4.button("👁️ Visualizar", key=f"view_{file_id}"):
+                    if col4.button("👁️ Visualizar", key=f"view_{file_id}", use_container_width=True):
                         st.session_state.selected_xml = file_id
                         st.rerun()
             
             # Botão para exportar lista
-            if st.button("📊 Exportar Lista para Excel"):
+            if st.button("📊 Exportar Lista para Excel", use_container_width=True):
                 df = pd.DataFrame(filtered_files, columns=['ID', 'Nome do Arquivo', 'Tamanho (bytes)', 'Data de Upload'])
                 df['Data de Upload'] = pd.to_datetime(df['Data de Upload']).dt.strftime('%Y-%m-%d %H:%M:%S')
                 
@@ -737,12 +737,12 @@ def main():
                     col1.markdown(href, unsafe_allow_html=True)
                     
                     # Copiar para área de transferência
-                    if col2.button("📋 Copiar Conteúdo"):
+                    if col2.button("📋 Copiar Conteúdo", use_container_width=True):
                         st.code(xml_content)
                         st.success("Conteúdo copiado para a área de transferência!")
                     
                     # Voltar para a lista
-                    if col3.button("↩️ Voltar para Lista"):
+                    if col3.button("↩️ Voltar para Lista", use_container_width=True):
                         st.session_state.selected_xml = None
                         st.rerun()
                         
@@ -751,7 +751,7 @@ def main():
                     st.text_area("Conteúdo do CT-e (original)", xml_content, height=500)
             else:
                 st.error("Conteúdo do CT-e não encontrado.")
-                if st.button("↩️ Voltar para Lista"):
+                if st.button("↩️ Voltar para Lista", use_container_width=True):
                     st.session_state.selected_xml = None
                     st.rerun()
         else:
@@ -774,7 +774,7 @@ def main():
             end_date = st.date_input("Data final", value=date.today())
         
         # Carregar dados
-        if st.button("Carregar Dados CT-e", type="primary"):
+        if st.button("Carregar Dados CT-e", type="primary", use_container_width=True):
             with st.spinner("Carregando dados de CT-e..."):
                 df = db.get_cte_data_by_date_range(start_date, end_date)
                 
@@ -782,7 +782,7 @@ def main():
                     st.success(f"Dados carregados: {len(df)} registros encontrados")
                     
                     # Exibir dataframe
-                    st.dataframe(df)
+                    st.dataframe(df, use_container_width=True)  # Corrigido: use_container_width em vez de use_column_width
                     
                     # Estatísticas rápidas
                     st.subheader("📈 Estatísticas de CT-e")
