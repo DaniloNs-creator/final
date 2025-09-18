@@ -11,11 +11,14 @@ import xml.dom.minidom
 import base64
 from io import BytesIO
 import traceback
+import requests
+from PIL import Image
+import re
 
 # Configuração da página
 st.set_page_config(
     page_title="Sistema de CT-e",
-    page_icon="📄",
+    page_icon="https://www.hafele.com.br/INTERSHOP/static/WFS/Haefele-HBR-Site/-/-/pt_BR/images/favicons/apple-touch-icon.png",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -30,7 +33,7 @@ if 'selected_xml' not in st.session_state:
     st.session_state.selected_xml = None
 
 class CTeDatabase:
-    def _init_(self, db_name="cte_database.db"):
+    def __init__(self, db_name="cte_database.db"):
         self.db_name = db_name
         self.init_database()
     
@@ -155,13 +158,23 @@ class CTeDatabase:
             
             # Formata data se encontrada
             if dhEmi:
-                dhEmi = dhEmi[:10]  # Pega apenas a data (YYYY-MM-DD)
+                try:
+                    # Converte para formato dd/mm/aa
+                    dt_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
+                    dhEmi = dt_obj.strftime('%d/%m/%y')
+                except:
+                    dhEmi = dhEmi[:10]  # Fallback para formato original
             
             # Converte valor para decimal
             try:
                 vTPrest = float(vTPrest) if vTPrest else None
             except (ValueError, TypeError):
                 vTPrest = None
+            
+            # Limpa a chave da NFe para mostrar apenas números
+            if infNFe_chave:
+                # Remove qualquer caractere não numérico
+                infNFe_chave = re.sub(r'\D', '', infNFe_chave)
             
             # Insere os dados estruturados do CT-e
             cursor = conn.cursor()
@@ -297,6 +310,10 @@ class CTeDatabase:
         try:
             conn = sqlite3.connect(self.db_name)
             
+            # Converte as datas para o formato do banco (YYYY-MM-DD)
+            start_date_str = start_date.strftime('%Y-%m-%d')
+            end_date_str = end_date.strftime('%Y-%m-%d')
+            
             query = '''
                 SELECT 
                     xf.id,
@@ -314,11 +331,12 @@ class CTeDatabase:
                     cte.infNFe_chave
                 FROM cte_structured_data cte
                 JOIN xml_files xf ON cte.xml_id = xf.id
-                WHERE date(cte.dhEmi) BETWEEN date(?) AND date(?)
+                WHERE date(substr(cte.dhEmi, 7, 4) || '-' || substr(cte.dhEmi, 4, 2) || '-' || substr(cte.dhEmi, 1, 2)) 
+                BETWEEN date(?) AND date(?)
                 ORDER BY cte.dhEmi DESC
             '''
             
-            df = pd.read_sql_query(query, conn, params=(start_date, end_date))
+            df = pd.read_sql_query(query, conn, params=(start_date_str, end_date_str))
             conn.close()
             return df
         except Exception as e:
@@ -326,7 +344,7 @@ class CTeDatabase:
             return pd.DataFrame()
 
 class CTeProcessor:
-    def _init_(self, storage_path="storage/cte_files"):
+    def __init__(self, storage_path="storage/cte_files"):
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
     
@@ -417,7 +435,7 @@ class CTeProcessor:
                 return results
             
             # Busca por arquivos XML
-            xml_files = list(directory_path.glob(".xml")) + list(directory_path.glob(".XML"))
+            xml_files = list(directory_path.glob("*.xml")) + list(directory_path.glob("*.XML"))
             
             for xml_file in xml_files:
                 try:
@@ -473,10 +491,30 @@ def init_database():
 def init_processor():
     return CTeProcessor()
 
+def load_haefele_logo():
+    """Carrega a logo da Haefele a partir do GitHub"""
+    try:
+        logo_url = "https://github.com/DaniloNs-creator/final/raw/main/haefele_logo.png"
+        response = requests.get(logo_url, stream=True)
+        if response.status_code == 200:
+            image = Image.open(response.raw)
+            return image
+        else:
+            st.error("Não foi possível carregar a logo da Haefele")
+            return None
+    except Exception as e:
+        st.error(f"Erro ao carregar logo: {str(e)}")
+        return None
+
 def main():
     # Inicializar componentes
     db = init_database()
     processor = init_processor()
+    
+    # Carregar e exibir logo da Haefele
+    logo = load_haefele_logo()
+    if logo:
+        st.sidebar.image(logo, use_column_width=True)
     
     st.title("📄 Sistema de Armazenamento de CT-e")
     st.markdown("### Armazene, consulte e exporte seus CT-es para Power BI")
@@ -645,12 +683,12 @@ def main():
                 with st.expander(f"📄 {filename}"):
                     col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
                     
-                    col1.write(f"*ID:* {file_id}")
-                    col2.write(f"*Tamanho:* {file_size} bytes")
-                    col3.write(f"*Data Upload:* {upload_date}")
+                    col1.write(f"**ID:** {file_id}")
+                    col2.write(f"**Tamanho:** {file_size} bytes")
+                    col3.write(f"**Data Upload:** {upload_date}")
                     
                     # Botão para visualizar
-                    if col4.button("👁 Visualizar", key=f"view_{file_id}"):
+                    if col4.button("👁️ Visualizar", key=f"view_{file_id}"):
                         st.session_state.selected_xml = file_id
                         st.rerun()
             
@@ -703,7 +741,7 @@ def main():
                         st.success("Conteúdo copiado para a área de transferência!")
                     
                     # Voltar para a lista
-                    if col3.button("↩ Voltar para Lista"):
+                    if col3.button("↩️ Voltar para Lista"):
                         st.session_state.selected_xml = None
                         st.rerun()
                         
@@ -712,7 +750,7 @@ def main():
                     st.text_area("Conteúdo do CT-e (original)", xml_content, height=500)
             else:
                 st.error("Conteúdo do CT-e não encontrado.")
-                if st.button("↩ Voltar para Lista"):
+                if st.button("↩️ Voltar para Lista"):
                     st.session_state.selected_xml = None
                     st.rerun()
         else:
@@ -737,10 +775,7 @@ def main():
         # Carregar dados
         if st.button("Carregar Dados CT-e", type="primary"):
             with st.spinner("Carregando dados de CT-e..."):
-                df = db.get_cte_data_by_date_range(
-                    start_date.strftime('%Y-%m-%d'), 
-                    end_date.strftime('%Y-%m-%d')
-                )
+                df = db.get_cte_data_by_date_range(start_date, end_date)
                 
                 if not df.empty:
                     st.success(f"Dados carregados: {len(df)} registros encontrados")
@@ -784,22 +819,22 @@ def main():
                         st.markdown("""
                         ### Como conectar esses dados ao Power BI:
                         
-                        1. *Método 1: Arquivo Excel/CSV*
+                        1. **Método 1: Arquivo Excel/CSV**
                            - Baixe os dados usando os botões acima
                            - No Power BI, selecione "Obter Dados" > "Arquivo" > "Excel" ou "Texto/CSV"
                            - Selecione o arquivo baixado
                         
-                        2. *Método 2: Conexão direta com SQLite (Recomendado)*
+                        2. **Método 2: Conexão direta com SQLite (Recomendado)**
                            - No Power BI, selecione "Obter Dados" > "Mais..." > "Banco de dados" > "SQLite"
-                           - No campo "Banco de dados", digite o caminho completo para o arquivo cte_database.db
-                           - Selecione a tabela cte_structured_data
+                           - No campo "Banco de dados", digite o caminho completo para o arquivo `cte_database.db`
+                           - Selecione a tabela `cte_structured_data`
                         
-                        3. *Método 3: Conexão ODBC*
+                        3. **Método 3: Conexão ODBC**
                            - Configure um driver ODBC para SQLite
                            - No Power BI, selecione "Obter Dados" > "ODBC"
                            - Selecione a fonte de dados configurada
                         
-                        *Vantagem dos métodos 2 e 3:* Atualizações em tempo real sem precisar reimportar arquivos.
+                        **Vantagem dos métodos 2 e 3:** Atualizações em tempo real sem precisar reimportar arquivos.
                         """)
                 else:
                     st.warning("Nenhum dado de CT-e encontrado para o período selecionado.")
@@ -807,14 +842,14 @@ def main():
     # Footer
     st.sidebar.divider()
     st.sidebar.info("""
-    *💡 Dicas:*
+    **💡 Dicas:**
     - Para 50k CT-es, use a opção de diretório
     - Conecte o Power BI diretamente ao banco SQLite
     - Dados armazenados permanentemente
     """)
 
 # Executar a aplicação
-if _name_ == "_main_":
+if __name__ == "__main__":
     try:
         main()
     except Exception as e:
