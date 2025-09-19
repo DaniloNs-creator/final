@@ -303,11 +303,14 @@ class CTeDatabase:
             
             df = pd.read_sql_query(query, conn)
             conn.close()
+            # Extração do número da NF-e via pandas (dígitos 26 a 34 da chave)
+            if 'infNFe_chave' in df.columns:
+                df['Numero_NFe'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[24:33]
             return df
         except Exception as e:
             st.error(f"Erro ao carregar dados de CT-e: {str(e)}")
             return pd.DataFrame()
-    
+
     def get_cte_data_by_date_range(self, start_date, end_date):
         """Retorna dados de CT-e filtrados por intervalo de datas"""
         try:
@@ -341,6 +344,9 @@ class CTeDatabase:
             
             df = pd.read_sql_query(query, conn, params=(start_date_str, end_date_str))
             conn.close()
+            # Extração do número da NF-e via pandas (dígitos 26 a 34 da chave)
+            if 'infNFe_chave' in df.columns:
+                df['Numero_NFe'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[24:33]
             return df
         except Exception as e:
             st.error(f"Erro ao carregar dados por intervalo: {str(e)}")
