@@ -156,14 +156,14 @@ class CTeDatabase:
             # Extrai chave da NFe associada (se existir)
             infNFe_chave = self.find_text(root, './/cte:infNFe/cte:chave')
 
-            # Extrai apenas o número da NF-e da chave de acesso (modelo 55, 44 dígitos, posições 26-34)
+            # Extraia o número da NF-e da chave de acesso (modelo 55, 44 dígitos, posições 26-34)
             numero_nfe = ""
             if infNFe_chave:
                 chave_numerica = ''.join(filter(str.isdigit, infNFe_chave))
                 if len(chave_numerica) == 44:
                     numero_nfe = chave_numerica[25:34]
                 else:
-                    numero_nfe = ""
+                    numero_nfe = infNFe_chave  # fallback: mostra o valor original se não for 44 dígitos
 
             # Formata data no padrão DD/MM/AA
             data_formatada = None
