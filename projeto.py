@@ -269,8 +269,9 @@ class CTeDatabase:
             '''
             df = pd.read_sql_query(query, conn, params=(start_date, end_date))
             conn.close()
+            # EXTRAIR NÚMERO DA NFE - 9 dígitos (posições 26 a 34, índice 25:34)
             if 'infNFe_chave' in df.columns:
-                df['numero_nfe'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[24:33]
+                df['numero_nfe'] = df['infNFe_chave'].astype(str).str[25:34]
             return df
         except Exception as e:
             st.error(f"Erro ao carregar dados por intervalo: {str(e)}")
