@@ -11,22 +11,23 @@ import xml.dom.minidom
 import base64
 from io import BytesIO
 import traceback
+from flask import Flask, jsonify, request
+import threading
 import requests
-from PIL import Image
-import re
+from waitress import serve
+import json
 
-# Configuração da página
+# Configuração da aplicação Flask
+app = Flask(__name__)
+app.config['JSON_SORT_KEYS'] = False
+
+# Configuração da página Streamlit
 st.set_page_config(
-    page_title="Sistema de CT-e",
-    page_icon="https://www.hafele.com.br/INTERSHOP/static/WFS/Haefele-HBR-Site/-/-/pt_BR/images/favicons/apple-touch-icon.png",
+    page_title="Sistema de CT-e com API",
+    page_icon="📄",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Namespaces para CT-e
-CTE_NAMESPACES = {
-    'cte': 'http://www.portalfiscal.inf.br/cte'
-}
 
 # Inicialização do estado da sessão
 if 'selected_xml' not in st.session_state:
@@ -80,6 +81,7 @@ class CTeDatabase:
                     vTPrest DECIMAL(15, 2),
                     rem_xNome TEXT,
                     infNFe_chave TEXT,
+                    upload_date TIMESTAMP,
                     FOREIGN KEY (xml_id) REFERENCES xml_files (id)
                 )
             ''')
@@ -138,78 +140,61 @@ class CTeDatabase:
         try:
             root = ET.fromstring(xml_content)
             
-            # Registra namespaces
-            for prefix, uri in CTE_NAMESPACES.items():
-                ET.register_namespace(prefix, uri)
+            # Namespaces para CT-e
+            namespaces = {
+                'cte': 'http://www.portalfiscal.inf.br/cte'
+            }
             
-            # Extrai dados específicos do CT-e com base nos campos solicitados
-            nCT = self.find_text(root, './/cte:nCT')
-            dhEmi = self.find_text(root, './/cte:dhEmi')
-            cMunIni = self.find_text(root, './/cte:cMunIni')
-            UFIni = self.find_text(root, './/cte:UFIni')
-            cMunFim = self.find_text(root, './/cte:cMunFim')
-            UFFim = self.find_text(root, './/cte:UFFim')
-            emit_xNome = self.find_text(root, './/cte:emit/cte:xNome')
-            vTPrest = self.find_text(root, './/cte:vTPrest')
-            rem_xNome = self.find_text(root, './/cte:rem/cte:xNome')
+            # Função auxiliar para encontrar texto com namespaces
+            def find_text(element, path):
+                for prefix, uri in namespaces.items():
+                    full_path = path.replace('cte:', f'{{{uri}}}')
+                    found = element.find(full_path)
+                    if found is not None and found.text:
+                        return found.text
+                
+                # Tentativa alternativa sem namespace
+                found = element.find(path.replace('cte:', ''))
+                if found is not None and found.text:
+                    return found.text
+                return None
+            
+            # Extrai dados específicos do CT-e
+            nCT = find_text(root, './/cte:nCT')
+            dhEmi = find_text(root, './/cte:dhEmi')
+            cMunIni = find_text(root, './/cte:cMunIni')
+            UFIni = find_text(root, './/cte:UFIni')
+            cMunFim = find_text(root, './/cte:cMunFim')
+            UFFim = find_text(root, './/cte:UFFim')
+            emit_xNome = find_text(root, './/cte:emit/cte:xNome')
+            vTPrest = find_text(root, './/cte:vTPrest')
+            rem_xNome = find_text(root, './/cte:rem/cte:xNome')
             
             # Extrai chave da NFe associada (se existir)
-            infNFe_chave = self.find_text(root, './/cte:infNFe/cte:chave')
-
+            infNFe_chave = find_text(root, './/cte:infNFe/cte:chave')
+            
             # Formata data se encontrada
             if dhEmi:
-                try:
-                    dt_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
-                    dhEmi = dt_obj.strftime('%d/%m/%y')
-                except:
-                    dhEmi = dhEmi[:10]
-
+                dhEmi = dhEmi[:10]  # Pega apenas a data (YYYY-MM-DD)
+            
+            # Converte valor para decimal
             try:
                 vTPrest = float(vTPrest) if vTPrest else None
             except (ValueError, TypeError):
                 vTPrest = None
-
-            # --- EXTRAI SOMENTE O NÚMERO DA NF-E (dígitos 26 a 34 da chave de acesso) ---
-            numero_nfe = None
-            if infNFe_chave:
-                chave_numerica = re.sub(r'\D', '', infNFe_chave)
-                if len(chave_numerica) >= 34:
-                    numero_nfe = chave_numerica[24:33]  # 25:34 para python, mas índice final é exclusivo
-                else:
-                    numero_nfe = ""
-            else:
-                numero_nfe = ""
-
+            
             # Insere os dados estruturados do CT-e
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT OR REPLACE INTO cte_structured_data 
                 (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim, 
-                 emit_xNome, vTPrest, rem_xNome, infNFe_chave)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 emit_xNome, vTPrest, rem_xNome, infNFe_chave, upload_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim,
-                 emit_xNome, vTPrest, rem_xNome, numero_nfe))
+                 emit_xNome, vTPrest, rem_xNome, infNFe_chave, datetime.now()))
+            
         except Exception as e:
             st.error(f"Erro ao extrair dados do CT-e: {str(e)}")
-    
-    def find_text(self, element, xpath):
-        """Encontra texto usando XPath com namespaces"""
-        try:
-            # Para cada namespace registrado, tentar encontrar o elemento
-            for prefix, uri in CTE_NAMESPACES.items():
-                full_xpath = xpath.replace('cte:', f'{{{uri}}}')
-                found = element.find(full_xpath)
-                if found is not None and found.text:
-                    return found.text
-            
-            # Tentativa alternativa sem namespace
-            found = element.find(xpath.replace('cte:', ''))
-            if found is not None and found.text:
-                return found.text
-                
-            return None
-        except Exception:
-            return None
     
     def get_all_files(self):
         """Retorna todos os arquivos do banco de dados"""
@@ -283,74 +268,138 @@ class CTeDatabase:
             
             query = '''
                 SELECT 
-                    xf.id,
-                    xf.filename,
-                    xf.upload_date,
-                    cte.nCT,
-                    cte.dhEmi,
-                    cte.cMunIni,
-                    cte.UFIni,
-                    cte.cMunFim,
-                    cte.UFFim,
-                    cte.emit_xNome,
-                    cte.vTPrest,
-                    cte.rem_xNome,
-                    cte.infNFe_chave
-                FROM cte_structured_data cte
-                JOIN xml_files xf ON cte.xml_id = xf.id
-                ORDER BY cte.dhEmi DESC
+                    id,
+                    nCT,
+                    dhEmi,
+                    cMunIni,
+                    UFIni,
+                    cMunFim,
+                    UFFim,
+                    emit_xNome,
+                    vTPrest,
+                    rem_xNome,
+                    infNFe_chave,
+                    upload_date
+                FROM cte_structured_data
+                ORDER BY dhEmi DESC
             '''
             
             df = pd.read_sql_query(query, conn)
             conn.close()
-            # Extração do número da NF-e via pandas (dígitos 26 a 34 da chave)
-            if 'infNFe_chave' in df.columns:
-                df['Numero_NFe'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[24:33]
             return df
         except Exception as e:
             st.error(f"Erro ao carregar dados de CT-e: {str(e)}")
             return pd.DataFrame()
-
+    
     def get_cte_data_by_date_range(self, start_date, end_date):
         """Retorna dados de CT-e filtrados por intervalo de datas"""
         try:
             conn = sqlite3.connect(self.db_name)
             
-            # Converte as datas para o formato do banco (YYYY-MM-DD)
-            start_date_str = start_date.strftime('%Y-%m-%d')
-            end_date_str = end_date.strftime('%Y-%m-%d')
-            
             query = '''
                 SELECT 
-                    xf.id,
-                    xf.filename,
-                    xf.upload_date,
-                    cte.nCT,
-                    cte.dhEmi,
-                    cte.cMunIni,
-                    cte.UFIni,
-                    cte.cMunFim,
-                    cte.UFFim,
-                    cte.emit_xNome,
-                    cte.vTPrest,
-                    cte.rem_xNome,
-                    cte.infNFe_chave
-                FROM cte_structured_data cte
-                JOIN xml_files xf ON cte.xml_id = xf.id
-                WHERE date(substr(cte.dhEmi, 7, 4) || '-' || substr(cte.dhEmi, 4, 2) || '-' || substr(cte.dhEmi, 1, 2)) 
-                BETWEEN date(?) AND date(?)
-                ORDER BY cte.dhEmi DESC
+                    id,
+                    nCT,
+                    dhEmi,
+                    cMunIni,
+                    UFIni,
+                    cMunFim,
+                    UFFim,
+                    emit_xNome,
+                    vTPrest,
+                    rem_xNome,
+                    infNFe_chave,
+                    upload_date
+                FROM cte_structured_data
+                WHERE date(dhEmi) BETWEEN date(?) AND date(?)
+                ORDER BY dhEmi DESC
             '''
             
-            df = pd.read_sql_query(query, conn, params=(start_date_str, end_date_str))
+            df = pd.read_sql_query(query, conn, params=(start_date, end_date))
             conn.close()
-            # Extração do número da NF-e via pandas (dígitos 26 a 34 da chave)
-            if 'infNFe_chave' in df.columns:
-                df['Numero_NFe'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[24:33]
             return df
         except Exception as e:
             st.error(f"Erro ao carregar dados por intervalo: {str(e)}")
             return pd.DataFrame()
+    
+    def get_cte_data_api(self, limit=1000, offset=0, filters=None):
+        """Retorna dados de CT-e para API com paginação e filtros"""
+        try:
+            conn = sqlite3.connect(self.db_name)
+            cursor = conn.cursor()
+            
+            # Construir query base
+            query = '''
+                SELECT 
+                    id,
+                    nCT,
+                    dhEmi,
+                    cMunIni,
+                    UFIni,
+                    cMunFim,
+                    UFFim,
+                    emit_xNome,
+                    vTPrest,
+                    rem_xNome,
+                    infNFe_chave,
+                    upload_date
+                FROM cte_structured_data
+                WHERE 1=1
+            '''
+            
+            params = []
+            
+            # Aplicar filtros se fornecidos
+            if filters:
+                if 'start_date' in filters and filters['start_date']:
+                    query += " AND date(dhEmi) >= date(?)"
+                    params.append(filters['start_date'])
+                
+                if 'end_date' in filters and filters['end_date']:
+                    query += " AND date(dhEmi) <= date(?)"
+                    params.append(filters['end_date'])
+                
+                if 'emitente' in filters and filters['emitente']:
+                    query += " AND emit_xNome LIKE ?"
+                    params.append(f'%{filters["emitente"]}%')
+            
+            query += " ORDER BY dhEmi DESC LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+            
+            cursor.execute(query, params)
+            columns = [column[0] for column in cursor.description]
+            results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+            
+            # Contar total de registros
+            count_query = "SELECT COUNT(*) FROM cte_structured_data WHERE 1=1"
+            count_params = []
+            
+            if filters:
+                if 'start_date' in filters and filters['start_date']:
+                    count_query += " AND date(dhEmi) >= date(?)"
+                    count_params.append(filters['start_date'])
+                
+                if 'end_date' in filters and filters['end_date']:
+                    count_query += " AND date(dhEmi) <= date(?)"
+                    count_params.append(filters['end_date'])
+                
+                if 'emitente' in filters and filters['emitente']:
+                    count_query += " AND emit_xNome LIKE ?"
+                    count_params.append(f'%{filters["emitente"]}%')
+            
+            cursor.execute(count_query, count_params)
+            total_count = cursor.fetchone()[0]
+            
+            conn.close()
+            
+            return {
+                "data": results,
+                "total_count": total_count,
+                "limit": limit,
+                "offset": offset
+            }
+        except Exception as e:
+            return {"error": str(e)}
 
 class CTeProcessor:
     def __init__(self, storage_path="storage/cte_files"):
@@ -491,6 +540,69 @@ class CTeProcessor:
             results['messages'].append(f"Erro geral no processamento: {str(e)}")
             return results
 
+# API Flask para integração com Power BI
+@app.route('/api/cte', methods=['GET'])
+def get_cte_data():
+    """Endpoint para obter dados de CT-e em formato JSON"""
+    try:
+        # Parâmetros da query string
+        limit = int(request.args.get('limit', 1000))
+        offset = int(request.args.get('offset', 0))
+        
+        # Filtros
+        filters = {}
+        if 'start_date' in request.args:
+            filters['start_date'] = request.args.get('start_date')
+        if 'end_date' in request.args:
+            filters['end_date'] = request.args.get('end_date')
+        if 'emitente' in request.args:
+            filters['emitente'] = request.args.get('emitente')
+        
+        # Obter dados do banco
+        db = CTeDatabase()
+        result = db.get_cte_data_api(limit, offset, filters)
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/cte/count', methods=['GET'])
+def get_cte_count():
+    """Endpoint para obter contagem total de CT-es"""
+    try:
+        db = CTeDatabase()
+        count = db.get_file_count()
+        return jsonify({"total_count": count})
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/cte/fields', methods=['GET'])
+def get_cte_fields():
+    """Endpoint para obter metadados dos campos"""
+    fields = [
+        {"name": "id", "type": "integer", "description": "ID único do registro"},
+        {"name": "nCT", "type": "string", "description": "Número do Conhecimento de Transporte"},
+        {"name": "dhEmi", "type": "date", "description": "Data e hora de emissão"},
+        {"name": "cMunIni", "type": "string", "description": "Código do município de início"},
+        {"name": "UFIni", "type": "string", "description": "UF de início"},
+        {"name": "cMunFim", "type": "string", "description": "Código do município de fim"},
+        {"name": "UFFim", "type": "string", "description": "UF de fim"},
+        {"name": "emit_xNome", "type": "string", "description": "Nome do emitente"},
+        {"name": "vTPrest", "type": "number", "description": "Valor total da prestação"},
+        {"name": "rem_xNome", "type": "string", "description": "Nome do remetente"},
+        {"name": "infNFe_chave", "type": "string", "description": "Chave da NFe associada"},
+        {"name": "upload_date", "type": "datetime", "description": "Data de upload do arquivo"}
+    ]
+    
+    return jsonify(fields)
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Endpoint para verificar status da API"""
+    return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
+
 # Inicialização
 @st.cache_resource
 def init_database():
@@ -500,41 +612,53 @@ def init_database():
 def init_processor():
     return CTeProcessor()
 
-def load_haefele_logo():
-    """Carrega a logo da Haefele a partir do GitHub"""
+def start_flask_app():
+    """Inicia o servidor Flask em uma thread separada"""
     try:
-        logo_url = "https://github.com/DaniloNs-creator/final/raw/main/haefele_logo.png"
-        response = requests.get(logo_url, stream=True)
-        if response.status_code == 200:
-            image = Image.open(response.raw)
-            return image
-        else:
-            st.error("Não foi possível carregar a logo da Haefele")
-            return None
+        serve(app, host='0.0.0.0', port=5000)
     except Exception as e:
-        st.error(f"Erro ao carregar logo: {str(e)}")
-        return None
+        st.error(f"Erro ao iniciar servidor Flask: {e}")
 
 def main():
     # Inicializar componentes
     db = init_database()
     processor = init_processor()
     
-    # Carregar e exibir logo da Haefele
-    logo = load_haefele_logo()
-    if logo:
-        st.sidebar.image(logo, use_container_width=True)  # Corrigido para use_container_width
+    # Iniciar API Flask em thread separada
+    if 'flask_started' not in st.session_state:
+        try:
+            flask_thread = threading.Thread(target=start_flask_app, daemon=True)
+            flask_thread.start()
+            st.session_state.flask_started = True
+            st.success("API Flask iniciada na porta 5000")
+        except Exception as e:
+            st.error(f"Erro ao iniciar API: {e}")
     
-    st.title("📄 Sistema de Armazenamento de CT-e")
-    st.markdown("### Armazene, consulte e exporte seus CT-es para Power BI")
+    st.title("📄 Sistema de Armazenamento de CT-e com API")
+    st.markdown("### Armazene CT-es e acesse via API para integração com Power BI")
     
     # Sidebar
     st.sidebar.header("Estatísticas")
     total_files = db.get_file_count()
     st.sidebar.metric("Total de CT-es Armazenados", total_files)
     
+    # Informações da API
+    st.sidebar.header("API para Power BI")
+    st.sidebar.info("""
+    **Endpoints disponíveis:**
+    - `GET /api/cte` - Dados dos CT-es
+    - `GET /api/cte/count` - Contagem total
+    - `GET /api/cte/fields` - Metadados dos campos
+    - `GET /api/health` - Status da API
+    
+    **Exemplo de URL para Power BI:**
+    ```
+    http://localhost:5000/api/cte?limit=1000
+    ```
+    """)
+    
     # Navegação por abas
-    tab1, tab2, tab3, tab4 = st.tabs(["Upload", "Consultar CT-es", "Visualizar CT-e", "Dados para Power BI"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Upload", "Consultar CT-es", "Visualizar CT-e", "Dados para Power BI", "API Info"])
     
     # Tab 1 - Upload
     with tab1:
@@ -784,7 +908,10 @@ def main():
         # Carregar dados
         if st.button("Carregar Dados CT-e", type="primary"):
             with st.spinner("Carregando dados de CT-e..."):
-                df = db.get_cte_data_by_date_range(start_date, end_date)
+                df = db.get_cte_data_by_date_range(
+                    start_date.strftime('%Y-%m-%d'), 
+                    end_date.strftime('%Y-%m-%d')
+                )
                 
                 if not df.empty:
                     st.success(f"Dados carregados: {len(df)} registros encontrados")
@@ -823,39 +950,96 @@ def main():
                     href_csv = f'<a href="data:file/csv;base64,{b64_csv}" download="dados_cte_powerbi.csv">📥 Baixar para CSV</a>'
                     st.markdown(href_csv, unsafe_allow_html=True)
                     
-                    # Instruções para Power BI
-                    with st.expander("🔧 Instruções para conectar ao Power BI"):
-                        st.markdown("""
-                        ### Como conectar esses dados ao Power BI:
-                        
-                        1. **Método 1: Arquivo Excel/CSV**
-                           - Baixe os dados usando os botões acima
-                           - No Power BI, selecione "Obter Dados" > "Arquivo" > "Excel" ou "Texto/CSV"
-                           - Selecione o arquivo baixado
-                        
-                        2. **Método 2: Conexão direta com SQLite (Recomendado)**
-                           - No Power BI, selecione "Obter Dados" > "Mais..." > "Banco de dados" > "SQLite"
-                           - No campo "Banco de dados", digite o caminho completo para o arquivo `cte_database.db`
-                           - Selecione a tabela `cte_structured_data`
-                        
-                        3. **Método 3: Conexão ODBC**
-                           - Configure um driver ODBC para SQLite
-                           - No Power BI, selecione "Obter Dados" > "ODBC"
-                           - Selecione a fonte de dados configurada
-                        
-                        **Vantagem dos métodos 2 e 3:** Atualizações em tempo real sem precisar reimportar arquivos.
-                        """)
                 else:
                     st.warning("Nenhum dado de CT-e encontrado para o período selecionado.")
     
-    # Footer
-    st.sidebar.divider()
-    st.sidebar.info("""
-    **💡 Dicas:**
-    - Para 50k CT-es, use a opção de diretório
-    - Conecte o Power BI diretamente ao banco SQLite
-    - Dados armazenados permanentemente
-    """)
+    # Tab 5 - API Info
+    with tab5:
+        st.header("Informações da API para Power BI")
+        
+        st.info("""
+        ## 📊 Como conectar o Power BI à API
+        
+        Agora seu sistema possui uma API RESTful que permite ao Power BI conectar-se diretamente
+        aos dados dos CT-es sem necessidade de drivers ODBC complexos.
+        """)
+        
+        # Exemplos de URLs da API
+        st.subheader("📋 Endpoints da API")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.code("""
+# Obter todos os CT-es (com paginação)
+GET /api/cte?limit=1000&offset=0
+
+# Filtrar por data
+GET /api/cte?start_date=2024-01-01&end_date=2024-12-31
+
+# Filtrar por emitente
+GET /api/cte?emitente=NOME_DA_EMPRESA
+
+# Obter contagem total
+GET /api/cte/count
+
+# Obter metadados dos campos
+GET /api/cte/fields
+
+# Verificar status da API
+GET /api/health
+            """, language="http")
+        
+        with col2:
+            st.subheader("🔧 Configuração no Power BI")
+            st.markdown("""
+            1. No Power BI, selecione **"Obter Dados"** > **"Web"**
+            2. Cole a URL: `http://localhost:5000/api/cte`
+            3. Selecione **"OK"**
+            4. Os dados serão carregados automaticamente
+            
+            **Vantagens:**
+            - ✅ Conexão direta sem drivers
+            - ✅ Filtros via parâmetros de URL
+            - ✅ Atualização em tempo real
+            - ✅ Suporte a paginação para grandes volumes
+            - ✅ Metadados estruturados
+            """)
+        
+        # Testar a API
+        st.subheader("🧪 Testar Conexão da API")
+        
+        if st.button("Testar API", type="primary"):
+            try:
+                response = requests.get("http://localhost:5000/api/health")
+                if response.status_code == 200:
+                    st.success("✅ API está funcionando corretamente!")
+                    st.json(response.json())
+                else:
+                    st.error(f"❌ API retornou erro: {response.status_code}")
+            except Exception as e:
+                st.error(f"❌ Erro ao conectar na API: {e}")
+        
+        # Exemplo de código para Power BI
+        st.subheader("💡 Exemplo de Consulta no Power BI")
+        
+        st.code("""
+let
+    Fonte = Json.Document(Web.Contents("http://localhost:5000/api/cte", [
+        Query = [
+            limit = "10000",
+            start_date = "2024-01-01",
+            end_date = "2024-12-31"
+        ]
+    ])),
+    data = Fonte[data],
+    #"Convertido em Tabela" = Table.FromList(data, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+    #"Expandido" = Table.ExpandRecordColumn(#"Convertido em Tabela", "Column1", 
+        {"id", "nCT", "dhEmi", "cMunIni", "UFIni", "cMunFim", "UFFim", 
+         "emit_xNome", "vTPrest", "rem_xNome", "infNFe_chave", "upload_date"})
+in
+    #"Expandido"
+        """, language="powerquery")
 
 # Executar a aplicação
 if __name__ == "__main__":
