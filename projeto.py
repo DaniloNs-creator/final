@@ -171,10 +171,14 @@ class CTeDatabase:
             except (ValueError, TypeError):
                 vTPrest = None
             
-            # Limpa a chave da NFe para mostrar apenas números
+            # Limpa a chave da NFe para mostrar apenas os 9 últimos dígitos (número da NFe)
+            numero_nfe = None
             if infNFe_chave:
-                # Remove qualquer caractere não numérico
                 infNFe_chave = re.sub(r'\D', '', infNFe_chave)
+                if len(infNFe_chave) >= 9:
+                    numero_nfe = infNFe_chave[-9:]
+                else:
+                    numero_nfe = infNFe_chave  # fallback se não houver 9 dígitos
             
             # Insere os dados estruturados do CT-e
             cursor = conn.cursor()
@@ -184,7 +188,7 @@ class CTeDatabase:
                  emit_xNome, vTPrest, rem_xNome, infNFe_chave)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim,
-                 emit_xNome, vTPrest, rem_xNome, infNFe_chave))
+                 emit_xNome, vTPrest, rem_xNome, numero_nfe))
             
         except Exception as e:
             st.error(f"Erro ao extrair dados do CT-e: {str(e)}")
