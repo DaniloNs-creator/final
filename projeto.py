@@ -32,6 +32,8 @@ st.set_page_config(
 # Inicialização do estado da sessão
 if 'selected_xml' not in st.session_state:
     st.session_state.selected_xml = None
+if 'processing' not in st.session_state:
+    st.session_state.processing = False
 
 class CTeDatabase:
     def __init__(self, db_name="cte_database.db"):
@@ -43,6 +45,8 @@ class CTeDatabase:
         try:
             conn = sqlite3.connect(self.db_name)
             cursor = conn.cursor()
+            
+            # Cria as tabelas se não existirem
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS xml_files (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,6 +58,7 @@ class CTeDatabase:
                     processed BOOLEAN DEFAULT FALSE
                 )
             ''')
+            
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS xml_content (
                     id INTEGER PRIMARY KEY,
@@ -61,6 +66,58 @@ class CTeDatabase:
                     FOREIGN KEY (id) REFERENCES xml_files (id)
                 )
             ''')
+            
+            # Verifica se a tabela cte_structured_data existe e sua estrutura
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='cte_structured_data'")
+            table_exists = cursor.fetchone()
+            
+            if table_exists:
+                # Verifica se a coluna upload_date existe na tabela
+                cursor.execute("PRAGMA table_info(cte_structured_data)")
+                columns = [column[1] for column in cursor.fetchall()]
+                
+                if 'upload_date' in columns:
+                    # A coluna existe, precisamos criar uma nova tabela e migrar os dados
+                    st.warning("🔄 Corrigindo estrutura do banco de dados...")
+                    
+                    # Cria tabela temporária com estrutura correta
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS cte_structured_data_new (
+                            id INTEGER PRIMARY KEY,
+                            xml_id INTEGER,
+                            nCT TEXT,
+                            dhEmi DATE,
+                            cMunIni TEXT,
+                            UFIni TEXT,
+                            cMunFim TEXT,
+                            UFFim TEXT,
+                            emit_xNome TEXT,
+                            vTPrest DECIMAL(15, 2),
+                            rem_xNome TEXT,
+                            infNFe_chave TEXT,
+                            FOREIGN KEY (xml_id) REFERENCES xml_files (id)
+                        )
+                    ''')
+                    
+                    # Copia dados da tabela antiga para a nova (excluindo a coluna upload_date)
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO cte_structured_data_new 
+                        (id, xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim, 
+                         emit_xNome, vTPrest, rem_xNome, infNFe_chave)
+                        SELECT id, xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim, 
+                               emit_xNome, vTPrest, rem_xNome, infNFe_chave
+                        FROM cte_structured_data
+                    ''')
+                    
+                    # Remove tabela antiga
+                    cursor.execute('DROP TABLE cte_structured_data')
+                    
+                    # Renomeia tabela temporária
+                    cursor.execute('ALTER TABLE cte_structured_data_new RENAME TO cte_structured_data')
+                    
+                    st.success("✅ Estrutura do banco de dados corrigida com sucesso!")
+            
+            # Cria a tabela se não existir (após a correção)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS cte_structured_data (
                     id INTEGER PRIMARY KEY,
@@ -75,16 +132,15 @@ class CTeDatabase:
                     vTPrest DECIMAL(15, 2),
                     rem_xNome TEXT,
                     infNFe_chave TEXT,
-                    numero_nfe TEXT,
-                    upload_date TIMESTAMP,
                     FOREIGN KEY (xml_id) REFERENCES xml_files (id)
                 )
             ''')
+            
             conn.commit()
             conn.close()
             return True
         except Exception as e:
-            st.error(f"Erro ao inicializar banco de dados: {str(e)}")
+            st.error(f"❌ Erro ao inicializar banco de dados: {str(e)}")
             return False
 
     def insert_xml(self, filename, file_path, file_size, content_hash, xml_content=None):
@@ -114,7 +170,7 @@ class CTeDatabase:
         except sqlite3.IntegrityError:
             return None
         except Exception as e:
-            st.error(f"Erro ao inserir CT-e: {str(e)}")
+            st.error(f"❌ Erro ao inserir CT-e: {str(e)}")
             return None
         finally:
             if conn:
@@ -127,6 +183,7 @@ class CTeDatabase:
             namespaces = {
                 'cte': 'http://www.portalfiscal.inf.br/cte'
             }
+            
             def find_text(element, path):
                 for prefix, uri in namespaces.items():
                     full_path = path.replace('cte:', f'{{{uri}}}')
@@ -138,6 +195,7 @@ class CTeDatabase:
                     return found.text
                 return None
             
+            # Extrai os dados do XML
             nCT = find_text(root, './/cte:nCT')
             dhEmi = find_text(root, './/cte:dhEmi')
             cMunIni = find_text(root, './/cte:cMunIni')
@@ -149,29 +207,27 @@ class CTeDatabase:
             rem_xNome = find_text(root, './/cte:rem/cte:xNome')
             infNFe_chave = find_text(root, './/cte:infNFe/cte:chave')
             
-            # Extrai os 9 dígitos do número da NFe
-            numero_nfe = None
-            if infNFe_chave and len(infNFe_chave) >= 44:
-                numero_nfe = infNFe_chave[25:34]  # Posições 26 a 34 (9 dígitos)
-
+            # Formata os dados
             if dhEmi:
-                dhEmi = dhEmi[:10]
+                dhEmi = dhEmi[:10]  # Pega apenas a data (YYYY-MM-DD)
             
             try:
                 vTPrest = float(vTPrest) if vTPrest else None
             except (ValueError, TypeError):
                 vTPrest = None
-
+            
+            # Insere os dados na tabela SEM a coluna upload_date
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT OR REPLACE INTO cte_structured_data 
                 (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim, 
-                 emit_xNome, vTPrest, rem_xNome, infNFe_chave, numero_nfe, upload_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 emit_xNome, vTPrest, rem_xNome, infNFe_chave)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim,
-                 emit_xNome, vTPrest, rem_xNome, infNFe_chave, numero_nfe, datetime.now()))
+                 emit_xNome, vTPrest, rem_xNome, infNFe_chave))
+            
         except Exception as e:
-            st.error(f"Erro ao extrair dados do CT-e: {str(e)}")
+            st.error(f"❌ Erro ao extrair dados do CT-e: {str(e)}")
 
     def get_all_files(self):
         try:
@@ -182,7 +238,7 @@ class CTeDatabase:
             conn.close()
             return files
         except Exception as e:
-            st.error(f"Erro ao buscar arquivos: {str(e)}")
+            st.error(f"❌ Erro ao buscar arquivos: {str(e)}")
             return []
 
     def get_file_count(self):
@@ -194,7 +250,7 @@ class CTeDatabase:
             conn.close()
             return count
         except Exception as e:
-            st.error(f"Erro ao contar arquivos: {str(e)}")
+            st.error(f"❌ Erro ao contar arquivos: {str(e)}")
             return 0
 
     def search_files(self, search_term):
@@ -211,7 +267,7 @@ class CTeDatabase:
             conn.close()
             return files
         except Exception as e:
-            st.error(f"Erro ao buscar arquivos: {str(e)}")
+            st.error(f"❌ Erro ao buscar arquivos: {str(e)}")
             return []
 
     def get_xml_content(self, file_id):
@@ -223,7 +279,7 @@ class CTeDatabase:
             conn.close()
             return result[0] if result else None
         except Exception as e:
-            st.error(f"Erro ao buscar conteúdo do XML: {str(e)}")
+            st.error(f"❌ Erro ao buscar conteúdo do XML: {str(e)}")
             return None
 
     def get_cte_data(self):
@@ -231,27 +287,30 @@ class CTeDatabase:
             conn = sqlite3.connect(self.db_name)
             query = '''
                 SELECT 
-                    id,
-                    nCT,
-                    dhEmi,
-                    cMunIni,
-                    UFIni,
-                    cMunFim,
-                    UFFim,
-                    emit_xNome,
-                    vTPrest,
-                    rem_xNome,
-                    infNFe_chave,
-                    numero_nfe,
-                    upload_date
-                FROM cte_structured_data
-                ORDER BY dhEmi DESC
+                    csd.id,
+                    csd.nCT,
+                    csd.dhEmi,
+                    csd.cMunIni,
+                    csd.UFIni,
+                    csd.cMunFim,
+                    csd.UFFim,
+                    csd.emit_xNome,
+                    csd.vTPrest,
+                    csd.rem_xNome,
+                    csd.infNFe_chave,
+                    xf.upload_date
+                FROM cte_structured_data csd
+                JOIN xml_files xf ON csd.xml_id = xf.id
+                ORDER BY csd.dhEmi DESC
             '''
             df = pd.read_sql_query(query, conn)
             conn.close()
+            # Extraia apenas o número da NF-e (9 dígitos, posições 26 a 34 da chave de 44 caracteres)
+            if 'infNFe_chave' in df.columns:
+                df['numero_nfe'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[24:33]
             return df
         except Exception as e:
-            st.error(f"Erro ao carregar dados de CT-e: {str(e)}")
+            st.error(f"❌ Erro ao carregar dados de CT-e: {str(e)}")
             return pd.DataFrame()
 
     def get_cte_data_by_date_range(self, start_date, end_date):
@@ -259,28 +318,31 @@ class CTeDatabase:
             conn = sqlite3.connect(self.db_name)
             query = '''
                 SELECT 
-                    id,
-                    nCT,
-                    dhEmi,
-                    cMunIni,
-                    UFIni,
-                    cMunFim,
-                    UFFim,
-                    emit_xNome,
-                    vTPrest,
-                    rem_xNome,
-                    infNFe_chave,
-                    numero_nfe,
-                    upload_date
-                FROM cte_structured_data
-                WHERE date(dhEmi) BETWEEN date(?) AND date(?)
-                ORDER BY dhEmi DESC
+                    csd.id,
+                    csd.nCT,
+                    csd.dhEmi,
+                    csd.cMunIni,
+                    csd.UFIni,
+                    csd.cMunFim,
+                    csd.UFFim,
+                    csd.emit_xNome,
+                    csd.vTPrest,
+                    csd.rem_xNome,
+                    csd.infNFe_chave,
+                    xf.upload_date
+                FROM cte_structured_data csd
+                JOIN xml_files xf ON csd.xml_id = xf.id
+                WHERE date(csd.dhEmi) BETWEEN date(?) AND date(?)
+                ORDER BY csd.dhEmi DESC
             '''
             df = pd.read_sql_query(query, conn, params=(start_date, end_date))
             conn.close()
+            # Deixe a coluna infNFe_chave com apenas os 9 dígitos do número da NFe
+            if 'infNFe_chave' in df.columns:
+                df['infNFe_chave'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[25:34]
             return df
         except Exception as e:
-            st.error(f"Erro ao carregar dados por intervalo: {str(e)}")
+            st.error(f"❌ Erro ao carregar dados por intervalo: {str(e)}")
             return pd.DataFrame()
 
     def get_cte_data_api(self, limit=1000, offset=0, filters=None):
@@ -289,51 +351,58 @@ class CTeDatabase:
             cursor = conn.cursor()
             query = '''
                 SELECT 
-                    id,
-                    nCT,
-                    dhEmi,
-                    cMunIni,
-                    UFIni,
-                    cMunFim,
-                    UFFim,
-                    emit_xNome,
-                    vTPrest,
-                    rem_xNome,
-                    infNFe_chave,
-                    numero_nfe,
-                    upload_date
-                FROM cte_structured_data
+                    csd.id,
+                    csd.nCT,
+                    csd.dhEmi,
+                    csd.cMunIni,
+                    csd.UFIni,
+                    csd.cMunFim,
+                    csd.UFFim,
+                    csd.emit_xNome,
+                    csd.vTPrest,
+                    csd.rem_xNome,
+                    csd.infNFe_chave,
+                    xf.upload_date
+                FROM cte_structured_data csd
+                JOIN xml_files xf ON csd.xml_id = xf.id
                 WHERE 1=1
             '''
             params = []
             if filters:
                 if 'start_date' in filters and filters['start_date']:
-                    query += " AND date(dhEmi) >= date(?)"
+                    query += " AND date(csd.dhEmi) >= date(?)"
                     params.append(filters['start_date'])
                 if 'end_date' in filters and filters['end_date']:
-                    query += " AND date(dhEmi) <= date(?)"
+                    query += " AND date(csd.dhEmi) <= date(?)"
                     params.append(filters['end_date'])
                 if 'emitente' in filters and filters['emitente']:
-                    query += " AND emit_xNome LIKE ?"
+                    query += " AND csd.emit_xNome LIKE ?"
                     params.append(f'%{filters["emitente"]}%')
-            query += " ORDER BY dhEmi DESC LIMIT ? OFFSET ?"
+            query += " ORDER BY csd.dhEmi DESC LIMIT ? OFFSET ?"
             params.extend([limit, offset])
             cursor.execute(query, params)
             columns = [column[0] for column in cursor.description]
             results = [dict(zip(columns, row)) for row in cursor.fetchall()]
             
-            count_query = "SELECT COUNT(*) FROM cte_structured_data WHERE 1=1"
+            # Contagem total com filtros
+            count_query = '''
+                SELECT COUNT(*) 
+                FROM cte_structured_data csd
+                JOIN xml_files xf ON csd.xml_id = xf.id
+                WHERE 1=1
+            '''
             count_params = []
             if filters:
                 if 'start_date' in filters and filters['start_date']:
-                    count_query += " AND date(dhEmi) >= date(?)"
+                    count_query += " AND date(csd.dhEmi) >= date(?)"
                     count_params.append(filters['start_date'])
                 if 'end_date' in filters and filters['end_date']:
-                    count_query += " AND date(dhEmi) <= date(?)"
+                    count_query += " AND date(csd.dhEmi) <= date(?)"
                     count_params.append(filters['end_date'])
                 if 'emitente' in filters and filters['emitente']:
-                    count_query += " AND emit_xNome LIKE ?"
+                    count_query += " AND csd.emit_xNome LIKE ?"
                     count_params.append(f'%{filters["emitente"]}%')
+            
             cursor.execute(count_query, count_params)
             total_count = cursor.fetchone()[0]
             conn.close()
@@ -367,7 +436,7 @@ class CTeProcessor:
                 f.write(file_content)
             return file_path, True
         except Exception as e:
-            st.error(f"Erro ao salvar arquivo: {str(e)}")
+            st.error(f"❌ Erro ao salvar arquivo: {str(e)}")
             return None, False
     
     def process_uploaded_file(self, uploaded_file, db):
@@ -411,23 +480,49 @@ class CTeProcessor:
         try:
             directory_path = Path(directory_path)
             if not directory_path.exists():
-                results['messages'].append("Diretório não encontrado")
+                results['messages'].append("❌ Diretório não encontrado")
                 return results
+            
             xml_files = list(directory_path.glob("*.xml")) + list(directory_path.glob("*.XML"))
-            for xml_file in xml_files:
+            total_files = len(xml_files)
+            
+            if total_files == 0:
+                results['messages'].append("❌ Nenhum arquivo XML encontrado no diretório")
+                return results
+            
+            st.info(f"📁 Encontrados {total_files} arquivos XML para processar")
+            
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            stats_text = st.empty()
+            
+            for i, xml_file in enumerate(xml_files):
+                if st.session_state.processing == False:
+                    results['messages'].append("⏹️ Processamento interrompido pelo usuário")
+                    break
+                    
                 try:
+                    progress = (i + 1) / total_files
+                    progress_bar.progress(progress)
+                    status_text.text(f"📊 Processando {i+1}/{total_files}: {xml_file.name}")
+                    stats_text.text(f"✅ Sucessos: {results['success']} | 🔄 Duplicados: {results['duplicates']} | ❌ Erros: {results['errors']}")
+                    
                     file_content = xml_file.read_bytes()
                     filename = xml_file.name
                     content_str = file_content.decode('utf-8', errors='ignore')
+                    
                     if 'CTe' not in content_str and 'conhecimento' not in content_str.lower():
-                        results['messages'].append(f"Ignorado (não é CT-e): {filename}")
+                        results['messages'].append(f"⚠️ Ignorado (não é CT-e): {filename}")
                         continue
+                    
                     content_hash = self.calculate_hash(file_content)
                     file_path, is_new = self.save_cte_file(file_content, filename)
+                    
                     if not is_new:
                         results['duplicates'] += 1
-                        results['messages'].append(f"Duplicado: {filename}")
+                        results['messages'].append(f"🔄 Duplicado: {filename}")
                         continue
+                    
                     file_size = len(file_content)
                     file_id = db.insert_xml(
                         filename=filename,
@@ -436,19 +531,29 @@ class CTeProcessor:
                         content_hash=content_hash,
                         xml_content=content_str
                     )
+                    
                     if file_id:
                         results['success'] += 1
-                        results['messages'].append(f"Sucesso: {filename} (ID: {file_id})")
+                        results['messages'].append(f"✅ Sucesso: {filename} (ID: {file_id})")
                     else:
                         results['errors'] += 1
-                        results['messages'].append(f"Erro BD: {filename}")
+                        results['messages'].append(f"❌ Erro BD: {filename}")
+                        
                 except Exception as e:
                     results['errors'] += 1
-                    results['messages'].append(f"Erro processando {xml_file.name}: {str(e)}")
+                    results['messages'].append(f"❌ Erro processando {xml_file.name}: {str(e)}")
+                
+                # Pequena pausa para não sobrecarregar o sistema
+                time.sleep(0.001)
+            
+            progress_bar.empty()
+            status_text.empty()
+            stats_text.empty()
+            
             return results
         except Exception as e:
             results['errors'] += 1
-            results['messages'].append(f"Erro geral no processamento: {str(e)}")
+            results['messages'].append(f"❌ Erro geral no processamento: {str(e)}")
             return results
 
 # API Flask para integração com Power BI
@@ -493,7 +598,6 @@ def get_cte_fields():
         {"name": "vTPrest", "type": "number", "description": "Valor total da prestação"},
         {"name": "rem_xNome", "type": "string", "description": "Nome do remetente"},
         {"name": "infNFe_chave", "type": "string", "description": "Chave da NFe associada"},
-        {"name": "numero_nfe", "type": "string", "description": "Número da NFe (9 dígitos)"},
         {"name": "upload_date", "type": "datetime", "description": "Data de upload do arquivo"}
     ]
     return jsonify(fields)
@@ -514,28 +618,29 @@ def start_flask_app():
     try:
         serve(app, host='0.0.0.0', port=5000)
     except Exception as e:
-        st.error(f"Erro ao iniciar servidor Flask: {e}")
+        st.error(f"❌ Erro ao iniciar servidor Flask: {e}")
 
 def main():
     db = init_database()
     processor = init_processor()
+    
     if 'flask_started' not in st.session_state:
         try:
             flask_thread = threading.Thread(target=start_flask_app, daemon=True)
             flask_thread.start()
             st.session_state.flask_started = True
-            st.success("API Flask iniciada na porta 5000")
+            st.success("✅ API Flask iniciada na porta 5000")
         except Exception as e:
-            st.error(f"Erro ao iniciar API: {e}")
+            st.error(f"❌ Erro ao iniciar API: {e}")
 
     st.title("📄 Sistema de Armazenamento de CT-e com API")
     st.markdown("### Armazene CT-es e acesse via API para integração com Power BI")
 
-    st.sidebar.header("Estatísticas")
+    st.sidebar.header("📊 Estatísticas")
     total_files = db.get_file_count()
     st.sidebar.metric("Total de CT-es Armazenados", total_files)
 
-    st.sidebar.header("API para Power BI")
+    st.sidebar.header("🔌 API para Power BI")
     st.sidebar.info("""
     **Endpoints disponíveis:**
     - `GET /api/cte` - Dados dos CT-es
@@ -549,12 +654,13 @@ def main():
     ```
     """)
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Upload", "Consultar CT-es", "Visualizar CT-e", "Dados para Power BI", "API Info"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📤 Upload", "🔍 Consultar CT-es", "👁️ Visualizar CT-e", "📊 Dados para Power BI", "ℹ️ API Info"])
 
     with tab1:
-        st.header("Upload de CT-es")
+        st.header("📤 Upload de CT-es")
         upload_option = st.radio("Selecione o tipo de upload:", 
                                 ["Upload Individual", "Upload em Lote", "Upload por Diretório"])
+        
         if upload_option == "Upload Individual":
             uploaded_file = st.file_uploader(
                 "Selecione um arquivo XML de CT-e", 
@@ -564,8 +670,8 @@ def main():
             if uploaded_file:
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.info(f"Arquivo selecionado: {uploaded_file.name}")
-                    st.write(f"Tamanho: {len(uploaded_file.getvalue())} bytes")
+                    st.info(f"📄 Arquivo selecionado: {uploaded_file.name}")
+                    st.write(f"📏 Tamanho: {len(uploaded_file.getvalue())} bytes")
                 with col2:
                     if st.button("🔄 Armazenar CT-e", use_container_width=True):
                         with st.spinner("Processando arquivo..."):
@@ -573,10 +679,10 @@ def main():
                             if success:
                                 st.success(message)
                                 st.balloons()
+                                st.rerun()
                             else:
                                 st.error(message)
-                        time.sleep(2)
-                        st.rerun()
+        
         elif upload_option == "Upload em Lote":
             uploaded_files = st.file_uploader(
                 "Selecione múltiplos arquivos XML de CT-e", 
@@ -585,7 +691,7 @@ def main():
                 help="Selecione vários arquivos XML de CT-e para armazenar"
             )
             if uploaded_files:
-                st.info(f"{len(uploaded_files)} arquivo(s) selecionado(s)")
+                st.info(f"📦 {len(uploaded_files)} arquivo(s) selecionado(s)")
                 if st.button("🔄 Armazenar Todos", type="primary"):
                     progress_bar = st.progress(0)
                     status_text = st.empty()
@@ -594,7 +700,7 @@ def main():
                     for i, uploaded_file in enumerate(uploaded_files):
                         progress = (i + 1) / len(uploaded_files)
                         progress_bar.progress(progress)
-                        status_text.text(f"Processando {i+1}/{len(uploaded_files)}: {uploaded_file.name}")
+                        status_text.text(f"📊 Processando {i+1}/{len(uploaded_files)}: {uploaded_file.name}")
                         success, message = processor.process_uploaded_file(uploaded_file, db)
                         if success:
                             success_count += 1
@@ -603,39 +709,55 @@ def main():
                         time.sleep(0.1)
                     progress_bar.empty()
                     status_text.empty()
-                    st.success(f"Processamento concluído!")
+                    st.success(f"✅ Processamento concluído!")
                     st.write(f"✅ Sucessos: {success_count}")
                     st.write(f"❌ Erros: {error_count}")
-                    time.sleep(2)
                     st.rerun()
+        
         else:
-            st.subheader("Para grandes volumes (50k+ CT-es)")
-            st.info("Para processar 50 mil CT-es, recomendamos usar a opção de diretório")
+            st.subheader("📁 Processamento em Lote de Diretório")
+            st.info("💡 Para processar grandes volumes de CT-es (20k+ arquivos)")
+            
             directory_path = st.text_input(
                 "Caminho do diretório com CT-es",
                 placeholder="Ex: C:/cte_files/ ou /home/usuario/cte_files/"
             )
-            if st.button("📁 Processar Diretório", type="secondary"):
-                if directory_path and os.path.exists(directory_path):
-                    with st.spinner("Processando diretório... Isso pode demorar para muitos arquivos"):
-                        results = processor.process_directory(directory_path, db)
-                        st.success(f"Processamento do diretório concluído!")
-                        st.write(f"✅ Sucessos: {results['success']}")
-                        st.write(f"🔄 Duplicados: {results['duplicates']}")
-                        st.write(f"❌ Erros: {results['errors']}")
-                        with st.expander("Ver detalhes do processamento"):
-                            for msg in results['messages'][-10:]:
-                                st.write(msg)
-                        time.sleep(2)
-                        st.rerun()
-                else:
-                    st.error("Diretório não encontrado ou caminho inválido")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🚀 Iniciar Processamento (20k+ CT-es)", type="primary"):
+                    if directory_path and os.path.exists(directory_path):
+                        st.session_state.processing = True
+                        with st.spinner("🔄 Processando diretório... Isso pode demorar para 20k arquivos"):
+                            results = processor.process_directory(directory_path, db)
+                            
+                            st.success(f"✅ Processamento do diretório concluído!")
+                            st.write(f"✅ Sucessos: {results['success']}")
+                            st.write(f"🔄 Duplicados: {results['duplicates']}")
+                            st.write(f"❌ Erros: {results['errors']}")
+                            
+                            with st.expander("📋 Ver últimos 20 detalhes do processamento"):
+                                for msg in results['messages'][-20:]:
+                                    st.write(msg)
+                            
+                            # Atualiza estatísticas
+                            total_files = db.get_file_count()
+                            st.sidebar.metric("Total de CT-es Armazenados", total_files)
+                            
+                            st.rerun()
+                    else:
+                        st.error("❌ Diretório não encontrado ou caminho inválido")
+            
+            with col2:
+                if st.button("⏹️ Parar Processamento", type="secondary"):
+                    st.session_state.processing = False
+                    st.warning("⏹️ Processamento interrompido pelo usuário")
 
     with tab2:
-        st.header("Consultar CT-es Armazenados")
+        st.header("🔍 Consultar CT-es Armazenados")
         files = db.get_all_files()
         if files:
-            st.write(f"Total de arquivos: {len(files)}")
+            st.write(f"📊 Total de arquivos: {len(files)}")
             col1, col2, col3 = st.columns(3)
             with col1:
                 items_per_page = st.selectbox("Itens por página", [10, 25, 50, 100], key="items_page")
@@ -643,10 +765,12 @@ def main():
                 search_term = st.text_input("Buscar por nome", key="search_term")
             with col3:
                 sort_order = st.selectbox("Ordenar por", ["Data Upload (Mais Recente)", "Data Upload (Mais Antigo)", "Nome (A-Z)", "Nome (Z-A)"])
+            
             if search_term:
                 filtered_files = db.search_files(search_term)
             else:
                 filtered_files = files
+            
             if sort_order == "Data Upload (Mais Recente)":
                 filtered_files = sorted(filtered_files, key=lambda x: x[3], reverse=True)
             elif sort_order == "Data Upload (Mais Antigo)":
@@ -655,11 +779,14 @@ def main():
                 filtered_files = sorted(filtered_files, key=lambda x: x[1])
             elif sort_order == "Nome (Z-A)":
                 filtered_files = sorted(filtered_files, key=lambda x: x[1], reverse=True)
+            
             total_pages = max(1, (len(filtered_files) + items_per_page - 1) // items_per_page)
             page = st.number_input("Página", min_value=1, max_value=total_pages, value=1, key="page_num")
             start_idx = (page - 1) * items_per_page
             end_idx = min(start_idx + items_per_page, len(filtered_files))
-            st.write(f"Mostrando {start_idx + 1}-{end_idx} de {len(filtered_files)} arquivos")
+            
+            st.write(f"📄 Mostrando {start_idx + 1}-{end_idx} de {len(filtered_files)} arquivos")
+            
             for file in filtered_files[start_idx:end_idx]:
                 file_id, filename, file_size, upload_date = file
                 with st.expander(f"📄 {filename}"):
@@ -670,6 +797,7 @@ def main():
                     if col4.button("👁️ Visualizar", key=f"view_{file_id}"):
                         st.session_state.selected_xml = file_id
                         st.rerun()
+            
             if st.button("📊 Exportar Lista para Excel"):
                 df = pd.DataFrame(filtered_files, columns=['ID', 'Nome do Arquivo', 'Tamanho (bytes)', 'Data de Upload'])
                 df['Data de Upload'] = pd.to_datetime(df['Data de Upload']).dt.strftime('%Y-%m-%d %H:%M:%S')
@@ -681,10 +809,10 @@ def main():
                 href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="lista_ctes.xlsx">📥 Baixar Lista de CT-es</a>'
                 st.markdown(href, unsafe_allow_html=True)
         else:
-            st.info("Nenhum arquivo armazenado ainda.")
+            st.info("📭 Nenhum arquivo armazenado ainda.")
 
     with tab3:
-        st.header("Visualizar Conteúdo do CT-e")
+        st.header("👁️ Visualizar Conteúdo do CT-e")
         if st.session_state.selected_xml:
             xml_content = db.get_xml_content(st.session_state.selected_xml)
             if xml_content:
@@ -692,56 +820,64 @@ def main():
                     parsed_xml = xml.dom.minidom.parseString(xml_content)
                     pretty_xml = parsed_xml.toprettyxml()
                     st.text_area("Conteúdo do CT-e (formatado)", pretty_xml, height=500)
+                    
                     col1, col2, col3 = st.columns(3)
                     b64_xml = base64.b64encode(xml_content.encode()).decode()
                     href = f'<a href="data:application/xml;base64,{b64_xml}" download="cte_{st.session_state.selected_xml}.xml">📥 Baixar CT-e</a>'
                     col1.markdown(href, unsafe_allow_html=True)
+                    
                     if col2.button("📋 Copiar Conteúdo"):
                         st.code(xml_content)
-                        st.success("Conteúdo copiado para a área de transferência!")
+                        st.success("✅ Conteúdo copiado para a área de transferência!")
+                    
                     if col3.button("↩️ Voltar para Lista"):
                         st.session_state.selected_xml = None
                         st.rerun()
                 except Exception as e:
-                    st.error(f"Erro ao formatar CT-e: {e}")
+                    st.error(f"❌ Erro ao formatar CT-e: {e}")
                     st.text_area("Conteúdo do CT-e (original)", xml_content, height=500)
             else:
-                st.error("Conteúdo do CT-e não encontrado.")
+                st.error("❌ Conteúdo do CT-e não encontrado.")
                 if st.button("↩️ Voltar para Lista"):
                     st.session_state.selected_xml = None
                     st.rerun()
         else:
-            st.info("Selecione um CT-e na aba 'Consultar CT-es' para visualizar seu conteúdo.")
+            st.info("👆 Selecione um CT-e na aba 'Consultar CT-es' para visualizar seu conteúdo.")
 
     with tab4:
-        st.header("Dados Estruturados para Power BI")
+        st.header("📊 Dados Estruturados para Power BI")
         st.info("""
-        Esta seção fornece os dados estruturados extraídos dos CT-es para uso no Power BI.
+        📈 Esta seção fornece os dados estruturados extraídos dos CT-es para uso no Power BI.
         Os dados incluem informações específicas de Conhecimento de Transporte Eletrônico.
         """)
+        
         col1, col2 = st.columns(2)
         with col1:
             start_date = st.date_input("Data inicial", value=date.today().replace(day=1))
         with col2:
             end_date = st.date_input("Data final", value=date.today())
-        if st.button("Carregar Dados CT-e", type="primary"):
-            with st.spinner("Carregando dados de CT-e..."):
+        
+        if st.button("📥 Carregar Dados CT-e", type="primary"):
+            with st.spinner("🔄 Carregando dados de CT-e..."):
                 df = db.get_cte_data_by_date_range(
                     start_date.strftime('%Y-%m-%d'), 
                     end_date.strftime('%Y-%m-%d')
                 )
                 if not df.empty:
-                    st.success(f"Dados carregados: {len(df)} registros encontrados")
+                    st.success(f"✅ Dados carregados: {len(df)} registros encontrados")
                     st.dataframe(df)
+                    
                     st.subheader("📈 Estatísticas de CT-e")
                     col1, col2, col3 = st.columns(3)
                     col1.metric("Total de CT-es", len(df))
+                    
                     if 'vTPrest' in df.columns:
                         col2.metric("Valor Total", f"R$ {df['vTPrest'].sum():,.2f}")
                         col3.metric("Valor Médio", f"R$ {df['vTPrest'].mean():,.2f}" if len(df) > 0 else "R$ 0,00")
                     else:
                         col2.metric("Valor Total", "N/A")
                         col3.metric("Valor Médio", "N/A")
+                    
                     st.subheader("📤 Exportar Dados")
                     output = BytesIO()
                     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -750,23 +886,26 @@ def main():
                     b64 = base64.b64encode(output.read()).decode()
                     href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="dados_cte_powerbi.xlsx">📥 Baixar para Excel</a>'
                     st.markdown(href, unsafe_allow_html=True)
+                    
                     csv = df.to_csv(index=False)
                     b64_csv = base64.b64encode(csv.encode()).decode()
                     href_csv = f'<a href="data:file/csv;base64,{b64_csv}" download="dados_cte_powerbi.csv">📥 Baixar para CSV</a>'
                     st.markdown(href_csv, unsafe_allow_html=True)
                 else:
-                    st.warning("Nenhum dado de CT-e encontrado para o período selecionado.")
+                    st.warning("⚠️ Nenhum dado de CT-e encontrado para o período selecionado.")
 
     with tab5:
-        st.header("Informações da API para Power BI")
+        st.header("ℹ️ Informações da API para Power BI")
         st.info("""
         ## 📊 Como conectar o Power BI à API
 
         Agora seu sistema possui uma API RESTful que permite ao Power BI conectar-se diretamente
         aos dados dos CT-es sem necessidade de drivers ODBC complexos.
         """)
+        
         st.subheader("📋 Endpoints da API")
         col1, col2 = st.columns(2)
+        
         with col1:
             st.code("""
 # Obter todos os CT-es (com paginação)
@@ -787,6 +926,7 @@ GET /api/cte/fields
 # Verificar status da API
 GET /api/health
             """, language="http")
+        
         with col2:
             st.subheader("🔧 Configuração no Power BI")
             st.markdown("""
@@ -802,8 +942,9 @@ GET /api/health
             - ✅ Suporte a paginação para grandes volumes
             - ✅ Metadados estruturados
             """)
+        
         st.subheader("🧪 Testar Conexão da API")
-        if st.button("Testar API", type="primary"):
+        if st.button("🔗 Testar API", type="primary"):
             try:
                 response = requests.get("http://localhost:5000/api/health")
                 if response.status_code == 200:
@@ -813,6 +954,7 @@ GET /api/health
                     st.error(f"❌ API retornou erro: {response.status_code}")
             except Exception as e:
                 st.error(f"❌ Erro ao conectar na API: {e}")
+        
         st.subheader("💡 Exemplo de Consulta no Power BI")
         st.code("""
 let
@@ -827,7 +969,7 @@ let
     #"Convertido em Tabela" = Table.FromList(data, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
     #"Expandido" = Table.ExpandRecordColumn(#"Convertido em Tabela", "Column1", 
         {"id", "nCT", "dhEmi", "cMunIni", "UFIni", "cMunFim", "UFFim", 
-         "emit_xNome", "vTPrest", "rem_xNome", "infNFe_chave", "numero_nfe", "upload_date"})
+         "emit_xNome", "vTPrest", "rem_xNome", "infNFe_chave", "upload_date"})
 in
     #"Expandido"
         """, language="powerquery")
@@ -836,5 +978,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        st.error(f"Ocorreu um erro inesperado: {str(e)}")
+        st.error(f"❌ Ocorreu um erro inesperado: {str(e)}")
         st.code(traceback.format_exc())
