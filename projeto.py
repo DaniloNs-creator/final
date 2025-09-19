@@ -134,7 +134,7 @@ class AtividadesDatabase:
                 atividade_data['mes_referencia'],
                 atividade_data.get('prioridade', 'Média'),
                 atividade_data.get('status', 'Pendente'),
-                atividade_data.get('categoria',
+                atividade_data.get('categoria'),
                 atividade_data.get('observacoes')
             ))
             
