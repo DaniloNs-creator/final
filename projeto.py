@@ -65,8 +65,8 @@ class CTeDatabase:
                     FOREIGN KEY (id) REFERENCES xml_files (id)
                 )
             ''')
-            
-            # Tabela para dados estruturados específicos do CT-e
+
+            # Corrigir a tabela cte_structured_data para garantir a existência da coluna upload_date
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS cte_structured_data (
                     id INTEGER PRIMARY KEY,
@@ -85,7 +85,13 @@ class CTeDatabase:
                     FOREIGN KEY (xml_id) REFERENCES xml_files (id)
                 )
             ''')
-            
+
+            # Garante que a coluna upload_date existe (para bancos já criados)
+            cursor.execute("PRAGMA table_info(cte_structured_data)")
+            columns = [col[1] for col in cursor.fetchall()]
+            if "upload_date" not in columns:
+                cursor.execute("ALTER TABLE cte_structured_data ADD COLUMN upload_date TIMESTAMP")
+
             conn.commit()
             conn.close()
             return True
@@ -265,7 +271,6 @@ class CTeDatabase:
         """Retorna todos os dados estruturados de CT-e para Power BI"""
         try:
             conn = sqlite3.connect(self.db_name)
-            
             query = '''
                 SELECT 
                     id,
@@ -283,19 +288,22 @@ class CTeDatabase:
                 FROM cte_structured_data
                 ORDER BY dhEmi DESC
             '''
-            
             df = pd.read_sql_query(query, conn)
             conn.close()
+            # Extraia apenas o número da NF-e (dígitos 26 a 34 da chave de 44 caracteres)
+            if 'infNFe_chave' in df.columns:
+                df['Numero_NFe'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[24:33]
+                # Opcional: se quiser mostrar apenas a coluna Numero_NFe, pode ocultar a original
+                # df = df.drop(columns=['infNFe_chave'])
             return df
         except Exception as e:
             st.error(f"Erro ao carregar dados de CT-e: {str(e)}")
             return pd.DataFrame()
-    
+
     def get_cte_data_by_date_range(self, start_date, end_date):
         """Retorna dados de CT-e filtrados por intervalo de datas"""
         try:
             conn = sqlite3.connect(self.db_name)
-            
             query = '''
                 SELECT 
                     id,
@@ -314,9 +322,11 @@ class CTeDatabase:
                 WHERE date(dhEmi) BETWEEN date(?) AND date(?)
                 ORDER BY dhEmi DESC
             '''
-            
             df = pd.read_sql_query(query, conn, params=(start_date, end_date))
             conn.close()
+            # Extraia apenas o número da NF-e (dígitos 26 a 34 da chave de 44 caracteres)
+            if 'infNFe_chave' in df.columns:
+                df['Numero_NFe'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[24:33]
             return df
         except Exception as e:
             st.error(f"Erro ao carregar dados por intervalo: {str(e)}")
