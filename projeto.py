@@ -16,9 +16,11 @@ import threading
 import requests
 from waitress import serve
 import json
+from flask_cors import CORS  # Importação do CORS
 
 # Configuração da aplicação Flask
 app = Flask(__name__)
+CORS(app)  # Habilita CORS para todas as rotas
 app.config['JSON_SORT_KEYS'] = False
 
 # Configuração da página Streamlit
@@ -32,6 +34,12 @@ st.set_page_config(
 # Inicialização do estado da sessão
 if 'selected_xml' not in st.session_state:
     st.session_state.selected_xml = None
+
+if 'flask_started' not in st.session_state:
+    st.session_state.flask_started = False
+
+if 'api_status' not in st.session_state:
+    st.session_state.api_status = "Não testado"
 
 class CTeDatabase:
     def __init__(self, db_name="cte_database.db"):
@@ -238,7 +246,6 @@ class CTeDatabase:
             '''
             df = pd.read_sql_query(query, conn)
             conn.close()
-            # Extraia apenas o número da NF-e (9 dígitos, posições 26 a 34 da chave de 44 caracteres)
             if 'infNFe_chave' in df.columns:
                 df['numero_nfe'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[24:33]
             return df
@@ -269,7 +276,6 @@ class CTeDatabase:
             '''
             df = pd.read_sql_query(query, conn, params=(start_date, end_date))
             conn.close()
-            # Deixe a coluna infNFe_chave com apenas os 9 dígitos do número da NFe (posições 26 a 34, índice 25:34)
             if 'infNFe_chave' in df.columns:
                 df['infNFe_chave'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[25:34]
             return df
@@ -502,28 +508,71 @@ def init_processor():
 
 def start_flask_app():
     try:
-        serve(app, host='0.0.0.0', port=5000)
+        st.info("🚀 Iniciando servidor Flask na porta 5000...")
+        serve(app, host='0.0.0.0', port=5000, threads=4)
     except Exception as e:
         st.error(f"Erro ao iniciar servidor Flask: {e}")
+        st.error(traceback.format_exc())
+
+def test_api_connection():
+    """Testa a conexão com a API Flask"""
+    try:
+        response = requests.get("http://localhost:5000/api/health", timeout=5)
+        if response.status_code == 200:
+            st.session_state.api_status = "✅ Conectado"
+            return True, response.json()
+        else:
+            st.session_state.api_status = f"❌ Erro HTTP {response.status_code}"
+            return False, response.text
+    except requests.exceptions.ConnectionError:
+        st.session_state.api_status = "❌ Não conectado"
+        return False, "Não foi possível conectar à API"
+    except Exception as e:
+        st.session_state.api_status = f"❌ Erro: {str(e)}"
+        return False, str(e)
 
 def main():
     db = init_database()
     processor = init_processor()
-    if 'flask_started' not in st.session_state:
+    
+    # Inicialização do servidor Flask
+    if not st.session_state.flask_started:
         try:
-            flask_thread = threading.Thread(target=start_flask_app, daemon=True)
-            flask_thread.start()
-            st.session_state.flask_started = True
-            st.success("API Flask iniciada na porta 5000")
+            # Verifica se a porta já está em uso
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            result = sock.connect_ex(('localhost', 5000))
+            sock.close()
+            
+            if result == 0:
+                st.session_state.flask_started = True
+                st.session_state.api_status = "✅ Servidor já está rodando"
+            else:
+                flask_thread = threading.Thread(target=start_flask_app, daemon=True)
+                flask_thread.start()
+                st.session_state.flask_started = True
+                time.sleep(2)  # Aguarda o servidor iniciar
+                st.session_state.api_status = "🚀 Iniciando servidor..."
+                
         except Exception as e:
-            st.error(f"Erro ao iniciar API: {e}")
+            st.error(f"Erro ao verificar servidor: {e}")
 
     st.title("📄 Sistema de Armazenamento de CT-e com API")
     st.markdown("### Armazene CT-es e acesse via API para integração com Power BI")
 
-    st.sidebar.header("Estatísticas")
-    total_files = db.get_file_count()
-    st.sidebar.metric("Total de CT-es Armazenados", total_files)
+    # Sidebar com status da API
+    st.sidebar.header("Status do Sistema")
+    st.sidebar.metric("Total de CT-es Armazenados", db.get_file_count())
+    
+    # Status da API
+    if st.sidebar.button("🔄 Verificar Status da API"):
+        success, message = test_api_connection()
+        if success:
+            st.sidebar.success("API conectada com sucesso!")
+        else:
+            st.sidebar.error(f"Falha na conexão: {message}")
+    
+    st.sidebar.info(f"**Status API:** {st.session_state.api_status}")
 
     st.sidebar.header("API para Power BI")
     st.sidebar.info("""
@@ -533,7 +582,7 @@ def main():
     - `GET /api/cte/fields` - Metadados dos campos
     - `GET /api/health` - Status da API
 
-    **Exemplo de URL para Power BI:**
+    **URL para Power BI:**
     ```
     http://localhost:5000/api/cte?limit=1000
     ```
@@ -545,6 +594,7 @@ def main():
         st.header("Upload de CT-es")
         upload_option = st.radio("Selecione o tipo de upload:", 
                                 ["Upload Individual", "Upload em Lote", "Upload por Diretório"])
+        
         if upload_option == "Upload Individual":
             uploaded_file = st.file_uploader(
                 "Selecione um arquivo XML de CT-e", 
@@ -567,6 +617,7 @@ def main():
                                 st.error(message)
                         time.sleep(2)
                         st.rerun()
+                        
         elif upload_option == "Upload em Lote":
             uploaded_files = st.file_uploader(
                 "Selecione múltiplos arquivos XML de CT-e", 
@@ -581,6 +632,7 @@ def main():
                     status_text = st.empty()
                     success_count = 0
                     error_count = 0
+                    
                     for i, uploaded_file in enumerate(uploaded_files):
                         progress = (i + 1) / len(uploaded_files)
                         progress_bar.progress(progress)
@@ -591,6 +643,7 @@ def main():
                         else:
                             error_count += 1
                         time.sleep(0.1)
+                    
                     progress_bar.empty()
                     status_text.empty()
                     st.success(f"Processamento concluído!")
@@ -598,6 +651,7 @@ def main():
                     st.write(f"❌ Erros: {error_count}")
                     time.sleep(2)
                     st.rerun()
+                    
         else:
             st.subheader("Para grandes volumes (50k+ CT-es)")
             st.info("Para processar 50 mil CT-es, recomendamos usar a opção de diretório")
@@ -624,6 +678,7 @@ def main():
     with tab2:
         st.header("Consultar CT-es Armazenados")
         files = db.get_all_files()
+        
         if files:
             st.write(f"Total de arquivos: {len(files)}")
             col1, col2, col3 = st.columns(3)
@@ -633,10 +688,12 @@ def main():
                 search_term = st.text_input("Buscar por nome", key="search_term")
             with col3:
                 sort_order = st.selectbox("Ordenar por", ["Data Upload (Mais Recente)", "Data Upload (Mais Antigo)", "Nome (A-Z)", "Nome (Z-A)"])
+            
             if search_term:
                 filtered_files = db.search_files(search_term)
             else:
                 filtered_files = files
+                
             if sort_order == "Data Upload (Mais Recente)":
                 filtered_files = sorted(filtered_files, key=lambda x: x[3], reverse=True)
             elif sort_order == "Data Upload (Mais Antigo)":
@@ -645,11 +702,15 @@ def main():
                 filtered_files = sorted(filtered_files, key=lambda x: x[1])
             elif sort_order == "Nome (Z-A)":
                 filtered_files = sorted(filtered_files, key=lambda x: x[1], reverse=True)
+                
             total_pages = max(1, (len(filtered_files) + items_per_page - 1) // items_per_page)
             page = st.number_input("Página", min_value=1, max_value=total_pages, value=1, key="page_num")
+            
             start_idx = (page - 1) * items_per_page
             end_idx = min(start_idx + items_per_page, len(filtered_files))
+            
             st.write(f"Mostrando {start_idx + 1}-{end_idx} de {len(filtered_files)} arquivos")
+            
             for file in filtered_files[start_idx:end_idx]:
                 file_id, filename, file_size, upload_date = file
                 with st.expander(f"📄 {filename}"):
@@ -660,6 +721,7 @@ def main():
                     if col4.button("👁️ Visualizar", key=f"view_{file_id}"):
                         st.session_state.selected_xml = file_id
                         st.rerun()
+            
             if st.button("📊 Exportar Lista para Excel"):
                 df = pd.DataFrame(filtered_files, columns=['ID', 'Nome do Arquivo', 'Tamanho (bytes)', 'Data de Upload'])
                 df['Data de Upload'] = pd.to_datetime(df['Data de Upload']).dt.strftime('%Y-%m-%d %H:%M:%S')
@@ -670,28 +732,35 @@ def main():
                 b64 = base64.b64encode(output.read()).decode()
                 href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="lista_ctes.xlsx">📥 Baixar Lista de CT-es</a>'
                 st.markdown(href, unsafe_allow_html=True)
+                
         else:
             st.info("Nenhum arquivo armazenado ainda.")
 
     with tab3:
         st.header("Visualizar Conteúdo do CT-e")
+        
         if st.session_state.selected_xml:
             xml_content = db.get_xml_content(st.session_state.selected_xml)
+            
             if xml_content:
                 try:
                     parsed_xml = xml.dom.minidom.parseString(xml_content)
                     pretty_xml = parsed_xml.toprettyxml()
                     st.text_area("Conteúdo do CT-e (formatado)", pretty_xml, height=500)
+                    
                     col1, col2, col3 = st.columns(3)
                     b64_xml = base64.b64encode(xml_content.encode()).decode()
                     href = f'<a href="data:application/xml;base64,{b64_xml}" download="cte_{st.session_state.selected_xml}.xml">📥 Baixar CT-e</a>'
                     col1.markdown(href, unsafe_allow_html=True)
+                    
                     if col2.button("📋 Copiar Conteúdo"):
                         st.code(xml_content)
                         st.success("Conteúdo copiado para a área de transferência!")
+                    
                     if col3.button("↩️ Voltar para Lista"):
                         st.session_state.selected_xml = None
                         st.rerun()
+                        
                 except Exception as e:
                     st.error(f"Erro ao formatar CT-e: {e}")
                     st.text_area("Conteúdo do CT-e (original)", xml_content, height=500)
@@ -709,29 +778,35 @@ def main():
         Esta seção fornece os dados estruturados extraídos dos CT-es para uso no Power BI.
         Os dados incluem informações específicas de Conhecimento de Transporte Eletrônico.
         """)
+        
         col1, col2 = st.columns(2)
         with col1:
             start_date = st.date_input("Data inicial", value=date.today().replace(day=1))
         with col2:
             end_date = st.date_input("Data final", value=date.today())
+            
         if st.button("Carregar Dados CT-e", type="primary"):
             with st.spinner("Carregando dados de CT-e..."):
                 df = db.get_cte_data_by_date_range(
                     start_date.strftime('%Y-%m-%d'), 
                     end_date.strftime('%Y-%m-%d')
                 )
+                
                 if not df.empty:
                     st.success(f"Dados carregados: {len(df)} registros encontrados")
                     st.dataframe(df)
+                    
                     st.subheader("📈 Estatísticas de CT-e")
                     col1, col2, col3 = st.columns(3)
                     col1.metric("Total de CT-es", len(df))
+                    
                     if 'vTPrest' in df.columns:
                         col2.metric("Valor Total", f"R$ {df['vTPrest'].sum():,.2f}")
                         col3.metric("Valor Médio", f"R$ {df['vTPrest'].mean():,.2f}" if len(df) > 0 else "R$ 0,00")
                     else:
                         col2.metric("Valor Total", "N/A")
                         col3.metric("Valor Médio", "N/A")
+                    
                     st.subheader("📤 Exportar Dados")
                     output = BytesIO()
                     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -740,6 +815,7 @@ def main():
                     b64 = base64.b64encode(output.read()).decode()
                     href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="dados_cte_powerbi.xlsx">📥 Baixar para Excel</a>'
                     st.markdown(href, unsafe_allow_html=True)
+                    
                     csv = df.to_csv(index=False)
                     b64_csv = base64.b64encode(csv.encode()).decode()
                     href_csv = f'<a href="data:file/csv;base64,{b64_csv}" download="dados_cte_powerbi.csv">📥 Baixar para CSV</a>'
@@ -755,8 +831,43 @@ def main():
         Agora seu sistema possui uma API RESTful que permite ao Power BI conectar-se diretamente
         aos dados dos CT-es sem necessidade de drivers ODBC complexos.
         """)
-        st.subheader("📋 Endpoints da API")
+        
+        # Teste de conexão em tempo real
+        st.subheader("🧪 Teste de Conexão em Tempo Real")
+        
         col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🔄 Testar Conexão com API", type="primary", key="test_api_btn"):
+                success, message = test_api_connection()
+                if success:
+                    st.success("✅ API está funcionando corretamente!")
+                    st.json(message)
+                else:
+                    st.error(f"❌ Falha na conexão: {message}")
+        
+        with col2:
+            if st.button("📋 Testar Endpoint CT-e", type="secondary"):
+                try:
+                    response = requests.get("http://localhost:5000/api/cte?limit=5", timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        st.success(f"✅ Endpoint CT-e funcionando!")
+                        st.write(f"**Total de registros:** {data['total_count']}")
+                        st.write(f"**Retornados:** {len(data['data'])} registros")
+                        if data['data']:
+                            st.write("**Primeiro registro:**")
+                            st.json(data['data'][0])
+                    else:
+                        st.error(f"❌ Endpoint CT-e retornou erro: {response.status_code}")
+                        st.write(f"Resposta: {response.text}")
+                except Exception as e:
+                    st.error(f"❌ Erro no endpoint CT-e: {e}")
+        
+        st.subheader("📋 Endpoints da API")
+        
+        col1, col2 = st.columns(2)
+        
         with col1:
             st.code("""
 # Obter todos os CT-es (com paginação)
@@ -777,6 +888,7 @@ GET /api/cte/fields
 # Verificar status da API
 GET /api/health
             """, language="http")
+        
         with col2:
             st.subheader("🔧 Configuração no Power BI")
             st.markdown("""
@@ -792,17 +904,7 @@ GET /api/health
             - ✅ Suporte a paginação para grandes volumes
             - ✅ Metadados estruturados
             """)
-        st.subheader("🧪 Testar Conexão da API")
-        if st.button("Testar API", type="primary"):
-            try:
-                response = requests.get("http://localhost:5000/api/health")
-                if response.status_code == 200:
-                    st.success("✅ API está funcionando corretamente!")
-                    st.json(response.json())
-                else:
-                    st.error(f"❌ API retornou erro: {response.status_code}")
-            except Exception as e:
-                st.error(f"❌ Erro ao conectar na API: {e}")
+        
         st.subheader("💡 Exemplo de Consulta no Power BI")
         st.code("""
 let
@@ -821,6 +923,15 @@ let
 in
     #"Expandido"
         """, language="powerquery")
+        
+        st.subheader("🔍 Solução de Problemas")
+        st.markdown("""
+        **Se não conseguir conectar:**
+        1. Verifique se o servidor Flask está rodando (status acima)
+        2. Confirme que a porta 5000 não está bloqueada pelo firewall
+        3. Teste manualmente: abra `http://localhost:5000/api/health` no navegador
+        4. Reinicie a aplicação se necessário
+        """)
 
 if __name__ == "__main__":
     try:
