@@ -138,7 +138,7 @@ class AtividadesDatabase:
                 atividade_data.get('status', 'Pendente'),
                 atividade_data.get('categoria'),
                 atividade_data.get('observacoes')
-            ))
+            ))  # <-- Parêntese fechado corretamente aqui
             
             atividade_id = cursor.lastrowid
             conn.commit()
@@ -1414,35 +1414,8 @@ def main():
         login_section()
     else:
         mostrar_capa()
-        
-        # Menu de navegação
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "📋 Atividades", 
-            "📝 Nova Atividade", 
-            "📊 Indicadores", 
-            "📄 Processador TXT",
-            "📑 Processador XML",
-            "🚚 Sistema CT-e"
-        ])
-        
-        with tab1:
-            lista_atividades(atividades_db)
-        
-        with tab2:
-            cadastro_atividade(atividades_db)
-        
-        with tab3:
-            mostrar_indicadores(atividades_db)
-        
-        with tab4:
-            processador_txt()
-        
-        with tab5:
-            processador_xml()
-        
-        with tab6:
-            processador_cte()
-        
+        # Apenas a interface do sistema CT-e
+        processador_cte()
         # Sidebar
         with st.sidebar:
             st.header("Estatísticas")
@@ -1450,7 +1423,6 @@ def main():
             if estatisticas:
                 st.metric("Total de Atividades", estatisticas['total'])
                 st.metric("Taxa de Conclusão", f"{estatisticas['percentual']:.1f}%")
-            
             if st.button("🚪 Sair", use_container_width=True):
                 st.session_state.logged_in = False
                 st.rerun()
