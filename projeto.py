@@ -238,9 +238,9 @@ class CTeDatabase:
             '''
             df = pd.read_sql_query(query, conn)
             conn.close()
-            # Extraia apenas o número da NF-e (dígitos 26 a 34 da chave de 44 caracteres)
+            # Extraia apenas o número da NF-e (9 dígitos, posições 26 a 34 da chave de 44 caracteres)
             if 'infNFe_chave' in df.columns:
-                df['Numero_NFe'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[24:33]
+                df['numero_nfe'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[24:33]
             return df
         except Exception as e:
             st.error(f"Erro ao carregar dados de CT-e: {str(e)}")
@@ -270,7 +270,7 @@ class CTeDatabase:
             df = pd.read_sql_query(query, conn, params=(start_date, end_date))
             conn.close()
             if 'infNFe_chave' in df.columns:
-                df['Numero_NFe'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[24:33]
+                df['numero_nfe'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[24:33]
             return df
         except Exception as e:
             st.error(f"Erro ao carregar dados por intervalo: {str(e)}")
