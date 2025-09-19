@@ -269,9 +269,9 @@ class CTeDatabase:
             '''
             df = pd.read_sql_query(query, conn, params=(start_date, end_date))
             conn.close()
-            # Substitui a coluna infNFe_chave pelos 9 dígitos do número da NFe (posições 26 a 34, índice 25:34)
+            # Deixe a coluna infNFe_chave com apenas os 9 dígitos do número da NFe (posições 26 a 34, índice 25:34)
             if 'infNFe_chave' in df.columns:
-                df['infNFe_chave'] = df['infNFe_chave'].astype(str).str[25:34]
+                df['infNFe_chave'] = df['infNFe_chave'].astype(str).str.replace(r'\D', '', regex=True).str[25:34]
             return df
         except Exception as e:
             st.error(f"Erro ao carregar dados por intervalo: {str(e)}")
