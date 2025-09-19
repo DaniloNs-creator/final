@@ -136,7 +136,7 @@ class AtividadesDatabase:
                 atividade_data.get('status', 'Pendente'),
                 atividade_data.get('categoria'),
                 atividade_data.get('observacoes')
-            ))
+            ))  # <-- Parêntese fechado corretamente aqui
             
             atividade_id = cursor.lastrowid
             conn.commit()
