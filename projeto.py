@@ -155,7 +155,7 @@ class CTeDatabase:
             
             # Extrai chave da NFe associada (se existir)
             infNFe_chave = self.find_text(root, './/cte:infNFe/cte:chave')
-            
+
             # Extrai apenas o número da NF-e da chave de acesso (modelo 55, 44 dígitos, posições 26-34)
             numero_nfe = ""
             if infNFe_chave:
@@ -184,10 +184,10 @@ class CTeDatabase:
             cursor.execute('''
                 INSERT OR REPLACE INTO cte_structured_data 
                 (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim, 
-                 emit_xNome, vTPrest, rem_xNome, infNFe_chave, numero_nfe)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 emit_xNome, vTPrest, rem_xNome, infNFe_chave)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (xml_id, nCT, data_formatada, cMunIni, UFIni, cMunFim, UFFim,
-                 emit_xNome, vTPrest, rem_xNome, infNFe_chave, numero_nfe))
+                 emit_xNome, vTPrest, rem_xNome, numero_nfe))
         except Exception as e:
             st.error(f"Erro ao extrair dados do CT-e: {str(e)}")
     
