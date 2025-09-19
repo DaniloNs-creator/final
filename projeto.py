@@ -155,7 +155,7 @@ class CTeDatabase:
             
             # Extrai chave da NFe associada (se existir)
             infNFe_chave = self.find_text(root, './/cte:infNFe/cte:chave')
-            
+
             # Formata data se encontrada
             if dhEmi:
                 try:
@@ -163,20 +163,22 @@ class CTeDatabase:
                     dhEmi = dt_obj.strftime('%d/%m/%y')
                 except:
                     dhEmi = dhEmi[:10]
-            
+
             try:
                 vTPrest = float(vTPrest) if vTPrest else None
             except (ValueError, TypeError):
                 vTPrest = None
 
-            # Extrai apenas o número da NF-e da chave de acesso (dígitos 26 a 34, 9 dígitos)
+            # --- EXTRAI SOMENTE O NÚMERO DA NF-E (dígitos 26 a 34 da chave de acesso) ---
             numero_nfe = None
             if infNFe_chave:
-                infNFe_chave = re.sub(r'\D', '', infNFe_chave)
-                if len(infNFe_chave) >= 34:
-                    numero_nfe = infNFe_chave[25:34]
+                chave_numerica = re.sub(r'\D', '', infNFe_chave)
+                if len(chave_numerica) >= 34:
+                    numero_nfe = chave_numerica[24:33]  # 25:34 para python, mas índice final é exclusivo
                 else:
-                    numero_nfe = ""  # ou None, se preferir
+                    numero_nfe = ""
+            else:
+                numero_nfe = ""
 
             # Insere os dados estruturados do CT-e
             cursor = conn.cursor()
@@ -187,7 +189,6 @@ class CTeDatabase:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim,
                  emit_xNome, vTPrest, rem_xNome, numero_nfe))
-            
         except Exception as e:
             st.error(f"Erro ao extrair dados do CT-e: {str(e)}")
     
