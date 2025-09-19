@@ -1151,8 +1151,11 @@ def lista_atividades(db):
     if categoria_selecionada != "Todos":
         filtros['categoria'] = categoria_selecionada
     
-    # Buscar atividades
-    atividades_df = db.get_all_atividades(filtros)
+    # Buscar atividades (usa cache para evitar queries repetidas)
+    @st.cache_data(show_spinner=False, hash_funcs={sqlite3.Connection: id}, max_entries=10)
+    def cached_get_all_atividades(filtros):
+        return db.get_all_atividades(filtros)
+    atividades_df = cached_get_all_atividades(filtros)
     
     if not atividades_df.empty:
         st.write(f"Total de atividades encontradas: {len(atividades_df)}")
@@ -1225,7 +1228,11 @@ def mostrar_indicadores(db):
     """Exibe os indicadores de desempenho."""
     st.markdown('<div class="header">📊 Indicadores de Desempenho</div>', unsafe_allow_html=True)
     
-    estatisticas = db.get_estatisticas()
+    # Usa cache para estatísticas
+    @st.cache_data(show_spinner=False, hash_funcs={sqlite3.Connection: id}, max_entries=10)
+    def cached_estatisticas():
+        return db.get_estatisticas()
+    estatisticas = cached_estatisticas()
     
     if estatisticas:
         # Métricas principais
@@ -1273,8 +1280,7 @@ def mostrar_indicadores(db):
 # --- INTERFACE PARA CT-E ---
 def processador_cte():
     """Interface para o sistema de CT-e"""
-    # Inicializar componentes
-    db = CTeDatabase()
+    db = get_cte_db()
     processor = CTeProcessor()
     
     st.title("📄 Sistema de Armazenamento de CT-e")
@@ -1344,9 +1350,13 @@ def processador_cte():
         start_date = st.date_input("Data inicial", value=date.today().replace(day=1))
         end_date = st.date_input("Data final", value=date.today())
         
+        # Usa cache para dados do período
+        @st.cache_data(show_spinner=False, max_entries=10)
+        def cached_cte_data(start, end):
+            return db.get_cte_data_by_date_range(start, end)
         if st.button("Carregar Dados CT-e"):
             with st.spinner("Carregando dados de CT-e..."):
-                df = db.get_cte_data_by_date_range(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+                df = cached_cte_data(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
                 
                 if not df.empty:
                     st.session_state.cte_data = df
@@ -1408,10 +1418,7 @@ def load_css():
 def main():
     """Função principal que gerencia o fluxo da aplicação."""
     load_css()
-    
-    # Inicializar bancos de dados
-    atividades_db = AtividadesDatabase()
-    atividades_db.init_database()
+    atividades_db = get_atividades_db()
     
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
@@ -1433,30 +1440,28 @@ def main():
         
         with tab1:
             lista_atividades(atividades_db)
-        
         with tab2:
             cadastro_atividade(atividades_db)
-        
         with tab3:
             mostrar_indicadores(atividades_db)
-        
         with tab4:
             processador_txt()
-        
         with tab5:
             processador_xml()
-        
         with tab6:
             processador_cte()
         
         # Sidebar
         with st.sidebar:
             st.header("Estatísticas")
-            estatisticas = atividades_db.get_estatisticas()
+            # Usa cache para estatísticas rápidas
+            @st.cache_data(show_spinner=False, hash_funcs={sqlite3.Connection: id}, max_entries=10)
+            def cached_estatisticas():
+                return atividades_db.get_estatisticas()
+            estatisticas = cached_estatisticas()
             if estatisticas:
                 st.metric("Total de Atividades", estatisticas['total'])
                 st.metric("Taxa de Conclusão", f"{estatisticas['percentual']:.1f}%")
-            
             if st.button("🚪 Sair", use_container_width=True):
                 st.session_state.logged_in = False
                 st.rerun()
