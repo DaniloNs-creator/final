@@ -159,27 +159,25 @@ class CTeDatabase:
             # Formata data se encontrada
             if dhEmi:
                 try:
-                    # Converte para formato dd/mm/aa
                     dt_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
                     dhEmi = dt_obj.strftime('%d/%m/%y')
                 except:
-                    dhEmi = dhEmi[:10]  # Fallback para formato original
+                    dhEmi = dhEmi[:10]
             
-            # Converte valor para decimal
             try:
                 vTPrest = float(vTPrest) if vTPrest else None
             except (ValueError, TypeError):
                 vTPrest = None
-            
-            # Limpa a chave da NFe para mostrar apenas os 9 últimos dígitos (número da NFe)
+
+            # Extrai apenas o número da NF-e da chave de acesso (dígitos 26 a 34, 9 dígitos)
             numero_nfe = None
             if infNFe_chave:
                 infNFe_chave = re.sub(r'\D', '', infNFe_chave)
-                if len(infNFe_chave) >= 9:
-                    numero_nfe = infNFe_chave[-9:]
+                if len(infNFe_chave) >= 34:
+                    numero_nfe = infNFe_chave[25:34]
                 else:
-                    numero_nfe = infNFe_chave  # fallback se não houver 9 dígitos
-            
+                    numero_nfe = ""  # ou None, se preferir
+
             # Insere os dados estruturados do CT-e
             cursor = conn.cursor()
             cursor.execute('''
