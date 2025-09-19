@@ -75,7 +75,6 @@ class CTeDatabase:
                     vTPrest DECIMAL(15, 2),
                     rem_xNome TEXT,
                     infNFe_chave TEXT,
-                    upload_date TIMESTAMP,
                     FOREIGN KEY (xml_id) REFERENCES xml_files (id)
                 )
             ''')
@@ -156,10 +155,10 @@ class CTeDatabase:
             cursor.execute('''
                 INSERT OR REPLACE INTO cte_structured_data 
                 (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim, 
-                 emit_xNome, vTPrest, rem_xNome, infNFe_chave, upload_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 emit_xNome, vTPrest, rem_xNome, infNFe_chave)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (xml_id, nCT, dhEmi, cMunIni, UFIni, cMunFim, UFFim,
-                 emit_xNome, vTPrest, rem_xNome, infNFe_chave, datetime.now()))
+                 emit_xNome, vTPrest, rem_xNome, infNFe_chave))
         except Exception as e:
             st.error(f"Erro ao extrair dados do CT-e: {str(e)}")
 
@@ -221,20 +220,21 @@ class CTeDatabase:
             conn = sqlite3.connect(self.db_name)
             query = '''
                 SELECT 
-                    id,
-                    nCT,
-                    dhEmi,
-                    cMunIni,
-                    UFIni,
-                    cMunFim,
-                    UFFim,
-                    emit_xNome,
-                    vTPrest,
-                    rem_xNome,
-                    infNFe_chave,
-                    upload_date
-                FROM cte_structured_data
-                ORDER BY dhEmi DESC
+                    csd.id,
+                    csd.nCT,
+                    csd.dhEmi,
+                    csd.cMunIni,
+                    csd.UFIni,
+                    csd.cMunFim,
+                    csd.UFFim,
+                    csd.emit_xNome,
+                    csd.vTPrest,
+                    csd.rem_xNome,
+                    csd.infNFe_chave,
+                    xf.upload_date
+                FROM cte_structured_data csd
+                JOIN xml_files xf ON csd.xml_id = xf.id
+                ORDER BY csd.dhEmi DESC
             '''
             df = pd.read_sql_query(query, conn)
             conn.close()
@@ -251,21 +251,22 @@ class CTeDatabase:
             conn = sqlite3.connect(self.db_name)
             query = '''
                 SELECT 
-                    id,
-                    nCT,
-                    dhEmi,
-                    cMunIni,
-                    UFIni,
-                    cMunFim,
-                    UFFim,
-                    emit_xNome,
-                    vTPrest,
-                    rem_xNome,
-                    infNFe_chave,
-                    upload_date
-                FROM cte_structured_data
-                WHERE date(dhEmi) BETWEEN date(?) AND date(?)
-                ORDER BY dhEmi DESC
+                    csd.id,
+                    csd.nCT,
+                    csd.dhEmi,
+                    csd.cMunIni,
+                    csd.UFIni,
+                    csd.cMunFim,
+                    csd.UFFim,
+                    csd.emit_xNome,
+                    csd.vTPrest,
+                    csd.rem_xNome,
+                    csd.infNFe_chave,
+                    xf.upload_date
+                FROM cte_structured_data csd
+                JOIN xml_files xf ON csd.xml_id = xf.id
+                WHERE date(csd.dhEmi) BETWEEN date(?) AND date(?)
+                ORDER BY csd.dhEmi DESC
             '''
             df = pd.read_sql_query(query, conn, params=(start_date, end_date))
             conn.close()
@@ -283,48 +284,49 @@ class CTeDatabase:
             cursor = conn.cursor()
             query = '''
                 SELECT 
-                    id,
-                    nCT,
-                    dhEmi,
-                    cMunIni,
-                    UFIni,
-                    cMunFim,
-                    UFFim,
-                    emit_xNome,
-                    vTPrest,
-                    rem_xNome,
-                    infNFe_chave,
-                    upload_date
-                FROM cte_structured_data
+                    csd.id,
+                    csd.nCT,
+                    csd.dhEmi,
+                    csd.cMunIni,
+                    csd.UFIni,
+                    csd.cMunFim,
+                    csd.UFFim,
+                    csd.emit_xNome,
+                    csd.vTPrest,
+                    csd.rem_xNome,
+                    csd.infNFe_chave,
+                    xf.upload_date
+                FROM cte_structured_data csd
+                JOIN xml_files xf ON csd.xml_id = xf.id
                 WHERE 1=1
             '''
             params = []
             if filters:
                 if 'start_date' in filters and filters['start_date']:
-                    query += " AND date(dhEmi) >= date(?)"
+                    query += " AND date(csd.dhEmi) >= date(?)"
                     params.append(filters['start_date'])
                 if 'end_date' in filters and filters['end_date']:
-                    query += " AND date(dhEmi) <= date(?)"
+                    query += " AND date(csd.dhEmi) <= date(?)"
                     params.append(filters['end_date'])
                 if 'emitente' in filters and filters['emitente']:
-                    query += " AND emit_xNome LIKE ?"
+                    query += " AND csd.emit_xNome LIKE ?"
                     params.append(f'%{filters["emitente"]}%')
-            query += " ORDER BY dhEmi DESC LIMIT ? OFFSET ?"
+            query += " ORDER BY csd.dhEmi DESC LIMIT ? OFFSET ?"
             params.extend([limit, offset])
             cursor.execute(query, params)
             columns = [column[0] for column in cursor.description]
             results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-            count_query = "SELECT COUNT(*) FROM cte_structured_data WHERE 1=1"
+            count_query = "SELECT COUNT(*) FROM cte_structured_data csd WHERE 1=1"
             count_params = []
             if filters:
                 if 'start_date' in filters and filters['start_date']:
-                    count_query += " AND date(dhEmi) >= date(?)"
+                    count_query += " AND date(csd.dhEmi) >= date(?)"
                     count_params.append(filters['start_date'])
                 if 'end_date' in filters and filters['end_date']:
-                    count_query += " AND date(dhEmi) <= date(?)"
+                    count_query += " AND date(csd.dhEmi) <= date(?)"
                     count_params.append(filters['end_date'])
                 if 'emitente' in filters and filters['emitente']:
-                    count_query += " AND emit_xNome LIKE ?"
+                    count_query += " AND csd.emit_xNome LIKE ?"
                     count_params.append(f'%{filters["emitente"]}%')
             cursor.execute(count_query, count_params)
             total_count = cursor.fetchone()[0]
