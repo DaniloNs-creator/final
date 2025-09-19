@@ -134,7 +134,7 @@ class AtividadesDatabase:
                 atividade_data['mes_referencia'],
                 atividade_data.get('prioridade', 'Média'),
                 atividade_data.get('status', 'Pendente'),
-                atividade_data.get('categoria'),
+                atividade_data.get('categoria',
                 atividade_data.get('observacoes')
             ))
             
@@ -1413,6 +1413,15 @@ def load_css():
         }
     </style>
     """, unsafe_allow_html=True)
+
+# --- FUNÇÕES DE CACHE PARA BANCOS DE DADOS ---
+@st.cache_resource(show_spinner=False)
+def get_atividades_db():
+    return AtividadesDatabase()
+
+@st.cache_resource(show_spinner=False)
+def get_cte_db():
+    return CTeDatabase()
 
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
