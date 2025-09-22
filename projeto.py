@@ -180,26 +180,6 @@ class CTeProcessorDirect:
                 except Exception:
                     return None
             
-            # Função para encontrar múltiplos elementos
-            def find_all_elements(element, xpath):
-                try:
-                    elements = []
-                    for prefix, uri in CTE_NAMESPACES.items():
-                        full_xpath = xpath.replace('cte:', f'{{{uri}}}')
-                        found_elements = element.findall(full_xpath)
-                        if found_elements:
-                            elements.extend(found_elements)
-                    
-                    if not elements:
-                        # Tentativa alternativa sem namespace
-                        found_elements = element.findall(xpath.replace('cte:', ''))
-                        if found_elements:
-                            elements.extend(found_elements)
-                    
-                    return elements
-                except Exception:
-                    return []
-            
             # Extrai dados específicos do CT-e
             nCT = find_text(root, './/cte:nCT')
             dhEmi = find_text(root, './/cte:dhEmi')
@@ -254,45 +234,6 @@ class CTeProcessorDirect:
             if infNFe_chave and len(infNFe_chave) >= 9:
                 numero_nfe = infNFe_chave[-9:]
             
-            # EXTRAIR PESO DA MERCADORIA - CORREÇÃO PARA A ESTRUTURA infQ
-            peso_mercadoria = None
-            tipo_peso = "N/A"
-            
-            # Busca por todas as tags infQ
-            infQ_elements = find_all_elements(root, './/cte:infQ')
-            
-            for infQ in infQ_elements:
-                # Verifica se é PESO BRUTO
-                tpMed = infQ.find('.//{*}tpMed') or infQ.find('.//tpMed')
-                qCarga = infQ.find('.//{*}qCarga') or infQ.find('.//qCarga')
-                
-                if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
-                    tipo_medida = tpMed.text.strip().upper()
-                    if 'PESO' in tipo_medida or 'PESO BRUTO' in tipo_medida:
-                        try:
-                            peso_mercadoria = float(qCarga.text)
-                            tipo_peso = tipo_medida
-                            break  # Para no primeiro PESO BRUTO encontrado
-                        except (ValueError, TypeError):
-                            continue
-            
-            # Se não encontrou PESO BRUTO, tenta encontrar qualquer peso
-            if peso_mercadoria is None:
-                for infQ in infQ_elements:
-                    qCarga = infQ.find('.//{*}qCarga') or infQ.find('.//qCarga')
-                    if qCarga is not None and qCarga.text:
-                        try:
-                            peso_mercadoria = float(qCarga.text)
-                            # Tenta identificar o tipo
-                            tpMed = infQ.find('.//{*}tpMed') or infQ.find('.//tpMed')
-                            tipo_peso = tpMed.text if tpMed is not None and tpMed.text else "PESO"
-                            break
-                        except (ValueError, TypeError):
-                            continue
-            
-            # Formata peso para exibição
-            peso_formatado = f"{peso_mercadoria:,.3f} kg" if peso_mercadoria is not None else "N/A"
-            
             # Formata data no padrão DD/MM/AA
             data_formatada = None
             if dhEmi:
@@ -335,9 +276,6 @@ class CTeProcessorDirect:
                 'UF Destino': dest_UF or 'N/A',
                 'Chave NFe': infNFe_chave or 'N/A',
                 'Número NFe': numero_nfe or 'N/A',
-                'Peso Mercadoria (kg)': peso_mercadoria or 0.0,
-                'Tipo Peso': tipo_peso,
-                'Peso Formatado': peso_formatado,
                 'Data Processamento': datetime.now().strftime('%d/%m/%Y %H:%M:%S')
             }
             
@@ -477,11 +415,10 @@ def processador_cte():
             if emitente_filter:
                 filtered_df = filtered_df[filtered_df['Emitente'].isin(emitente_filter)]
             
-            # Exibir dataframe com colunas principais (incluindo peso)
+            # Exibir dataframe com colunas principais
             colunas_principais = [
                 'Arquivo', 'nCT', 'Data Emissão', 'Emitente', 'Remetente', 
-                'Destinatário', 'UF Início', 'UF Destino', 'Valor Prestação', 
-                'Peso Formatado', 'Tipo Peso'
+                'Destinatário', 'UF Início', 'UF Destino', 'Valor Prestação'
             ]
             
             st.dataframe(filtered_df[colunas_principais], use_container_width=True)
@@ -490,16 +427,16 @@ def processador_cte():
             with st.expander("📋 Ver todos os campos detalhados"):
                 st.dataframe(filtered_df, use_container_width=True)
             
-            # Estatísticas (incluindo estatísticas de peso)
+            # Estatísticas
             st.subheader("📈 Estatísticas")
             col1, col2, col3, col4 = st.columns(4)
             
             col1.metric("Total Valor Prestação", f"R$ {filtered_df['Valor Prestação'].sum():,.2f}")
             col2.metric("Média por CT-e", f"R$ {filtered_df['Valor Prestação'].mean():,.2f}")
-            col3.metric("Total Peso (kg)", f"{filtered_df['Peso Mercadoria (kg)'].sum():,.3f}")
-            col4.metric("CT-es com Peso", f"{filtered_df[filtered_df['Peso Mercadoria (kg)'] > 0].shape[0]}")
+            col3.metric("Maior Valor", f"R$ {filtered_df['Valor Prestação'].max():,.2f}")
+            col4.metric("CT-es com NFe", f"{filtered_df[filtered_df['Chave NFe'] != 'N/A'].shape[0]}")
             
-            # Gráficos adicionais com informações de peso
+            # Gráficos
             col_chart1, col_chart2 = st.columns(2)
             
             with col_chart1:
@@ -514,22 +451,6 @@ def processador_cte():
                     st.plotly_chart(fig_uf, use_container_width=True)
             
             with col_chart2:
-                st.subheader("⚖️ Peso por Emitente")
-                if not filtered_df.empty:
-                    peso_por_emitente = filtered_df.groupby('Emitente')['Peso Mercadoria (kg)'].sum().sort_values(ascending=False).head(10)
-                    fig_peso = px.bar(
-                        x=peso_por_emitente.values,
-                        y=peso_por_emitente.index,
-                        orientation='h',
-                        title="Top 10 Emitentes por Peso (kg)",
-                        labels={'x': 'Peso Total (kg)', 'y': 'Emitente'}
-                    )
-                    st.plotly_chart(fig_peso, use_container_width=True)
-            
-            # Gráficos adicionais
-            col_chart3, col_chart4 = st.columns(2)
-            
-            with col_chart3:
                 st.subheader("📈 Valor por Emitente")
                 if not filtered_df.empty:
                     valor_por_emitente = filtered_df.groupby('Emitente')['Valor Prestação'].sum().sort_values(ascending=False).head(10)
@@ -541,26 +462,6 @@ def processador_cte():
                         labels={'x': 'Valor Total (R$)', 'y': 'Emitente'}
                     )
                     st.plotly_chart(fig_emitente, use_container_width=True)
-            
-            with col_chart4:
-                st.subheader("📦 Relação Peso x Valor")
-                if not filtered_df.empty:
-                    fig_relacao = px.scatter(
-                        filtered_df,
-                        x='Peso Mercadoria (kg)',
-                        y='Valor Prestação',
-                        title="Relação entre Peso e Valor do Frete",
-                        hover_data=['Emitente', 'Destinatário', 'Tipo Peso']
-                    )
-                    st.plotly_chart(fig_relacao, use_container_width=True)
-            
-            # Informações sobre os tipos de peso encontrados
-            if not filtered_df.empty:
-                with st.expander("📋 Informações sobre os Tipos de Peso"):
-                    tipos_peso = filtered_df['Tipo Peso'].value_counts()
-                    st.write("**Tipos de peso encontrados:**")
-                    for tipo, quantidade in tipos_peso.items():
-                        st.write(f"- {tipo}: {quantidade} CT-e(s)")
             
         else:
             st.info("Nenhum CT-e processado ainda. Faça upload de arquivos na aba 'Upload'.")
