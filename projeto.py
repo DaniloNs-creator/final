@@ -191,6 +191,41 @@ class CTeProcessorDirect:
             vTPrest = find_text(root, './/cte:vTPrest')
             rem_xNome = find_text(root, './/cte:rem/cte:xNome')
             
+            # Extrai dados do destinatário
+            dest_xNome = find_text(root, './/cte:dest/cte:xNome')
+            dest_CNPJ = find_text(root, './/cte:dest/cte:CNPJ')
+            dest_CPF = find_text(root, './/cte:dest/cte:CPF')
+            
+            # Determina o documento do destinatário (CNPJ ou CPF)
+            documento_destinatario = dest_CNPJ or dest_CPF or 'N/A'
+            
+            # Extrai endereço do destinatário
+            dest_xLgr = find_text(root, './/cte:dest/cte:enderDest/cte:xLgr')
+            dest_nro = find_text(root, './/cte:dest/cte:enderDest/cte:nro')
+            dest_xBairro = find_text(root, './/cte:dest/cte:enderDest/cte:xBairro')
+            dest_cMun = find_text(root, './/cte:dest/cte:enderDest/cte:cMun')
+            dest_xMun = find_text(root, './/cte:dest/cte:enderDest/cte:xMun')
+            dest_CEP = find_text(root, './/cte:dest/cte:enderDest/cte:CEP')
+            dest_UF = find_text(root, './/cte:dest/cte:enderDest/cte:UF')
+            
+            # Monta endereço completo do destinatário
+            endereco_destinatario = ""
+            if dest_xLgr:
+                endereco_destinatario += f"{dest_xLgr}"
+                if dest_nro:
+                    endereco_destinatario += f", {dest_nro}"
+                if dest_xBairro:
+                    endereco_destinatario += f" - {dest_xBairro}"
+                if dest_xMun:
+                    endereco_destinatario += f", {dest_xMun}"
+                if dest_UF:
+                    endereco_destinatario += f"/{dest_UF}"
+                if dest_CEP:
+                    endereco_destinatario += f" - CEP: {dest_CEP}"
+            
+            if not endereco_destinatario:
+                endereco_destinatario = "N/A"
+            
             # Extrai chave da NFe associada (se existir)
             infNFe_chave = find_text(root, './/cte:infNFe/cte:chave')
             
@@ -207,7 +242,10 @@ class CTeProcessorDirect:
                     try:
                         data_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
                     except:
-                        data_obj = datetime.strptime(dhEmi[:10], '%d/%m/%Y')
+                        try:
+                            data_obj = datetime.strptime(dhEmi[:10], '%d/%m/%Y')
+                        except:
+                            data_obj = datetime.strptime(dhEmi[:10], '%d/%m/%y')
                     
                     data_formatada = data_obj.strftime('%d/%m/%y')
                 except:
@@ -231,6 +269,11 @@ class CTeProcessorDirect:
                 'Emitente': emit_xNome or 'N/A',
                 'Valor Prestação': vTPrest,
                 'Remetente': rem_xNome or 'N/A',
+                'Destinatário': dest_xNome or 'N/A',
+                'Documento Destinatário': documento_destinatario,
+                'Endereço Destinatário': endereco_destinatario,
+                'Município Destino': dest_xMun or 'N/A',
+                'UF Destino': dest_UF or 'N/A',
                 'Chave NFe': infNFe_chave or 'N/A',
                 'Número NFe': numero_nfe or 'N/A',
                 'Data Processamento': datetime.now().strftime('%d/%m/%Y %H:%M:%S')
@@ -355,29 +398,70 @@ def processador_cte():
             st.write(f"Total de CT-es processados: {len(df)}")
             
             # Filtros
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             with col1:
                 uf_filter = st.multiselect("Filtrar por UF Início", options=df['UF Início'].unique())
             with col2:
+                uf_destino_filter = st.multiselect("Filtrar por UF Destino", options=df['UF Destino'].unique())
+            with col3:
                 emitente_filter = st.multiselect("Filtrar por Emitente", options=df['Emitente'].unique())
             
             # Aplicar filtros
             filtered_df = df.copy()
             if uf_filter:
                 filtered_df = filtered_df[filtered_df['UF Início'].isin(uf_filter)]
+            if uf_destino_filter:
+                filtered_df = filtered_df[filtered_df['UF Destino'].isin(uf_destino_filter)]
             if emitente_filter:
                 filtered_df = filtered_df[filtered_df['Emitente'].isin(emitente_filter)]
             
-            # Exibir dataframe
-            st.dataframe(filtered_df, use_container_width=True)
+            # Exibir dataframe com colunas principais
+            colunas_principais = [
+                'Arquivo', 'nCT', 'Data Emissão', 'Emitente', 'Remetente', 
+                'Destinatário', 'UF Início', 'UF Destino', 'Valor Prestação'
+            ]
+            
+            st.dataframe(filtered_df[colunas_principais], use_container_width=True)
+            
+            # Detalhes expandíveis
+            with st.expander("📋 Ver todos os campos detalhados"):
+                st.dataframe(filtered_df, use_container_width=True)
             
             # Estatísticas
             st.subheader("📈 Estatísticas")
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             
             col1.metric("Total Valor Prestação", f"R$ {filtered_df['Valor Prestação'].sum():,.2f}")
             col2.metric("Média por CT-e", f"R$ {filtered_df['Valor Prestação'].mean():,.2f}")
             col3.metric("Maior Valor", f"R$ {filtered_df['Valor Prestação'].max():,.2f}")
+            col4.metric("CT-es com NFe", f"{filtered_df[filtered_df['Chave NFe'] != 'N/A'].shape[0]}")
+            
+            # Gráficos
+            col_chart1, col_chart2 = st.columns(2)
+            
+            with col_chart1:
+                st.subheader("📊 Distribuição por UF Destino")
+                if not filtered_df.empty:
+                    uf_counts = filtered_df['UF Destino'].value_counts()
+                    fig_uf = px.pie(
+                        values=uf_counts.values,
+                        names=uf_counts.index,
+                        title="Distribuição por UF de Destino"
+                    )
+                    st.plotly_chart(fig_uf, use_container_width=True)
+            
+            with col_chart2:
+                st.subheader("📈 Valor por Emitente")
+                if not filtered_df.empty:
+                    valor_por_emitente = filtered_df.groupby('Emitente')['Valor Prestação'].sum().sort_values(ascending=False).head(10)
+                    fig_emitente = px.bar(
+                        x=valor_por_emitente.values,
+                        y=valor_por_emitente.index,
+                        orientation='h',
+                        title="Top 10 Emitentes por Valor",
+                        labels={'x': 'Valor Total (R$)', 'y': 'Emitente'}
+                    )
+                    st.plotly_chart(fig_emitente, use_container_width=True)
             
         else:
             st.info("Nenhum CT-e processado ainda. Faça upload de arquivos na aba 'Upload'.")
@@ -393,11 +477,22 @@ def processador_cte():
             export_option = st.radio("Formato de exportação:", 
                                    ["Excel (.xlsx)", "CSV (.csv)"])
             
+            # Seleção de colunas para exportação
+            st.subheader("Selecionar Colunas para Exportação")
+            todas_colunas = df.columns.tolist()
+            colunas_selecionadas = st.multiselect(
+                "Selecione as colunas para exportar:",
+                options=todas_colunas,
+                default=todas_colunas
+            )
+            
+            df_export = df[colunas_selecionadas] if colunas_selecionadas else df
+            
             if export_option == "Excel (.xlsx)":
                 # Gerar Excel
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, sheet_name='Dados_CTe', index=False)
+                    df_export.to_excel(writer, sheet_name='Dados_CTe', index=False)
                 
                 output.seek(0)
                 
@@ -410,7 +505,7 @@ def processador_cte():
             
             else:
                 # Gerar CSV
-                csv = df.to_csv(index=False).encode('utf-8')
+                csv = df_export.to_csv(index=False).encode('utf-8')
                 
                 st.download_button(
                     label="📥 Baixar Arquivo CSV",
@@ -421,7 +516,7 @@ def processador_cte():
             
             # Prévia dos dados
             with st.expander("📋 Prévia dos dados a serem exportados"):
-                st.dataframe(df.head(10))
+                st.dataframe(df_export.head(10))
                 
         else:
             st.warning("Nenhum dado disponível para exportação.")
