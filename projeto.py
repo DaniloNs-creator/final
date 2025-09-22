@@ -180,6 +180,26 @@ class CTeProcessorDirect:
                 except Exception:
                     return None
             
+            # Função para encontrar múltiplos elementos
+            def find_all_elements(element, xpath):
+                try:
+                    elements = []
+                    for prefix, uri in CTE_NAMESPACES.items():
+                        full_xpath = xpath.replace('cte:', f'{{{uri}}}')
+                        found_elements = element.findall(full_xpath)
+                        if found_elements:
+                            elements.extend(found_elements)
+                    
+                    if not elements:
+                        # Tentativa alternativa sem namespace
+                        found_elements = element.findall(xpath.replace('cte:', ''))
+                        if found_elements:
+                            elements.extend(found_elements)
+                    
+                    return elements
+                except Exception:
+                    return []
+            
             # Extrai dados específicos do CT-e
             nCT = find_text(root, './/cte:nCT')
             dhEmi = find_text(root, './/cte:dhEmi')
@@ -234,6 +254,41 @@ class CTeProcessorDirect:
             if infNFe_chave and len(infNFe_chave) >= 9:
                 numero_nfe = infNFe_chave[-9:]
             
+            # EXTRAIR PESO BRUTO DA MERCADORIA - CORREÇÃO
+            peso_bruto = None
+            peso_cubado = None
+            volumes = None
+            metro_cubico = None
+            
+            # Busca todos os elementos infQ (informações de quantidade)
+            infQ_elements = find_all_elements(root, './/cte:infQ')
+            
+            for infQ in infQ_elements:
+                tpMed_element = infQ.find('.//{*}tpMed') or infQ.find('tpMed')
+                qCarga_element = infQ.find('.//{*}qCarga') or infQ.find('qCarga')
+                
+                if tpMed_element is not None and qCarga_element is not None:
+                    tipo_medida = tpMed_element.text
+                    quantidade = qCarga_element.text
+                    
+                    try:
+                        if tipo_medida == 'PESO BRUTO':
+                            peso_bruto = float(quantidade)
+                        elif tipo_medida == 'PESO CUBADO':
+                            peso_cubado = float(quantidade)
+                        elif tipo_medida == 'VOLUMES':
+                            volumes = float(quantidade)
+                        elif tipo_medida == 'METRO CUBICO':
+                            metro_cubico = float(quantidade)
+                    except (ValueError, TypeError):
+                        continue
+            
+            # Formata os valores para exibição
+            peso_bruto_formatado = f"{peso_bruto:,.3f}" if peso_bruto is not None else "N/A"
+            peso_cubado_formatado = f"{peso_cubado:,.3f}" if peso_cubado is not None else "N/A"
+            volumes_formatado = f"{volumes:,.0f}" if volumes is not None else "N/A"
+            metro_cubico_formatado = f"{metro_cubico:,.3f}" if metro_cubico is not None else "N/A"
+            
             # Formata data no padrão DD/MM/AA
             data_formatada = None
             if dhEmi:
@@ -276,6 +331,14 @@ class CTeProcessorDirect:
                 'UF Destino': dest_UF or 'N/A',
                 'Chave NFe': infNFe_chave or 'N/A',
                 'Número NFe': numero_nfe or 'N/A',
+                'Peso Bruto (kg)': peso_bruto or 0.0,
+                'Peso Cubado (kg)': peso_cubado or 0.0,
+                'Volumes': volumes or 0.0,
+                'Metro Cúbico': metro_cubico or 0.0,
+                'Peso Bruto Formatado': peso_bruto_formatado,
+                'Peso Cubado Formatado': peso_cubado_formatado,
+                'Volumes Formatado': volumes_formatado,
+                'Metro Cúbico Formatado': metro_cubico_formatado,
                 'Data Processamento': datetime.now().strftime('%d/%m/%Y %H:%M:%S')
             }
             
@@ -415,10 +478,11 @@ def processador_cte():
             if emitente_filter:
                 filtered_df = filtered_df[filtered_df['Emitente'].isin(emitente_filter)]
             
-            # Exibir dataframe com colunas principais
+            # Exibir dataframe com colunas principais (incluindo peso)
             colunas_principais = [
                 'Arquivo', 'nCT', 'Data Emissão', 'Emitente', 'Remetente', 
-                'Destinatário', 'UF Início', 'UF Destino', 'Valor Prestação'
+                'Destinatário', 'UF Início', 'UF Destino', 'Valor Prestação', 
+                'Peso Bruto Formatado', 'Volumes Formatado'
             ]
             
             st.dataframe(filtered_df[colunas_principais], use_container_width=True)
@@ -427,16 +491,16 @@ def processador_cte():
             with st.expander("📋 Ver todos os campos detalhados"):
                 st.dataframe(filtered_df, use_container_width=True)
             
-            # Estatísticas
+            # Estatísticas (incluindo estatísticas de peso)
             st.subheader("📈 Estatísticas")
             col1, col2, col3, col4 = st.columns(4)
             
             col1.metric("Total Valor Prestação", f"R$ {filtered_df['Valor Prestação'].sum():,.2f}")
             col2.metric("Média por CT-e", f"R$ {filtered_df['Valor Prestação'].mean():,.2f}")
-            col3.metric("Maior Valor", f"R$ {filtered_df['Valor Prestação'].max():,.2f}")
-            col4.metric("CT-es com NFe", f"{filtered_df[filtered_df['Chave NFe'] != 'N/A'].shape[0]}")
+            col3.metric("Total Peso Bruto (kg)", f"{filtered_df['Peso Bruto (kg)'].sum():,.1f}")
+            col4.metric("Total Volumes", f"{filtered_df['Volumes'].sum():,.0f}")
             
-            # Gráficos
+            # Gráficos adicionais com informações de peso
             col_chart1, col_chart2 = st.columns(2)
             
             with col_chart1:
@@ -451,6 +515,22 @@ def processador_cte():
                     st.plotly_chart(fig_uf, use_container_width=True)
             
             with col_chart2:
+                st.subheader("⚖️ Peso Bruto por Emitente")
+                if not filtered_df.empty:
+                    peso_por_emitente = filtered_df.groupby('Emitente')['Peso Bruto (kg)'].sum().sort_values(ascending=False).head(10)
+                    fig_peso = px.bar(
+                        x=peso_por_emitente.values,
+                        y=peso_por_emitente.index,
+                        orientation='h',
+                        title="Top 10 Emitentes por Peso Bruto (kg)",
+                        labels={'x': 'Peso Total (kg)', 'y': 'Emitente'}
+                    )
+                    st.plotly_chart(fig_peso, use_container_width=True)
+            
+            # Gráficos adicionais
+            col_chart3, col_chart4 = st.columns(2)
+            
+            with col_chart3:
                 st.subheader("📈 Valor por Emitente")
                 if not filtered_df.empty:
                     valor_por_emitente = filtered_df.groupby('Emitente')['Valor Prestação'].sum().sort_values(ascending=False).head(10)
@@ -462,6 +542,36 @@ def processador_cte():
                         labels={'x': 'Valor Total (R$)', 'y': 'Emitente'}
                     )
                     st.plotly_chart(fig_emitente, use_container_width=True)
+            
+            with col_chart4:
+                st.subheader("📦 Relação Peso x Valor")
+                if not filtered_df.empty:
+                    fig_relacao = px.scatter(
+                        filtered_df,
+                        x='Peso Bruto (kg)',
+                        y='Valor Prestação',
+                        title="Relação entre Peso Bruto e Valor do Frete",
+                        hover_data=['Emitente', 'Destinatário'],
+                        size='Volumes'
+                    )
+                    st.plotly_chart(fig_relacao, use_container_width=True)
+            
+            # Informações detalhadas de peso
+            with st.expander("⚖️ Detalhes de Peso e Medidas"):
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Peso Bruto Médio", f"{filtered_df['Peso Bruto (kg)'].mean():,.1f} kg")
+                with col2:
+                    st.metric("Peso Cubado Médio", f"{filtered_df['Peso Cubado (kg)'].mean():,.1f} kg")
+                with col3:
+                    st.metric("Volumes Médios", f"{filtered_df['Volumes'].mean():,.1f}")
+                with col4:
+                    st.metric("M³ Médio", f"{filtered_df['Metro Cúbico'].mean():,.3f}")
+                
+                # Tabela resumo de medidas
+                st.subheader("Resumo de Medidas por CT-e")
+                medidas_df = filtered_df[['nCT', 'Peso Bruto (kg)', 'Peso Cubado (kg)', 'Volumes', 'Metro Cúbico']]
+                st.dataframe(medidas_df, use_container_width=True)
             
         else:
             st.info("Nenhum CT-e processado ainda. Faça upload de arquivos na aba 'Upload'.")
