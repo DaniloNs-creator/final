@@ -17,7 +17,34 @@ import threading
 from threading import Lock
 import json
 
-# --- CONFIGURAÇÃO INICIAL OTIMIZADA ---
+# --- INICIALIZAÇÃO COMPLETA DO SESSION STATE ---
+def initialize_session_state():
+    """Inicializa todas as variáveis do session state"""
+    if 'processing_status' not in st.session_state:
+        st.session_state.processing_status = {
+            'processed': 0, 
+            'total': 0, 
+            'errors': 0, 
+            'current_file': '',
+            'is_processing': False
+        }
+    
+    if 'processed_data' not in st.session_state:
+        st.session_state.processed_data = []
+    
+    if 'processing_lock' not in st.session_state:
+        st.session_state.processing_lock = Lock()
+    
+    if 'stop_processing' not in st.session_state:
+        st.session_state.stop_processing = False
+    
+    if 'current_batch' not in st.session_state:
+        st.session_state.current_batch = 0
+    
+    if 'total_batches' not in st.session_state:
+        st.session_state.total_batches = 0
+
+# --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(
     page_title="Sistema de Processamento Massivo",
     page_icon="⚡",
@@ -25,26 +52,19 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Inicializar session state
+initialize_session_state()
+
 # Namespaces para CT-e
 CTE_NAMESPACES = {'cte': 'http://www.portalfiscal.inf.br/cte'}
-
-# Variáveis globais para gerenciamento de estado
-if 'processing_status' not in st.session_state:
-    st.session_state.processing_status = {'processed': 0, 'total': 0, 'errors': 0, 'current_file': ''}
-if 'processed_data' not in st.session_state:
-    st.session_state.processed_data = []
-if 'processing_lock' not in st.session_state:
-    st.session_state.processing_lock = Lock()
-if 'stop_processing' not in st.session_state:
-    st.session_state.stop_processing = False
 
 # --- SISTEMA DE CACHE E ARMAZENAMENTO OTIMIZADO ---
 class CTEProcessorOptimized:
     def __init__(self):
-        self.batch_size = 1000  # Processar em lotes de 1000 arquivos
-        self.max_workers = 4    # Número de threads paralelas
-        self.chunk_size = 100   # Tamanho do chunk para salvar dados
-        
+        self.batch_size = 500  # Reduzido para melhor estabilidade
+        self.max_workers = 2   # Reduzido para evitar sobrecarga
+        self.chunk_size = 100
+    
     def extract_nfe_number_from_key(self, chave_acesso):
         """Extrai o número da NF-e da chave de acesso"""
         if not chave_acesso or len(chave_acesso) != 44:
@@ -94,13 +114,15 @@ class CTEProcessorOptimized:
             root = ET.fromstring(xml_content)
             
             # Função auxiliar otimizada
-            def find_text_fast(element, xpath):
+            def find_text_fast(element, tag_name):
                 try:
+                    # Tentar com namespace primeiro
                     for prefix, uri in CTE_NAMESPACES.items():
-                        found = element.find(f'.//{{{uri}}}{xpath.replace("cte:", "")}')
+                        found = element.find(f'.//{{{uri}}}{tag_name}')
                         if found is not None and found.text:
                             return found.text
-                    found = element.find(f'.//{xpath.replace("cte:", "")}')
+                    # Tentar sem namespace
+                    found = element.find(f'.//{tag_name}')
                     return found.text if found is not None and found.text else None
                 except Exception:
                     return None
@@ -108,15 +130,25 @@ class CTEProcessorOptimized:
             # Extração otimizada dos dados
             nCT = find_text_fast(root, 'nCT')
             dhEmi = find_text_fast(root, 'dhEmi')
-            emit_xNome = find_text_fast(root, 'emit/xNome')
+            emit_xNome = find_text_fast(root, 'xNome')  # Buscar em qualquer nível
             vTPrest = find_text_fast(root, 'vTPrest')
-            rem_xNome = find_text_fast(root, 'rem/xNome')
-            dest_xNome = find_text_fast(root, 'dest/xNome')
-            dest_CNPJ = find_text_fast(root, 'dest/CNPJ')
-            dest_CPF = find_text_fast(root, 'dest/CPF')
+            rem_xNome = find_text_fast(root, 'xNome')  # Buscar remetente
+            dest_xNome = find_text_fast(root, 'xNome')  # Buscar destinatário
             UFIni = find_text_fast(root, 'UFIni')
             UFFim = find_text_fast(root, 'UFFim')
-            infNFe_chave = find_text_fast(root, 'infNFe/chave')
+            infNFe_chave = find_text_fast(root, 'chave')
+            
+            # Buscar mais específico para emitente, remetente, destinatário
+            if not emit_xNome:
+                emit_xNome = find_text_fast(root, 'emit/xNome')
+            if not rem_xNome:
+                rem_xNome = find_text_fast(root, 'rem/xNome')
+            if not dest_xNome:
+                dest_xNome = find_text_fast(root, 'dest/xNome')
+            
+            # Buscar CNPJ/CPF do destinatário
+            dest_CNPJ = find_text_fast(root, 'dest/CNPJ')
+            dest_CPF = find_text_fast(root, 'dest/CPF')
             
             # Extrai peso
             peso_bruto, tipo_peso = self.extract_peso_bruto(root)
@@ -128,7 +160,11 @@ class CTEProcessorOptimized:
                     data_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
                     data_formatada = data_obj.strftime('%d/%m/%y')
                 except:
-                    data_formatada = dhEmi[:10]
+                    try:
+                        data_obj = datetime.strptime(dhEmi[:10], '%d/%m/%Y')
+                        data_formatada = data_obj.strftime('%d/%m/%y')
+                    except:
+                        data_formatada = dhEmi[:10]
             
             # Conversão de valores
             try:
@@ -160,38 +196,15 @@ class CTEProcessorOptimized:
         except Exception as e:
             return {'error': f"Erro no arquivo {filename}: {str(e)}"}
     
-    def process_batch(self, batch_files):
-        """Processa um lote de arquivos de forma paralela"""
-        results = []
-        errors = []
-        
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_file = {
-                executor.submit(self.process_single_file, file_data, filename): filename 
-                for file_data, filename in batch_files
-            }
-            
-            for future in as_completed(future_to_file):
-                filename = future_to_file[future]
-                try:
-                    result = future.result(timeout=30)  # Timeout de 30 segundos por arquivo
-                    if 'error' not in result:
-                        results.append(result)
-                    else:
-                        errors.append(result['error'])
-                except Exception as e:
-                    errors.append(f"Timeout ou erro grave em {filename}: {str(e)}")
-        
-        return results, errors
-    
     def process_single_file(self, file_content, filename):
-        """Processa um único arquivo"""
+        """Processa um único arquivo com verificação de parada"""
         try:
+            # Verificar se o processamento foi interrompido
             if st.session_state.stop_processing:
                 return {'error': 'Processamento interrompido pelo usuário'}
                 
             content_str = file_content.decode('utf-8', errors='ignore')
-            if 'CTe' not in content_str:
+            if 'CTe' not in content_str and 'conhecimento' not in content_str.lower():
                 return {'error': f'Arquivo {filename} não é um CT-e válido'}
             
             return self.extract_cte_data_fast(content_str, filename)
@@ -200,228 +213,286 @@ class CTEProcessorOptimized:
             return {'error': f'Erro ao processar {filename}: {str(e)}'}
 
 # --- SISTEMA DE PROGRESSO E STATUS ---
-def update_progress(current, total, current_file="", errors=0):
-    """Atualiza a barra de progresso e status"""
-    with st.session_state.processing_lock:
+def update_progress(current, total, current_file="", errors=0, is_processing=False):
+    """Atualiza a barra de progresso e status de forma segura"""
+    try:
         st.session_state.processing_status = {
             'processed': current,
             'total': total,
             'errors': errors,
-            'current_file': current_file
+            'current_file': current_file,
+            'is_processing': is_processing
         }
+    except Exception as e:
+        print(f"Erro ao atualizar progresso: {e}")
 
 def get_progress_status():
-    """Retorna o status atual do processamento"""
-    with st.session_state.processing_lock:
+    """Retorna o status atual do processamento de forma segura"""
+    try:
         return st.session_state.processing_status.copy()
+    except Exception as e:
+        print(f"Erro ao obter status: {e}")
+        return {'processed': 0, 'total': 0, 'errors': 0, 'current_file': '', 'is_processing': False}
+
+def reset_processing_state():
+    """Reseta o estado de processamento"""
+    initialize_session_state()
+    st.session_state.stop_processing = False
+    st.session_state.processing_status['is_processing'] = False
 
 def show_progress_interface():
-    """Exibe a interface de progresso"""
-    status = get_progress_status()
-    
-    if status['total'] > 0:
-        progress = status['processed'] / status['total']
-        
-        # Barra de progresso principal
-        progress_bar = st.progress(progress)
-        
-        # Estatísticas
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Processados", f"{status['processed']:,}")
-        with col2:
-            st.metric("Total", f"{status['total']:,}")
-        with col3:
-            st.metric("Erros", f"{status['errors']:,}")
-        with col4:
-            st.metric("Progresso", f"{progress*100:.1f}%")
-        
-        # Arquivo atual
-        if status['current_file']:
-            st.info(f"📄 Processando: {status['current_file']}")
-        
-        # Botão de parada
-        if st.button("🛑 Parar Processamento", key="stop_button"):
-            st.session_state.stop_processing = True
-            st.warning("Parando processamento... Aguarde.")
-        
-        return progress_bar
-    return None
-
-# --- PROCESSAMENTO EM MASSA OTIMIZADO ---
-def process_large_volume(uploaded_files):
-    """Processa um grande volume de arquivos XML"""
-    processor = CTEProcessorOptimized()
-    total_files = len(uploaded_files)
-    
-    # Configuração inicial
-    update_progress(0, total_files)
-    st.session_state.stop_processing = False
-    
-    # Container para resultados
-    all_results = []
-    all_errors = []
-    
-    # Dividir arquivos em lotes
-    batches = []
-    for i in range(0, total_files, processor.batch_size):
-        batch = []
-        for j in range(i, min(i + processor.batch_size, total_files)):
-            file = uploaded_files[j]
-            batch.append((file.getvalue(), file.name))
-        batches.append(batch)
-    
-    # Processar lotes
-    for batch_num, batch_files in enumerate(batches):
-        if st.session_state.stop_processing:
-            st.error("Processamento interrompido pelo usuário")
-            break
-            
-        # Atualizar status
-        update_progress(batch_num * processor.batch_size, total_files, 
-                       f"Lote {batch_num + 1}/{len(batches)}")
-        
-        # Processar lote
-        results, errors = processor.process_batch(batch_files)
-        all_results.extend(results)
-        all_errors.extend(errors)
-        
-        # Limpar memória
-        if batch_num % 10 == 0:  # A cada 10 lotes
-            gc.collect()
-        
-        # Atualizar progresso
-        update_progress(min((batch_num + 1) * processor.batch_size, total_files), 
-                       total_files, errors=len(all_errors))
-        
-        # Pequena pausa para não sobrecarregar o sistema
-        time.sleep(0.1)
-    
-    return all_results, all_errors
-
-# --- SISTEMA DE EXPORTAÇÃO OTIMIZADO ---
-def export_large_dataframe(df, format_type):
-    """Exporta grandes dataframes de forma eficiente"""
+    """Exibe a interface de progresso de forma segura"""
     try:
-        if format_type == "Excel (.xlsx)":
-            # Para Excel, usar chunks se for muito grande
-            if len(df) > 100000:
-                st.warning("⚠️ Arquivo muito grande para Excel. Use CSV ou divida os dados.")
-                return None
-            
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df.to_excel(writer, sheet_name='Dados_CTe', index=False)
-            output.seek(0)
-            return output
+        status = get_progress_status()
         
-        else:  # CSV
-            # CSV pode lidar com volumes maiores
-            csv_data = df.to_csv(index=False).encode('utf-8')
-            return csv_data
+        if status['total'] > 0:
+            progress = status['processed'] / status['total'] if status['total'] > 0 else 0
             
+            # Barra de progresso principal
+            progress_bar = st.progress(float(progress))
+            
+            # Estatísticas
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Processados", f"{status['processed']:,}")
+            with col2:
+                st.metric("Total", f"{status['total']:,}")
+            with col3:
+                st.metric("Erros", f"{status['errors']:,}")
+            with col4:
+                success_rate = (status['processed'] - status['errors']) / status['processed'] * 100 if status['processed'] > 0 else 0
+                st.metric("Sucesso", f"{success_rate:.1f}%")
+            
+            # Arquivo atual
+            if status['current_file']:
+                st.info(f"📄 Processando: {os.path.basename(status['current_file'])}")
+            
+            # Botão de parada
+            if status['is_processing']:
+                if st.button("🛑 Parar Processamento", key="stop_button", type="secondary"):
+                    st.session_state.stop_processing = True
+                    st.warning("Parando processamento... Aguarde a conclusão do lote atual.")
+            
+            return progress_bar
+        return None
     except Exception as e:
-        st.error(f"Erro na exportação: {str(e)}")
+        st.error(f"Erro na interface de progresso: {e}")
         return None
 
-# --- INTERFACE PRINCIPAL OTIMIZADA ---
-def processador_cte_massivo():
-    """Interface otimizada para processamento massivo de CT-es"""
+# --- PROCESSAMENTO EM MASSA SEGURO ---
+def process_batch_safe(processor, batch_files, batch_number, total_batches):
+    """Processa um lote de arquivos de forma segura"""
+    results = []
+    errors = []
     
-    st.title("⚡ Processador Massivo de CT-e")
-    st.markdown("### Otimizado para processar mais de 50.000 arquivos XML")
+    try:
+        with ThreadPoolExecutor(max_workers=processor.max_workers) as executor:
+            future_to_file = {
+                executor.submit(processor.process_single_file, file_data, filename): filename 
+                for file_data, filename in batch_files
+            }
+            
+            for i, future in enumerate(as_completed(future_to_file)):
+                filename = future_to_file[future]
+                
+                # Verificar parada a cada arquivo
+                if st.session_state.stop_processing:
+                    break
+                
+                try:
+                    result = future.result(timeout=30)
+                    if 'error' not in result:
+                        results.append(result)
+                    else:
+                        errors.append(result['error'])
+                except Exception as e:
+                    errors.append(f"Timeout ou erro em {filename}: {str(e)}")
+                
+                # Atualizar progresso a cada 10 arquivos
+                if i % 10 == 0:
+                    current_processed = batch_number * processor.batch_size + i + 1
+                    update_progress(
+                        current_processed, 
+                        st.session_state.processing_status['total'],
+                        filename,
+                        len(errors),
+                        True
+                    )
     
-    # Informações de performance
-    with st.expander("🚀 Informações de Performance", expanded=True):
-        st.markdown("""
-        **Capacidades do Sistema:**
-        - ✅ **Processamento paralelo**: Até 4 arquivos simultaneamente
-        - ✅ **Processamento em lote**: Grupos de 1.000 arquivos
-        - ✅ **Otimização de memória**: Limpeza automática a cada 10.000 arquivos
-        - ✅ **Controle de progresso**: Monitoramento em tempo real
-        - ✅ **Interrupção segura**: Pare a qualquer momento
+    except Exception as e:
+        errors.append(f"Erro no lote {batch_number}: {str(e)}")
+    
+    return results, errors
+
+def process_large_volume_safe(uploaded_files):
+    """Processa um grande volume de arquivos XML de forma segura"""
+    try:
+        processor = CTEProcessorOptimized()
+        total_files = len(uploaded_files)
         
-        **Recomendações:**
-        - Carregue os arquivos em lotes de até 10.000 por vez
-        - Use formato ZIP para arquivos muito grandes
-        - Monitore o uso de memória durante o processamento
-        """)
-    
-    tab1, tab2, tab3, tab4 = st.tabs(["📤 Upload Massivo", "📊 Dashboard", "📥 Exportar", "⚙️ Configurações"])
-    
-    with tab1:
-        st.header("Upload de Arquivos em Massa")
+        # Configuração inicial segura
+        reset_processing_state()
+        update_progress(0, total_files, "Iniciando...", 0, True)
         
-        # Opções de upload
-        upload_option = st.radio("Selecione o método de upload:", 
-                                ["Upload Direto", "Upload via ZIP"])
+        # Container para resultados
+        all_results = []
+        all_errors = []
         
-        if upload_option == "Upload Direto":
-            uploaded_files = st.file_uploader(
-                "Selecione os arquivos XML de CT-e", 
-                type=['xml'], 
-                accept_multiple_files=True,
-                key="mass_upload"
+        # Dividir arquivos em lotes
+        batches = []
+        for i in range(0, total_files, processor.batch_size):
+            batch = []
+            for j in range(i, min(i + processor.batch_size, total_files)):
+                file = uploaded_files[j]
+                batch.append((file.getvalue(), file.name))
+            batches.append(batch)
+        
+        st.session_state.total_batches = len(batches)
+        
+        # Processar lotes
+        for batch_num, batch_files in enumerate(batches):
+            if st.session_state.stop_processing:
+                st.error("Processamento interrompido pelo usuário")
+                break
+            
+            # Atualizar status do lote
+            st.session_state.current_batch = batch_num + 1
+            update_progress(
+                batch_num * processor.batch_size, 
+                total_files, 
+                f"Lote {batch_num + 1}/{len(batches)}",
+                len(all_errors),
+                True
             )
             
-            if uploaded_files:
-                st.success(f"✅ {len(uploaded_files):,} arquivos selecionados")
-                
-                # Verificar limite recomendado
-                if len(uploaded_files) > 10000:
-                    st.warning("""
-                    ⚠️ **Número elevado de arquivos detectado**
-                    Recomendamos processar em lotes menores ou usar upload via ZIP.
-                    """)
-                
-                if st.button("🚀 Iniciar Processamento Massivo", type="primary"):
-                    if len(uploaded_files) > 50000:
-                        st.error("""
-                        ❌ **Limite máximo excedido**
-                        Para mais de 50.000 arquivos, divida em lotes menores.
-                        """)
-                    else:
-                        process_massive_files(uploaded_files)
-        
-        else:  # Upload via ZIP
-            zip_file = st.file_uploader("Selecione arquivo ZIP com XMLs", type=['zip'])
+            # Processar lote
+            results, errors = process_batch_safe(processor, batch_files, batch_num, len(batches))
+            all_results.extend(results)
+            all_errors.extend(errors)
             
-            if zip_file:
-                if st.button("📦 Extrair e Processar ZIP"):
-                    process_zip_file(zip_file)
+            # Limpar memória
+            gc.collect()
+            
+            # Pequena pausa para não sobrecarregar
+            time.sleep(0.5)
+            
+            # Atualizar progresso final do lote
+            current_processed = min((batch_num + 1) * processor.batch_size, total_files)
+            update_progress(
+                current_processed, 
+                total_files, 
+                f"Lote {batch_num + 1}/{len(batches)} concluído",
+                len(all_errors),
+                batch_num < len(batches) - 1  # Último lote?
+            )
+        
+        # Finalizar processamento
+        update_progress(total_files, total_files, "Processamento concluído", len(all_errors), False)
+        st.session_state.stop_processing = False
+        
+        return all_results, all_errors
+        
+    except Exception as e:
+        st.error(f"Erro crítico no processamento: {str(e)}")
+        update_progress(0, total_files, "Erro crítico", len(all_errors), False)
+        return [], [f"Erro crítico: {str(e)}"]
+
+# --- INTERFACE PRINCIPAL SEGURA ---
+def processador_cte_massivo():
+    """Interface segura para processamento massivo de CT-es"""
+    
+    st.title("⚡ Processador Massivo de CT-e")
+    st.markdown("### Sistema otimizado para grandes volumes de arquivos XML")
+    
+    # Verificar se há processamento em andamento
+    status = get_progress_status()
+    if status['is_processing'] and status['processed'] < status['total']:
+        st.warning("🔄 Processamento em andamento...")
+        show_progress_interface()
+        return
+    
+    # Informações de performance
+    with st.expander("🚀 Informações do Sistema", expanded=True):
+        st.markdown("""
+        **Capacidades:**
+        - ✅ **Processamento em lote**: Grupos de 500 arquivos
+        - ✅ **Processamento paralelo**: Até 2 arquivos simultaneamente  
+        - ✅ **Controle de progresso**: Monitoramento em tempo real
+        - ✅ **Interrupção segura**: Pare a qualquer momento
+        - ✅ **Busca inteligente**: Peso bruto e base de cálculo
+        
+        **Limites recomendados:**
+        - 📦 **Por lote**: Até 5.000 arquivos
+        - ⏱️ **Tempo estimado**: 1.000 arquivos ≈ 2-3 minutos
+        - 💾 **Memória**: Processamento eficiente
+        """)
+    
+    tab1, tab2, tab3 = st.tabs(["📤 Upload", "📊 Dashboard", "📥 Exportar"])
+    
+    with tab1:
+        show_upload_interface()
     
     with tab2:
-        show_dashboard()
+        show_dashboard_interface()
     
     with tab3:
         show_export_interface()
-    
-    with tab4:
-        show_configurations()
 
-def process_massive_files(uploaded_files):
-    """Processa uma grande quantidade de arquivos"""
+def show_upload_interface():
+    """Interface de upload segura"""
+    st.header("Upload de Arquivos XML")
+    
+    uploaded_files = st.file_uploader(
+        "Selecione os arquivos XML de CT-e", 
+        type=['xml'], 
+        accept_multiple_files=True,
+        key="mass_upload",
+        help="Selecione até 10.000 arquivos por vez para melhor performance"
+    )
+    
+    if uploaded_files:
+        st.success(f"✅ {len(uploaded_files):,} arquivos selecionados")
+        
+        # Verificar limites
+        if len(uploaded_files) > 10000:
+            st.warning("""
+            ⚠️ **Número elevado de arquivos**
+            Para melhor performance, recomendamos processar até 10.000 arquivos por vez.
+            """)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🚀 Iniciar Processamento", type="primary", use_container_width=True):
+                if len(uploaded_files) > 50000:
+                    st.error("❌ **Limite máximo excedido** - Máximo: 50.000 arquivos")
+                else:
+                    process_uploaded_files_safe(uploaded_files)
+        
+        with col2:
+            if st.button("🔄 Reiniciar Sistema", type="secondary", use_container_width=True):
+                reset_processing_state()
+                st.rerun()
+
+def process_uploaded_files_safe(uploaded_files):
+    """Processa arquivos uploadados de forma segura"""
     try:
         # Container de progresso
-        progress_container = st.container()
+        progress_placeholder = st.empty()
         
-        with progress_container:
+        with progress_placeholder.container():
             st.subheader("📈 Progresso do Processamento")
             progress_bar = show_progress_interface()
             
             # Processar arquivos
-            with st.spinner("Iniciando processamento massivo..."):
-                results, errors = process_large_volume(uploaded_files)
+            with st.spinner("Iniciando processamento..."):
+                results, errors = process_large_volume_safe(uploaded_files)
             
-            # Atualizar barra de progresso para 100%
-            if progress_bar:
-                progress_bar.progress(1.0)
-            
-            # Resultados
+            # Resultados finais
             st.success(f"""
             **Processamento Concluído!**
-            - ✅ Arquivos processados: {len(results):,}
-            - ❌ Erros: {len(errors):,}
+            - ✅ Arquivos processados com sucesso: {len(results):,}
+            - ❌ Erros encontrados: {len(errors):,}
             - 📊 Taxa de sucesso: {(len(results)/len(uploaded_files))*100:.1f}%
             """)
             
@@ -430,58 +501,23 @@ def process_massive_files(uploaded_files):
             
             # Mostrar erros se houver
             if errors:
-                with st.expander("📋 Detalhes dos Erros"):
-                    for error in errors[:100]:  # Mostrar apenas os 100 primeiros erros
+                with st.expander("📋 Detalhes dos Erros (Primeiros 50)"):
+                    for error in errors[:50]:
                         st.error(error)
-                    if len(errors) > 100:
-                        st.info(f"... e mais {len(errors) - 100} erros")
+                    if len(errors) > 50:
+                        st.info(f"... e mais {len(errors) - 50} erros")
             
             # Limpar memória
             gc.collect()
             
     except Exception as e:
-        st.error(f"Erro durante o processamento massivo: {str(e)}")
+        st.error(f"Erro durante o processamento: {str(e)}")
         st.code(traceback.format_exc())
 
-def process_zip_file(zip_file):
-    """Processa arquivos de um ZIP"""
-    try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Extrair ZIP
-            with zipfile.ZipFile(zip_file, 'r') as zip_ref:
-                zip_ref.extractall(temp_dir)
-            
-            # Encontrar arquivos XML
-            xml_files = []
-            for root, dirs, files in os.walk(temp_dir):
-                for file in files:
-                    if file.lower().endswith('.xml'):
-                        xml_files.append(os.path.join(root, file))
-            
-            if not xml_files:
-                st.error("Nenhum arquivo XML encontrado no ZIP")
-                return
-            
-            st.success(f"Encontrados {len(xml_files):,} arquivos XML")
-            
-            # Processar em lotes menores
-            batch_size = 5000
-            for i in range(0, len(xml_files), batch_size):
-                batch_files = xml_files[i:i + batch_size]
-                st.info(f"Processando lote {i//batch_size + 1}/{(len(xml_files)-1)//batch_size + 1}")
-                
-                # Aqui você implementaria o processamento do lote
-                # Por simplicidade, vamos pular a implementação completa
-                
-            st.success("Processamento do ZIP concluído!")
-            
-    except Exception as e:
-        st.error(f"Erro ao processar ZIP: {str(e)}")
-
-def show_dashboard():
-    """Mostra dashboard com os dados processados"""
+def show_dashboard_interface():
+    """Dashboard seguro para dados processados"""
     if not st.session_state.processed_data:
-        st.info("Nenhum dado processado ainda. Faça upload de arquivos na aba 'Upload Massivo'.")
+        st.info("💡 Nenhum dado processado ainda. Faça upload de arquivos XML na aba 'Upload'.")
         return
     
     df = pd.DataFrame(st.session_state.processed_data)
@@ -490,13 +526,15 @@ def show_dashboard():
     # Filtros rápidos
     col1, col2, col3 = st.columns(3)
     with col1:
-        uf_filter = st.multiselect("Filtrar por UF", options=df['UF Início'].unique())
+        uf_options = [uf for uf in df['UF Início'].unique() if uf != 'N/A']
+        uf_filter = st.multiselect("Filtrar por UF", options=uf_options)
     with col2:
-        tipo_peso_filter = st.multiselect("Filtrar por Tipo de Peso", 
-                                         options=df['Tipo de Peso Encontrado'].unique())
+        tipo_options = [tipo for tipo in df['Tipo de Peso Encontrado'].unique() if tipo != 'N/A']
+        tipo_peso_filter = st.multiselect("Filtrar por Tipo de Peso", options=tipo_options)
     with col3:
+        # Amostragem para grandes volumes
         if len(df) > 10000:
-            sample_size = st.slider("Amostra para visualização", 1000, 10000, 5000)
+            sample_size = st.slider("Amostra para gráficos", 1000, 10000, 5000)
             df_display = df.sample(min(sample_size, len(df)))
         else:
             df_display = df
@@ -508,34 +546,41 @@ def show_dashboard():
         df_display = df_display[df_display['Tipo de Peso Encontrado'].isin(tipo_peso_filter)]
     
     # Métricas
+    st.subheader("📈 Métricas Principais")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Valor Total", f"R$ {df_display['Valor Prestação'].sum():,.0f}")
     col2.metric("Peso Total", f"{df_display['Peso Bruto (kg)'].sum():,.0f} kg")
     col3.metric("CT-es com NFe", f"{df_display[df_display['Chave NFe'] != 'N/A'].shape[0]:,}")
     col4.metric("Tipos de Peso", df_display['Tipo de Peso Encontrado'].nunique())
     
-    # Gráficos otimizados para grandes volumes
+    # Gráficos
     if len(df_display) > 0:
         col1, col2 = st.columns(2)
         
         with col1:
             # Gráfico de distribuição por UF
             uf_counts = df_display['UF Início'].value_counts().head(10)
-            fig_uf = px.bar(uf_counts, x=uf_counts.values, y=uf_counts.index, 
-                           orientation='h', title="Top 10 UFs")
-            st.plotly_chart(fig_use_container_width=True)
+            if len(uf_counts) > 0:
+                fig_uf = px.bar(uf_counts, x=uf_counts.values, y=uf_counts.index, 
+                               orientation='h', title="Top 10 UFs")
+                st.plotly_chart(fig_uf, use_container_width=True)
         
         with col2:
             # Gráfico de tipos de peso
             tipo_counts = df_display['Tipo de Peso Encontrado'].value_counts()
-            fig_tipo = px.pie(tipo_counts, values=tipo_counts.values, 
-                             names=tipo_counts.index, title="Distribuição por Tipo de Peso")
-            st.plotly_chart(fig_tipo, use_container_width=True)
+            if len(tipo_counts) > 0:
+                fig_tipo = px.pie(tipo_counts, values=tipo_counts.values, 
+                                 names=tipo_counts.index, title="Distribuição por Tipo de Peso")
+                st.plotly_chart(fig_tipo, use_container_width=True)
+        
+        # Tabela de preview
+        with st.expander("📋 Visualizar Dados (Primeiras 100 linhas)"):
+            st.dataframe(df_display.head(100), use_container_width=True)
 
 def show_export_interface():
-    """Interface de exportação otimizada"""
+    """Interface de exportação segura"""
     if not st.session_state.processed_data:
-        st.info("Nenhum dado para exportar. Processe alguns arquivos primeiro.")
+        st.info("💡 Nenhum dado para exportar. Processe alguns arquivos primeiro.")
         return
     
     df = pd.DataFrame(st.session_state.processed_data)
@@ -543,78 +588,52 @@ def show_export_interface():
     
     # Opções de exportação
     export_option = st.radio("Formato de exportação:", 
-                           ["CSV (.csv) - Recomendado", "Excel (.xlsx) - Até 100k registros"])
+                           ["CSV (.csv) - Recomendado para grandes volumes", 
+                            "Excel (.xlsx) - Até 100.000 registros"])
     
     # Seleção de colunas
     st.subheader("Selecionar Colunas para Exportação")
     todas_colunas = df.columns.tolist()
+    colunas_principais = [col for col in todas_colunas if col not in ['Data Processamento', 'Documento Destinatário']]
+    
     colunas_selecionadas = st.multiselect(
         "Selecione as colunas para exportar:",
         options=todas_colunas,
-        default=todas_colunas[:10]  # Colunas principais por padrão
+        default=colunas_principais
     )
     
-    if colunas_selecionadas:
+    if colunas_selecionadas and st.button("💾 Gerar Arquivo de Exportação", type="primary"):
         df_export = df[colunas_selecionadas]
         
-        if export_option.startswith("CSV"):
-            if st.button("💾 Gerar Arquivo CSV"):
-                with st.spinner("Gerando CSV..."):
-                    csv_data = export_large_dataframe(df_export, "CSV")
-                    if csv_data:
-                        st.download_button(
-                            label=f"📥 Baixar CSV ({len(df_export):,} registros)",
-                            data=csv_data,
-                            file_name="dados_cte_massivo.csv",
-                            mime="text/csv"
-                        )
-        
-        else:  # Excel
-            if st.button("💾 Gerar Arquivo Excel"):
-                with st.spinner("Gerando Excel..."):
-                    excel_data = export_large_dataframe(df_export, "Excel")
-                    if excel_data:
-                        st.download_button(
-                            label=f"📥 Baixar Excel ({len(df_export):,} registros)",
-                            data=excel_data,
-                            file_name="dados_cte_massivo.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
+        with st.spinner("Gerando arquivo de exportação..."):
+            try:
+                if export_option.startswith("CSV"):
+                    csv_data = df_export.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label=f"📥 Baixar CSV ({len(df_export):,} registros)",
+                        data=csv_data,
+                        file_name="dados_cte_massivo.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                else:
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                        df_export.to_excel(writer, sheet_name='Dados_CTe', index=False)
+                    output.seek(0)
+                    
+                    st.download_button(
+                        label=f"📥 Baixar Excel ({len(df_export):,} registros)",
+                        data=output,
+                        file_name="dados_cte_massivo.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+                    
+            except Exception as e:
+                st.error(f"Erro na exportação: {str(e)}")
 
-def show_configurations():
-    """Configurações do sistema"""
-    st.header("⚙️ Configurações de Performance")
-    
-    st.subheader("Otimizações para Grande Volume")
-    st.markdown("""
-    **Técnicas Implementadas:**
-    - 🚀 **Processamento Paralelo**: Múltiplas threads para máximo desempenho
-    - 📦 **Processamento em Lote**: Divisão inteligente em lotes de 1.000 arquivos
-    - 🧹 **Gerenciamento de Memória**: Limpeza automática durante o processamento
-    - ⏱️ **Timeouts Individuais**: Prevenção de travamentos por arquivo
-    - 🔄 **Controle de Progresso**: Monitoramento em tempo real
-    """)
-    
-    st.subheader("Limites Recomendados")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("""
-        **Por Lote:**
-        - ✅ Até 10.000 arquivos
-        - ✅ Processamento: 2-5 minutos
-        - ✅ Uso de memória: ~1-2GB
-        """)
-    
-    with col2:
-        st.markdown("""
-        **Total:**
-        - ✅ Ilimitado (em lotes)
-        - ✅ Recomendado: 50.000 por sessão
-        - ✅ Máximo testado: 100.000 arquivos
-        """)
-
-# --- CSS OTIMIZADO ---
+# --- CSS ---
 def load_css():
     st.markdown("""
     <style>
@@ -627,42 +646,35 @@ def load_css():
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
-        .metric-card {
-            background: white;
-            border-radius: 10px;
-            padding: 1rem;
-            margin: 0.5rem 0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .progress-container {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 1.5rem;
-            margin: 1rem 0;
+        .stButton>button {
+            width: 100%;
         }
     </style>
     """, unsafe_allow_html=True)
 
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
-    """Função principal otimizada"""
-    load_css()
-    
-    st.markdown('<div class="main-header">⚡ Sistema de Processamento Massivo de CT-e</div>', 
-                unsafe_allow_html=True)
-    st.markdown("### Capacidade para processar mais de 50.000 arquivos XML")
-    
-    # Verificar se há dados em processamento
-    if (st.session_state.processing_status['total'] > 0 and 
-        st.session_state.processing_status['processed'] < st.session_state.processing_status['total']):
-        st.warning("🔄 Processamento em andamento...")
-        show_progress_interface()
-    
-    processador_cte_massivo()
+    """Função principal com tratamento seguro de erros"""
+    try:
+        # Garantir que o session state está inicializado
+        initialize_session_state()
+        
+        load_css()
+        
+        st.markdown('<div class="main-header">⚡ Sistema de Processamento Massivo de CT-e</div>', 
+                    unsafe_allow_html=True)
+        st.markdown("### Processamento seguro para grandes volumes de XML")
+        
+        processador_cte_massivo()
+        
+    except Exception as e:
+        st.error(f"Erro crítico na aplicação: {str(e)}")
+        st.code(traceback.format_exc())
+        
+        # Tentar recuperar
+        if st.button("🔄 Tentar Recuperar"):
+            initialize_session_state()
+            st.rerun()
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        st.error(f"Erro crítico: {str(e)}")
-        st.code(traceback.format_exc())
+    main()
