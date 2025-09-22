@@ -175,7 +175,7 @@ def processador_txt():
                 st.error(f"Erro inesperado: {str(e)}")
                 st.info("Tente novamente ou verifique o arquivo.")
 
-# --- PROCESSADOR CT-E COM EXTRAÇÃO DO PESO BRUTO ---
+# --- PROCESSADOR CT-E COM EXTRAÇÃO DO PESO BRUTO E PESO BASE DE CÁLCULO ---
 class CTeProcessorDirect:
     def __init__(self):
         self.processed_data = []
@@ -192,7 +192,7 @@ class CTeProcessorDirect:
             return None
     
     def extract_peso_bruto(self, root):
-        """Extrai o peso bruto do CT-e"""
+        """Extrai o peso bruto do CT-e - BUSCA EM PESO BRUTO E PESO BASE DE CÁLCULO"""
         try:
             def find_text(element, xpath):
                 try:
@@ -209,16 +209,22 @@ class CTeProcessorDirect:
                 except Exception:
                     return None
             
-            # Busca por todas as tags infQ
+            # Lista de tipos de peso a serem procurados (em ordem de prioridade)
+            tipos_peso = ['PESO BRUTO', 'PESO BASE DE CALCULO', 'PESO BASE CÁLCULO', 'PESO']
+            
+            # Busca por todas as tags infQ com namespaces
             for prefix, uri in CTE_NAMESPACES.items():
                 infQ_elements = root.findall(f'.//{{{uri}}}infQ')
                 for infQ in infQ_elements:
                     tpMed = infQ.find(f'{{{uri}}}tpMed')
                     qCarga = infQ.find(f'{{{uri}}}qCarga')
                     
-                    if (tpMed is not None and tpMed.text == 'PESO BRUTO' and 
-                        qCarga is not None and qCarga.text):
-                        return float(qCarga.text)
+                    if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
+                        # Verifica cada tipo de peso na ordem de prioridade
+                        for tipo_peso in tipos_peso:
+                            if tipo_peso in tpMed.text.upper():
+                                peso = float(qCarga.text)
+                                return peso, tipo_peso  # Retorna o peso e o tipo encontrado
             
             # Tentativa alternativa sem namespace
             infQ_elements = root.findall('.//infQ')
@@ -226,15 +232,17 @@ class CTeProcessorDirect:
                 tpMed = infQ.find('tpMed')
                 qCarga = infQ.find('qCarga')
                 
-                if (tpMed is not None and tpMed.text == 'PESO BRUTO' and 
-                    qCarga is not None and qCarga.text):
-                    return float(qCarga.text)
+                if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
+                    for tipo_peso in tipos_peso:
+                        if tipo_peso in tpMed.text.upper():
+                            peso = float(qCarga.text)
+                            return peso, tipo_peso
             
-            return 0.0
+            return 0.0, "Não encontrado"
             
         except Exception as e:
-            st.warning(f"Não foi possível extrair o peso bruto: {str(e)}")
-            return 0.0
+            st.warning(f"Não foi possível extrair o peso: {str(e)}")
+            return 0.0, "Erro na extração"
     
     def extract_cte_data(self, xml_content, filename):
         """Extrai dados específicos do CT-e incluindo peso bruto"""
@@ -307,8 +315,8 @@ class CTeProcessorDirect:
             infNFe_chave = find_text(root, './/cte:infNFe/cte:chave')
             numero_nfe = self.extract_nfe_number_from_key(infNFe_chave) if infNFe_chave else None
             
-            # EXTRAI O PESO BRUTO
-            peso_bruto = self.extract_peso_bruto(root)
+            # EXTRAI O PESO BRUTO - AGORA COM BUSCA EM MÚLTIPLOS CAMPOS
+            peso_bruto, tipo_peso_encontrado = self.extract_peso_bruto(root)
             
             # Formata data
             data_formatada = None
@@ -342,6 +350,7 @@ class CTeProcessorDirect:
                 'Emitente': emit_xNome or 'N/A',
                 'Valor Prestação': vTPrest,
                 'Peso Bruto (kg)': peso_bruto,
+                'Tipo de Peso Encontrado': tipo_peso_encontrado,  # NOVO CAMPO
                 'Remetente': rem_xNome or 'N/A',
                 'Destinatário': dest_xNome or 'N/A',
                 'Documento Destinatário': documento_destinatario,
@@ -455,13 +464,32 @@ def processador_cte():
     st.title("🚚 Processador de CT-e para Power BI")
     st.markdown("### Processa arquivos XML de CT-e e gera planilha para análise")
     
-    with st.expander("ℹ️ Informações sobre a extração do Peso Bruto", expanded=False):
+    with st.expander("ℹ️ Informações sobre a extração do Peso", expanded=True):
         st.markdown("""
-        **Extração do Peso Bruto:**
+        **Extração do Peso - Busca Inteligente:**
         
-        - O sistema extrai automaticamente o **Peso Bruto** do campo específico no XML
-        - Localização: `<infQ><tpMed>PESO BRUTO</tpMed><qCarga>319.8000</qCarga></infQ>`
-        - O peso é convertido para quilogramas (kg) e incluído na planilha final
+        O sistema agora busca o peso em **múltiplos campos** na seguinte ordem de prioridade:
+        
+        1. **PESO BRUTO** - Campo principal
+        2. **PESO BASE DE CALCULO** - Campo alternativo 1
+        3. **PESO BASE CÁLCULO** - Campo alternativo 2  
+        4. **PESO** - Campo genérico
+        
+        **Exemplos de campos reconhecidos:**
+        ```xml
+        <infQ>
+            <tpMed>PESO BRUTO</tpMed>
+            <qCarga>319.8000</qCarga>
+        </infQ>
+        ```
+        ```xml
+        <infQ>
+            <tpMed>PESO BASE DE CALCULO</tpMed>
+            <qCarga>250.5000</qCarga>
+        </infQ>
+        ```
+        
+        **Resultado:** O sistema mostrará qual tipo de peso foi encontrado em cada CT-e
         """)
     
     tab1, tab2, tab3 = st.tabs(["📤 Upload", "👀 Visualizar Dados", "📥 Exportar"])
@@ -484,7 +512,11 @@ def processador_cte():
                     df = processor.get_dataframe()
                     if not df.empty:
                         ultimo_cte = df.iloc[-1]
-                        st.info(f"**Peso Bruto extraído:** {ultimo_cte['Peso Bruto (kg)']} kg")
+                        st.info(f"""
+                        **Extração bem-sucedida:**
+                        - **Peso encontrado:** {ultimo_cte['Peso Bruto (kg)']} kg
+                        - **Tipo de peso:** {ultimo_cte['Tipo de Peso Encontrado']}
+                        """)
                 else:
                     st.error(message)
         
@@ -507,14 +539,19 @@ def processador_cte():
                 
                 df = processor.get_dataframe()
                 if not df.empty:
-                    ctes_com_nfe = df[df['Chave NFe'] != 'N/A'].shape[0]
+                    # Estatísticas dos tipos de peso encontrados
+                    tipos_peso = df['Tipo de Peso Encontrado'].value_counts()
                     peso_total = df['Peso Bruto (kg)'].sum()
+                    
                     st.info(f"""
                     **Estatísticas de extração:**
-                    - CT-es com NF-e: {ctes_com_nfe}
                     - Peso bruto total: {peso_total:,.2f} kg
                     - Peso médio por CT-e: {df['Peso Bruto (kg)'].mean():,.2f} kg
+                    - Tipos de peso encontrados:
                     """)
+                    
+                    for tipo, quantidade in tipos_peso.items():
+                        st.write(f"  - **{tipo}**: {quantidade} CT-e(s)")
                 
                 if results['errors'] > 0:
                     with st.expander("Ver mensagens detalhadas"):
@@ -541,10 +578,13 @@ def processador_cte():
             with col2:
                 uf_destino_filter = st.multiselect("Filtrar por UF Destino", options=df['UF Destino'].unique())
             with col3:
-                peso_filter = st.slider("Filtrar por Peso Bruto (kg)", 
-                                      float(df['Peso Bruto (kg)'].min()), 
-                                      float(df['Peso Bruto (kg)'].max()),
-                                      (float(df['Peso Bruto (kg)'].min()), float(df['Peso Bruto (kg)'].max())))
+                tipo_peso_filter = st.multiselect("Filtrar por Tipo de Peso", options=df['Tipo de Peso Encontrado'].unique())
+            
+            # Filtro de peso
+            st.subheader("Filtro por Peso Bruto")
+            peso_min = float(df['Peso Bruto (kg)'].min())
+            peso_max = float(df['Peso Bruto (kg)'].max())
+            peso_filter = st.slider("Selecione a faixa de peso (kg)", peso_min, peso_max, (peso_min, peso_max))
             
             # Aplicar filtros
             filtered_df = df.copy()
@@ -552,6 +592,8 @@ def processador_cte():
                 filtered_df = filtered_df[filtered_df['UF Início'].isin(uf_filter)]
             if uf_destino_filter:
                 filtered_df = filtered_df[filtered_df['UF Destino'].isin(uf_destino_filter)]
+            if tipo_peso_filter:
+                filtered_df = filtered_df[filtered_df['Tipo de Peso Encontrado'].isin(tipo_peso_filter)]
             filtered_df = filtered_df[
                 (filtered_df['Peso Bruto (kg)'] >= peso_filter[0]) & 
                 (filtered_df['Peso Bruto (kg)'] <= peso_filter[1])
@@ -560,7 +602,8 @@ def processador_cte():
             # Exibir dataframe
             colunas_principais = [
                 'Arquivo', 'nCT', 'Data Emissão', 'Emitente', 'Remetente', 
-                'Destinatário', 'UF Início', 'UF Destino', 'Peso Bruto (kg)', 'Valor Prestação'
+                'Destinatário', 'UF Início', 'UF Destino', 'Peso Bruto (kg)', 
+                'Tipo de Peso Encontrado', 'Valor Prestação'
             ]
             
             st.dataframe(filtered_df[colunas_principais], use_container_width=True)
@@ -575,38 +618,33 @@ def processador_cte():
             col1.metric("Total Valor Prestação", f"R$ {filtered_df['Valor Prestação'].sum():,.2f}")
             col2.metric("Peso Bruto Total", f"{filtered_df['Peso Bruto (kg)'].sum():,.2f} kg")
             col3.metric("Média Peso/CT-e", f"{filtered_df['Peso Bruto (kg)'].mean():,.2f} kg")
-            col4.metric("CT-es com NFe", f"{filtered_df[filtered_df['Chave NFe'] != 'N/A'].shape[0]}")
+            col4.metric("Tipos de Peso", f"{filtered_df['Tipo de Peso Encontrado'].nunique()}")
             
-            if not filtered_df.empty:
-                exemplo = filtered_df.iloc[0]
-                st.info(f"**Exemplo de extração:** Peso Bruto = {exemplo['Peso Bruto (kg)']} kg")
-            
-            # Gráficos - CORRIGIDO: sem dependência do statsmodels
+            # Gráficos
             col_chart1, col_chart2 = st.columns(2)
             
             with col_chart1:
-                st.subheader("📊 Distribuição por Peso Bruto")
+                st.subheader("📊 Distribuição por Tipo de Peso")
                 if not filtered_df.empty:
-                    fig_peso = px.histogram(
-                        filtered_df, 
-                        x='Peso Bruto (kg)',
-                        title="Distribuição dos CT-es por Peso Bruto",
-                        nbins=20
+                    tipo_counts = filtered_df['Tipo de Peso Encontrado'].value_counts()
+                    fig_tipo = px.pie(
+                        values=tipo_counts.values,
+                        names=tipo_counts.index,
+                        title="Distribuição por Tipo de Peso Encontrado"
                     )
-                    st.plotly_chart(fig_peso, use_container_width=True)
+                    st.plotly_chart(fig_tipo, use_container_width=True)
             
             with col_chart2:
                 st.subheader("📈 Relação Peso x Valor")
                 if not filtered_df.empty:
-                    # Gráfico de dispersão sem trendline problemático
                     fig_relacao = px.scatter(
                         filtered_df,
                         x='Peso Bruto (kg)',
                         y='Valor Prestação',
-                        title="Relação entre Peso Bruto e Valor da Prestação"
+                        title="Relação entre Peso Bruto e Valor da Prestação",
+                        color='Tipo de Peso Encontrado'
                     )
                     
-                    # Adiciona linha de tendência simples se desejado
                     if st.checkbox("Mostrar linha de tendência", key="trendline"):
                         add_simple_trendline(fig_relacao, 
                                            filtered_df['Peso Bruto (kg)'].values, 
