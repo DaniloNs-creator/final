@@ -437,6 +437,10 @@ def load_css():
             margin-bottom: 2rem;
             text-align: center;
         }
+        .cover-logo {
+            max-width: 300px;
+            margin-bottom: 1.5rem;
+        }
         .cover-title {
             font-size: 2.8rem;
             font-weight: 800;
@@ -444,6 +448,11 @@ def load_css():
             background: linear-gradient(90deg, #2c3e50, #3498db);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+        }
+        .cover-subtitle {
+            font-size: 1.2rem;
+            color: #7f8c8d;
+            margin-bottom: 0;
         }
         .header {
             font-size: 1.8rem;
@@ -470,9 +479,10 @@ def main():
     """Função principal que gerencia o fluxo da aplicação."""
     load_css()
     
-    # Mostrar capa
+    # Mostrar capa com a imagem
     st.markdown("""
     <div class="cover-container">
+        <img src="https://raw.githubusercontent.com/DaniloNs-creator/final/7ea6ab2a610ef8f0c11be3c34f046e7ff2cdfc6a/haefele_logo.png" class="cover-logo">
         <h1 class="cover-title">Sistema de Processamento de Arquivos</h1>
         <p class="cover-subtitle">Processamento de TXT e CT-e para análise de dados</p>
     </div>
