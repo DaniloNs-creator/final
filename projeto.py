@@ -1,680 +1,757 @@
 import streamlit as st
+import sqlite3
+from datetime import datetime, timedelta, date
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
+import random
+from typing import List, Tuple, Optional
+import io
+import contextlib
+import chardet
 from io import BytesIO
+import base64
 import time
 import xml.etree.ElementTree as ET
-import traceback
-import numpy as np
 import os
-import gc
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import tempfile
-import zipfile
-import threading
-from threading import Lock
-import json
-
-# --- INICIALIZAÇÃO COMPLETA DO SESSION STATE ---
-def initialize_session_state():
-    """Inicializa todas as variáveis do session state"""
-    if 'processing_status' not in st.session_state:
-        st.session_state.processing_status = {
-            'processed': 0, 
-            'total': 0, 
-            'errors': 0, 
-            'current_file': '',
-            'is_processing': False
-        }
-    
-    if 'processed_data' not in st.session_state:
-        st.session_state.processed_data = []
-    
-    if 'processing_lock' not in st.session_state:
-        st.session_state.processing_lock = Lock()
-    
-    if 'stop_processing' not in st.session_state:
-        st.session_state.stop_processing = False
-    
-    if 'current_batch' not in st.session_state:
-        st.session_state.current_batch = 0
-    
-    if 'total_batches' not in st.session_state:
-        st.session_state.total_batches = 0
+import hashlib
+import xml.dom.minidom
+import traceback
+from pathlib import Path
+import numpy as np
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(
-    page_title="Sistema de Processamento Massivo",
-    page_icon="⚡",
+    page_title="Sistema de Processamento",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Inicializar session state
-initialize_session_state()
-
 # Namespaces para CT-e
-CTE_NAMESPACES = {'cte': 'http://www.portalfiscal.inf.br/cte'}
+CTE_NAMESPACES = {
+    'cte': 'http://www.portalfiscal.inf.br/cte'
+}
 
-# --- SISTEMA DE CACHE E ARMAZENAMENTO OTIMIZADO ---
-class CTEProcessorOptimized:
+# Inicialização do estado da sessão
+if 'selected_xml' not in st.session_state:
+    st.session_state.selected_xml = None
+if 'cte_data' not in st.session_state:
+    st.session_state.cte_data = None
+
+# --- ANIMAÇÕES DE CARREGAMENTO ---
+def show_loading_animation(message="Processando..."):
+    """Exibe uma animação de carregamento"""
+    with st.spinner(message):
+        progress_bar = st.progress(0)
+        for i in range(100):
+            time.sleep(0.01)
+            progress_bar.progress(i + 1)
+        progress_bar.empty()
+
+def show_processing_animation(message="Analisando dados..."):
+    """Exibe animação de processamento"""
+    placeholder = st.empty()
+    with placeholder.container():
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.info(f"⏳ {message}")
+            spinner_placeholder = st.empty()
+            spinner_chars = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]
+            for i in range(20):
+                spinner_placeholder.markdown(f"<div style='text-align: center; font-size: 24px;'>{spinner_chars[i % 8]}</div>", unsafe_allow_html=True)
+                time.sleep(0.1)
+    placeholder.empty()
+
+def show_success_animation(message="Concluído!"):
+    """Exibe animação de sucesso"""
+    success_placeholder = st.empty()
+    with success_placeholder.container():
+        st.success(f"✅ {message}")
+        time.sleep(1.5)
+    success_placeholder.empty()
+
+# --- FUNÇÕES DO PROCESSADOR DE ARQUIVOS ---
+def processador_txt():
+    st.title("📄 Processador de Arquivos TXT")
+    st.markdown("""
+    <div class="card">
+        Remova linhas indesejadas de arquivos TXT. Carregue seu arquivo e defina os padrões a serem removidos.
+    </div>
+    """, unsafe_allow_html=True)
+
+    def detectar_encoding(conteudo):
+        """Detecta o encoding do conteúdo do arquivo"""
+        resultado = chardet.detect(conteudo)
+        return resultado['encoding']
+
+    def processar_arquivo(conteudo, padroes):
+        """
+        Processa o conteúdo do arquivo removendo linhas indesejadas e realizando substituições
+        """
+        try:
+            substituicoes = {
+                "IMPOSTO IMPORTACAO": "IMP IMPORT",
+                "TAXA SICOMEX": "TX SISCOMEX",
+                "FRETE INTERNACIONAL": "FRET INTER",
+                "SEGURO INTERNACIONAL": "SEG INTERN"
+            }
+            
+            encoding = detectar_encoding(conteudo)
+            
+            try:
+                texto = conteudo.decode(encoding)
+            except UnicodeDecodeError:
+                texto = conteudo.decode('latin-1')
+            
+            linhas = texto.splitlines()
+            linhas_processadas = []
+            
+            for linha in linhas:
+                linha = linha.strip()
+                if not any(padrao in linha for padrao in padroes):
+                    for original, substituto in substituicoes.items():
+                        linha = linha.replace(original, substituto)
+                    linhas_processadas.append(linha)
+            
+            return "\n".join(linhas_processadas), len(linhas)
+        
+        except Exception as e:
+            st.error(f"Erro ao processar o arquivo: {str(e)}")
+            return None, 0
+
+    # Padrões padrão para remoção
+    padroes_default = ["-------", "SPED EFD-ICMS/IPI"]
+    
+    # Upload do arquivo
+    arquivo = st.file_uploader("Selecione o arquivo TXT", type=['txt'])
+    
+    # Opções avançadas
+    with st.expander("⚙️ Configurações avançadas", expanded=False):
+        padroes_adicionais = st.text_input(
+            "Padrões adicionais para remoção (separados por vírgula)",
+            help="Exemplo: padrão1, padrão2, padrão3"
+        )
+        
+        padroes = padroes_default + [
+            p.strip() for p in padroes_adicionais.split(",") 
+            if p.strip()
+        ] if padroes_adicionais else padroes_default
+
+    if arquivo is not None:
+        if st.button("🔄 Processar Arquivo TXT"):
+            try:
+                show_loading_animation("Analisando arquivo TXT...")
+                conteudo = arquivo.read()
+                show_processing_animation("Processando linhas...")
+                resultado, total_linhas = processar_arquivo(conteudo, padroes)
+                
+                if resultado is not None:
+                    show_success_animation("Arquivo processado com sucesso!")
+                    
+                    linhas_processadas = len(resultado.splitlines())
+                    st.success(f"""
+                    **Processamento concluído!**  
+                    ✔️ Linhas originais: {total_linhas}  
+                    ✔️ Linhas processadas: {linhas_processadas}  
+                    ✔️ Linhas removidas: {total_linhas - linhas_processadas}
+                    """)
+
+                    st.subheader("Prévia do resultado")
+                    st.text_area("Conteúdo processado", resultado, height=300)
+
+                    buffer = BytesIO()
+                    buffer.write(resultado.encode('utf-8'))
+                    buffer.seek(0)
+                    
+                    st.download_button(
+                        label="⬇️ Baixar arquivo processado",
+                        data=buffer,
+                        file_name=f"processado_{arquivo.name}",
+                        mime="text/plain"
+                    )
+            
+            except Exception as e:
+                st.error(f"Erro inesperado: {str(e)}")
+                st.info("Tente novamente ou verifique o arquivo.")
+
+# --- PROCESSADOR CT-E COM EXTRAÇÃO DO PESO BRUTO ---
+class CTeProcessorDirect:
     def __init__(self):
-        self.batch_size = 500  # Reduzido para melhor estabilidade
-        self.max_workers = 2   # Reduzido para evitar sobrecarga
-        self.chunk_size = 100
+        self.processed_data = []
     
     def extract_nfe_number_from_key(self, chave_acesso):
         """Extrai o número da NF-e da chave de acesso"""
         if not chave_acesso or len(chave_acesso) != 44:
             return None
+        
         try:
-            return chave_acesso[25:34]
+            numero_nfe = chave_acesso[25:34]
+            return numero_nfe
         except Exception:
             return None
     
     def extract_peso_bruto(self, root):
-        """Extrai o peso bruto do CT-e - BUSCA EM MÚLTIPLOS CAMPOS"""
+        """Extrai o peso bruto do CT-e"""
         try:
-            tipos_peso = ['PESO BRUTO', 'PESO BASE DE CALCULO', 'PESO BASE CÁLCULO', 'PESO']
+            def find_text(element, xpath):
+                try:
+                    for prefix, uri in CTE_NAMESPACES.items():
+                        full_xpath = xpath.replace('cte:', f'{{{uri}}}')
+                        found = element.find(full_xpath)
+                        if found is not None and found.text:
+                            return found.text
+                    
+                    found = element.find(xpath.replace('cte:', ''))
+                    if found is not None and found.text:
+                        return found.text
+                    return None
+                except Exception:
+                    return None
             
-            # Busca com namespace
+            # Busca por todas as tags infQ
             for prefix, uri in CTE_NAMESPACES.items():
                 infQ_elements = root.findall(f'.//{{{uri}}}infQ')
                 for infQ in infQ_elements:
                     tpMed = infQ.find(f'{{{uri}}}tpMed')
                     qCarga = infQ.find(f'{{{uri}}}qCarga')
                     
-                    if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
-                        for tipo_peso in tipos_peso:
-                            if tipo_peso in tpMed.text.upper():
-                                return float(qCarga.text), tipo_peso
+                    if (tpMed is not None and tpMed.text == 'PESO BRUTO' and 
+                        qCarga is not None and qCarga.text):
+                        return float(qCarga.text)
             
-            # Busca sem namespace
+            # Tentativa alternativa sem namespace
             infQ_elements = root.findall('.//infQ')
             for infQ in infQ_elements:
                 tpMed = infQ.find('tpMed')
                 qCarga = infQ.find('qCarga')
                 
-                if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
-                    for tipo_peso in tipos_peso:
-                        if tipo_peso in tpMed.text.upper():
-                            return float(qCarga.text), tipo_peso
+                if (tpMed is not None and tpMed.text == 'PESO BRUTO' and 
+                    qCarga is not None and qCarga.text):
+                    return float(qCarga.text)
             
-            return 0.0, "Não encontrado"
+            return 0.0
             
-        except Exception:
-            return 0.0, "Erro na extração"
+        except Exception as e:
+            st.warning(f"Não foi possível extrair o peso bruto: {str(e)}")
+            return 0.0
     
-    def extract_cte_data_fast(self, xml_content, filename):
-        """Extrai dados do CT-e de forma otimizada"""
+    def extract_cte_data(self, xml_content, filename):
+        """Extrai dados específicos do CT-e incluindo peso bruto"""
         try:
-            # Parse rápido do XML
             root = ET.fromstring(xml_content)
             
-            # Função auxiliar otimizada
-            def find_text_fast(element, tag_name):
+            for prefix, uri in CTE_NAMESPACES.items():
+                ET.register_namespace(prefix, uri)
+            
+            def find_text(element, xpath):
                 try:
-                    # Tentar com namespace primeiro
                     for prefix, uri in CTE_NAMESPACES.items():
-                        found = element.find(f'.//{{{uri}}}{tag_name}')
+                        full_xpath = xpath.replace('cte:', f'{{{uri}}}')
+                        found = element.find(full_xpath)
                         if found is not None and found.text:
                             return found.text
-                    # Tentar sem namespace
-                    found = element.find(f'.//{tag_name}')
-                    return found.text if found is not None and found.text else None
+                    
+                    found = element.find(xpath.replace('cte:', ''))
+                    if found is not None and found.text:
+                        return found.text
+                    return None
                 except Exception:
                     return None
             
-            # Extração otimizada dos dados
-            nCT = find_text_fast(root, 'nCT')
-            dhEmi = find_text_fast(root, 'dhEmi')
-            emit_xNome = find_text_fast(root, 'xNome')  # Buscar em qualquer nível
-            vTPrest = find_text_fast(root, 'vTPrest')
-            rem_xNome = find_text_fast(root, 'xNome')  # Buscar remetente
-            dest_xNome = find_text_fast(root, 'xNome')  # Buscar destinatário
-            UFIni = find_text_fast(root, 'UFIni')
-            UFFim = find_text_fast(root, 'UFFim')
-            infNFe_chave = find_text_fast(root, 'chave')
+            # Extrai dados do CT-e
+            nCT = find_text(root, './/cte:nCT')
+            dhEmi = find_text(root, './/cte:dhEmi')
+            cMunIni = find_text(root, './/cte:cMunIni')
+            UFIni = find_text(root, './/cte:UFIni')
+            cMunFim = find_text(root, './/cte:cMunFim')
+            UFFim = find_text(root, './/cte:UFFim')
+            emit_xNome = find_text(root, './/cte:emit/cte:xNome')
+            vTPrest = find_text(root, './/cte:vTPrest')
+            rem_xNome = find_text(root, './/cte:rem/cte:xNome')
             
-            # Buscar mais específico para emitente, remetente, destinatário
-            if not emit_xNome:
-                emit_xNome = find_text_fast(root, 'emit/xNome')
-            if not rem_xNome:
-                rem_xNome = find_text_fast(root, 'rem/xNome')
-            if not dest_xNome:
-                dest_xNome = find_text_fast(root, 'dest/xNome')
+            # Extrai dados do destinatário
+            dest_xNome = find_text(root, './/cte:dest/cte:xNome')
+            dest_CNPJ = find_text(root, './/cte:dest/cte:CNPJ')
+            dest_CPF = find_text(root, './/cte:dest/cte:CPF')
             
-            # Buscar CNPJ/CPF do destinatário
-            dest_CNPJ = find_text_fast(root, 'dest/CNPJ')
-            dest_CPF = find_text_fast(root, 'dest/CPF')
+            documento_destinatario = dest_CNPJ or dest_CPF or 'N/A'
             
-            # Extrai peso
-            peso_bruto, tipo_peso = self.extract_peso_bruto(root)
+            # Extrai endereço do destinatário
+            dest_xLgr = find_text(root, './/cte:dest/cte:enderDest/cte:xLgr')
+            dest_nro = find_text(root, './/cte:dest/cte:enderDest/cte:nro')
+            dest_xBairro = find_text(root, './/cte:dest/cte:enderDest/cte:xBairro')
+            dest_cMun = find_text(root, './/cte:dest/cte:enderDest/cte:cMun')
+            dest_xMun = find_text(root, './/cte:dest/cte:enderDest/cte:xMun')
+            dest_CEP = find_text(root, './/cte:dest/cte:enderDest/cte:CEP')
+            dest_UF = find_text(root, './/cte:dest/cte:enderDest/cte:UF')
             
-            # Formatação otimizada da data
+            # Monta endereço completo
+            endereco_destinatario = ""
+            if dest_xLgr:
+                endereco_destinatario += f"{dest_xLgr}"
+                if dest_nro:
+                    endereco_destinatario += f", {dest_nro}"
+                if dest_xBairro:
+                    endereco_destinatario += f" - {dest_xBairro}"
+                if dest_xMun:
+                    endereco_destinatario += f", {dest_xMun}"
+                if dest_UF:
+                    endereco_destinatario += f"/{dest_UF}"
+                if dest_CEP:
+                    endereco_destinatario += f" - CEP: {dest_CEP}"
+            
+            if not endereco_destinatario:
+                endereco_destinatario = "N/A"
+            
+            infNFe_chave = find_text(root, './/cte:infNFe/cte:chave')
+            numero_nfe = self.extract_nfe_number_from_key(infNFe_chave) if infNFe_chave else None
+            
+            # EXTRAI O PESO BRUTO
+            peso_bruto = self.extract_peso_bruto(root)
+            
+            # Formata data
             data_formatada = None
             if dhEmi:
                 try:
-                    data_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
+                    try:
+                        data_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
+                    except:
+                        try:
+                            data_obj = datetime.strptime(dhEmi[:10], '%d/%m/%Y')
+                        except:
+                            data_obj = datetime.strptime(dhEmi[:10], '%d/%m/%y')
                     data_formatada = data_obj.strftime('%d/%m/%y')
                 except:
-                    try:
-                        data_obj = datetime.strptime(dhEmi[:10], '%d/%m/%Y')
-                        data_formatada = data_obj.strftime('%d/%m/%y')
-                    except:
-                        data_formatada = dhEmi[:10]
+                    data_formatada = dhEmi[:10]
             
-            # Conversão de valores
+            # Converte valor para decimal
             try:
                 vTPrest = float(vTPrest) if vTPrest else 0.0
             except (ValueError, TypeError):
                 vTPrest = 0.0
             
-            documento_destinatario = dest_CNPJ or dest_CPF or 'N/A'
-            numero_nfe = self.extract_nfe_number_from_key(infNFe_chave) if infNFe_chave else None
-            
             return {
                 'Arquivo': filename,
                 'nCT': nCT or 'N/A',
-                'Data Emissão': data_formatada or 'N/A',
+                'Data Emissão': data_formatada or dhEmi or 'N/A',
+                'Código Município Início': cMunIni or 'N/A',
                 'UF Início': UFIni or 'N/A',
+                'Código Município Fim': cMunFim or 'N/A',
                 'UF Fim': UFFim or 'N/A',
                 'Emitente': emit_xNome or 'N/A',
                 'Valor Prestação': vTPrest,
                 'Peso Bruto (kg)': peso_bruto,
-                'Tipo de Peso Encontrado': tipo_peso,
                 'Remetente': rem_xNome or 'N/A',
                 'Destinatário': dest_xNome or 'N/A',
                 'Documento Destinatário': documento_destinatario,
+                'Endereço Destinatário': endereco_destinatario,
+                'Município Destino': dest_xMun or 'N/A',
+                'UF Destino': dest_UF or 'N/A',
                 'Chave NFe': infNFe_chave or 'N/A',
                 'Número NFe': numero_nfe or 'N/A',
                 'Data Processamento': datetime.now().strftime('%d/%m/%Y %H:%M:%S')
             }
             
         except Exception as e:
-            return {'error': f"Erro no arquivo {filename}: {str(e)}"}
+            st.error(f"Erro ao extrair dados do CT-e {filename}: {str(e)}")
+            return None
     
-    def process_single_file(self, file_content, filename):
-        """Processa um único arquivo com verificação de parada"""
+    def process_single_file(self, uploaded_file):
+        """Processa um único arquivo XML de CT-e"""
         try:
-            # Verificar se o processamento foi interrompido
-            if st.session_state.stop_processing:
-                return {'error': 'Processamento interrompido pelo usuário'}
-                
+            file_content = uploaded_file.getvalue()
+            filename = uploaded_file.name
+            
+            if not filename.lower().endswith('.xml'):
+                return False, "Arquivo não é XML"
+            
             content_str = file_content.decode('utf-8', errors='ignore')
             if 'CTe' not in content_str and 'conhecimento' not in content_str.lower():
-                return {'error': f'Arquivo {filename} não é um CT-e válido'}
+                return False, "Arquivo não parece ser um CT-e"
             
-            return self.extract_cte_data_fast(content_str, filename)
+            cte_data = self.extract_cte_data(content_str, filename)
             
+            if cte_data:
+                self.processed_data.append(cte_data)
+                return True, f"CT-e {filename} processado com sucesso!"
+            else:
+                return False, f"Erro ao processar CT-e {filename}"
+                
         except Exception as e:
-            return {'error': f'Erro ao processar {filename}: {str(e)}'}
-
-# --- SISTEMA DE PROGRESSO E STATUS ---
-def update_progress(current, total, current_file="", errors=0, is_processing=False):
-    """Atualiza a barra de progresso e status de forma segura"""
-    try:
-        st.session_state.processing_status = {
-            'processed': current,
-            'total': total,
-            'errors': errors,
-            'current_file': current_file,
-            'is_processing': is_processing
+            return False, f"Erro ao processar arquivo {filename}: {str(e)}"
+    
+    def process_multiple_files(self, uploaded_files):
+        """Processa múltiplos arquivos XML de CT-e"""
+        results = {
+            'success': 0,
+            'errors': 0,
+            'messages': []
         }
-    except Exception as e:
-        print(f"Erro ao atualizar progresso: {e}")
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        for i, uploaded_file in enumerate(uploaded_files):
+            status_text.text(f"Processando {i+1}/{len(uploaded_files)}: {uploaded_file.name}")
+            progress_bar.progress((i + 1) / len(uploaded_files))
+            
+            success, message = self.process_single_file(uploaded_file)
+            if success:
+                results['success'] += 1
+            else:
+                results['errors'] += 1
+            results['messages'].append(message)
+        
+        progress_bar.empty()
+        status_text.empty()
+        
+        return results
+    
+    def get_dataframe(self):
+        """Retorna os dados processados como DataFrame"""
+        if self.processed_data:
+            return pd.DataFrame(self.processed_data)
+        return pd.DataFrame()
+    
+    def clear_data(self):
+        """Limpa os dados processados"""
+        self.processed_data = []
 
-def get_progress_status():
-    """Retorna o status atual do processamento de forma segura"""
+# --- FUNÇÃO PARA CRIAR LINHA DE TENDÊNCIA SIMPLES SEM STATSMODELS ---
+def add_simple_trendline(fig, x, y):
+    """Adiciona uma linha de tendência simples usando regressão linear básica"""
     try:
-        return st.session_state.processing_status.copy()
-    except Exception as e:
-        print(f"Erro ao obter status: {e}")
-        return {'processed': 0, 'total': 0, 'errors': 0, 'current_file': '', 'is_processing': False}
+        # Remove valores NaN
+        mask = ~np.isnan(x) & ~np.isnan(y)
+        x_clean = x[mask]
+        y_clean = y[mask]
+        
+        if len(x_clean) > 1:
+            # Regressão linear simples
+            coefficients = np.polyfit(x_clean, y_clean, 1)
+            polynomial = np.poly1d(coefficients)
+            
+            # Gera pontos para a linha de tendência
+            x_trend = np.linspace(x_clean.min(), x_clean.max(), 100)
+            y_trend = polynomial(x_trend)
+            
+            fig.add_trace(go.Scatter(
+                x=x_trend, 
+                y=y_trend,
+                mode='lines',
+                name='Linha de Tendência',
+                line=dict(color='red', dash='dash'),
+                opacity=0.7
+            ))
+    except Exception:
+        # Se houver erro, simplesmente não adiciona a linha de tendência
+        pass
 
-def reset_processing_state():
-    """Reseta o estado de processamento"""
-    initialize_session_state()
-    st.session_state.stop_processing = False
-    st.session_state.processing_status['is_processing'] = False
-
-def show_progress_interface():
-    """Exibe a interface de progresso de forma segura"""
-    try:
-        status = get_progress_status()
-        
-        if status['total'] > 0:
-            progress = status['processed'] / status['total'] if status['total'] > 0 else 0
-            
-            # Barra de progresso principal
-            progress_bar = st.progress(float(progress))
-            
-            # Estatísticas
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Processados", f"{status['processed']:,}")
-            with col2:
-                st.metric("Total", f"{status['total']:,}")
-            with col3:
-                st.metric("Erros", f"{status['errors']:,}")
-            with col4:
-                success_rate = (status['processed'] - status['errors']) / status['processed'] * 100 if status['processed'] > 0 else 0
-                st.metric("Sucesso", f"{success_rate:.1f}%")
-            
-            # Arquivo atual
-            if status['current_file']:
-                st.info(f"📄 Processando: {os.path.basename(status['current_file'])}")
-            
-            # Botão de parada
-            if status['is_processing']:
-                if st.button("🛑 Parar Processamento", key="stop_button", type="secondary"):
-                    st.session_state.stop_processing = True
-                    st.warning("Parando processamento... Aguarde a conclusão do lote atual.")
-            
-            return progress_bar
-        return None
-    except Exception as e:
-        st.error(f"Erro na interface de progresso: {e}")
-        return None
-
-# --- PROCESSAMENTO EM MASSA SEGURO ---
-def process_batch_safe(processor, batch_files, batch_number, total_batches):
-    """Processa um lote de arquivos de forma segura"""
-    results = []
-    errors = []
+def processador_cte():
+    """Interface para o sistema de CT-e com extração do peso bruto"""
+    processor = CTeProcessorDirect()
     
-    try:
-        with ThreadPoolExecutor(max_workers=processor.max_workers) as executor:
-            future_to_file = {
-                executor.submit(processor.process_single_file, file_data, filename): filename 
-                for file_data, filename in batch_files
-            }
-            
-            for i, future in enumerate(as_completed(future_to_file)):
-                filename = future_to_file[future]
-                
-                # Verificar parada a cada arquivo
-                if st.session_state.stop_processing:
-                    break
-                
-                try:
-                    result = future.result(timeout=30)
-                    if 'error' not in result:
-                        results.append(result)
-                    else:
-                        errors.append(result['error'])
-                except Exception as e:
-                    errors.append(f"Timeout ou erro em {filename}: {str(e)}")
-                
-                # Atualizar progresso a cada 10 arquivos
-                if i % 10 == 0:
-                    current_processed = batch_number * processor.batch_size + i + 1
-                    update_progress(
-                        current_processed, 
-                        st.session_state.processing_status['total'],
-                        filename,
-                        len(errors),
-                        True
-                    )
+    st.title("🚚 Processador de CT-e para Power BI")
+    st.markdown("### Processa arquivos XML de CT-e e gera planilha para análise")
     
-    except Exception as e:
-        errors.append(f"Erro no lote {batch_number}: {str(e)}")
-    
-    return results, errors
-
-def process_large_volume_safe(uploaded_files):
-    """Processa um grande volume de arquivos XML de forma segura"""
-    try:
-        processor = CTEProcessorOptimized()
-        total_files = len(uploaded_files)
-        
-        # Configuração inicial segura
-        reset_processing_state()
-        update_progress(0, total_files, "Iniciando...", 0, True)
-        
-        # Container para resultados
-        all_results = []
-        all_errors = []
-        
-        # Dividir arquivos em lotes
-        batches = []
-        for i in range(0, total_files, processor.batch_size):
-            batch = []
-            for j in range(i, min(i + processor.batch_size, total_files)):
-                file = uploaded_files[j]
-                batch.append((file.getvalue(), file.name))
-            batches.append(batch)
-        
-        st.session_state.total_batches = len(batches)
-        
-        # Processar lotes
-        for batch_num, batch_files in enumerate(batches):
-            if st.session_state.stop_processing:
-                st.error("Processamento interrompido pelo usuário")
-                break
-            
-            # Atualizar status do lote
-            st.session_state.current_batch = batch_num + 1
-            update_progress(
-                batch_num * processor.batch_size, 
-                total_files, 
-                f"Lote {batch_num + 1}/{len(batches)}",
-                len(all_errors),
-                True
-            )
-            
-            # Processar lote
-            results, errors = process_batch_safe(processor, batch_files, batch_num, len(batches))
-            all_results.extend(results)
-            all_errors.extend(errors)
-            
-            # Limpar memória
-            gc.collect()
-            
-            # Pequena pausa para não sobrecarregar
-            time.sleep(0.5)
-            
-            # Atualizar progresso final do lote
-            current_processed = min((batch_num + 1) * processor.batch_size, total_files)
-            update_progress(
-                current_processed, 
-                total_files, 
-                f"Lote {batch_num + 1}/{len(batches)} concluído",
-                len(all_errors),
-                batch_num < len(batches) - 1  # Último lote?
-            )
-        
-        # Finalizar processamento
-        update_progress(total_files, total_files, "Processamento concluído", len(all_errors), False)
-        st.session_state.stop_processing = False
-        
-        return all_results, all_errors
-        
-    except Exception as e:
-        st.error(f"Erro crítico no processamento: {str(e)}")
-        update_progress(0, total_files, "Erro crítico", len(all_errors), False)
-        return [], [f"Erro crítico: {str(e)}"]
-
-# --- INTERFACE PRINCIPAL SEGURA ---
-def processador_cte_massivo():
-    """Interface segura para processamento massivo de CT-es"""
-    
-    st.title("⚡ Processador Massivo de CT-e")
-    st.markdown("### Sistema otimizado para grandes volumes de arquivos XML")
-    
-    # Verificar se há processamento em andamento
-    status = get_progress_status()
-    if status['is_processing'] and status['processed'] < status['total']:
-        st.warning("🔄 Processamento em andamento...")
-        show_progress_interface()
-        return
-    
-    # Informações de performance
-    with st.expander("🚀 Informações do Sistema", expanded=True):
+    with st.expander("ℹ️ Informações sobre a extração do Peso Bruto", expanded=False):
         st.markdown("""
-        **Capacidades:**
-        - ✅ **Processamento em lote**: Grupos de 500 arquivos
-        - ✅ **Processamento paralelo**: Até 2 arquivos simultaneamente  
-        - ✅ **Controle de progresso**: Monitoramento em tempo real
-        - ✅ **Interrupção segura**: Pare a qualquer momento
-        - ✅ **Busca inteligente**: Peso bruto e base de cálculo
+        **Extração do Peso Bruto:**
         
-        **Limites recomendados:**
-        - 📦 **Por lote**: Até 5.000 arquivos
-        - ⏱️ **Tempo estimado**: 1.000 arquivos ≈ 2-3 minutos
-        - 💾 **Memória**: Processamento eficiente
+        - O sistema extrai automaticamente o **Peso Bruto** do campo específico no XML
+        - Localização: `<infQ><tpMed>PESO BRUTO</tpMed><qCarga>319.8000</qCarga></infQ>`
+        - O peso é convertido para quilogramas (kg) e incluído na planilha final
         """)
     
-    tab1, tab2, tab3 = st.tabs(["📤 Upload", "📊 Dashboard", "📥 Exportar"])
+    tab1, tab2, tab3 = st.tabs(["📤 Upload", "👀 Visualizar Dados", "📥 Exportar"])
     
     with tab1:
-        show_upload_interface()
+        st.header("Upload de CT-es")
+        upload_option = st.radio("Selecione o tipo de upload:", 
+                                ["Upload Individual", "Upload em Lote"])
+        
+        if upload_option == "Upload Individual":
+            uploaded_file = st.file_uploader("Selecione um arquivo XML de CT-e", type=['xml'], key="single_cte")
+            if uploaded_file and st.button("📊 Processar CT-e", key="process_single"):
+                show_loading_animation("Analisando estrutura do XML...")
+                show_processing_animation("Extraindo dados do CT-e...")
+                
+                success, message = processor.process_single_file(uploaded_file)
+                if success:
+                    show_success_animation("CT-e processado com sucesso!")
+                    
+                    df = processor.get_dataframe()
+                    if not df.empty:
+                        ultimo_cte = df.iloc[-1]
+                        st.info(f"**Peso Bruto extraído:** {ultimo_cte['Peso Bruto (kg)']} kg")
+                else:
+                    st.error(message)
+        
+        else:
+            uploaded_files = st.file_uploader("Selecione múltiplos arquivos XML de CT-e", 
+                                            type=['xml'], 
+                                            accept_multiple_files=True,
+                                            key="multiple_cte")
+            if uploaded_files and st.button("📊 Processar Todos", key="process_multiple"):
+                show_loading_animation(f"Iniciando processamento de {len(uploaded_files)} arquivos...")
+                
+                results = processor.process_multiple_files(uploaded_files)
+                show_success_animation("Processamento em lote concluído!")
+                
+                st.success(f"""
+                **Processamento concluído!**  
+                ✅ Sucessos: {results['success']}  
+                ❌ Erros: {results['errors']}
+                """)
+                
+                df = processor.get_dataframe()
+                if not df.empty:
+                    ctes_com_nfe = df[df['Chave NFe'] != 'N/A'].shape[0]
+                    peso_total = df['Peso Bruto (kg)'].sum()
+                    st.info(f"""
+                    **Estatísticas de extração:**
+                    - CT-es com NF-e: {ctes_com_nfe}
+                    - Peso bruto total: {peso_total:,.2f} kg
+                    - Peso médio por CT-e: {df['Peso Bruto (kg)'].mean():,.2f} kg
+                    """)
+                
+                if results['errors'] > 0:
+                    with st.expander("Ver mensagens detalhadas"):
+                        for msg in results['messages']:
+                            st.write(f"- {msg}")
+        
+        if st.button("🗑️ Limpar Dados Processados", type="secondary"):
+            processor.clear_data()
+            st.success("Dados limpos com sucesso!")
+            time.sleep(1)
+            st.rerun()
     
     with tab2:
-        show_dashboard_interface()
+        st.header("Dados Processados")
+        df = processor.get_dataframe()
+        
+        if not df.empty:
+            st.write(f"Total de CT-es processados: {len(df)}")
+            
+            # Filtros
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                uf_filter = st.multiselect("Filtrar por UF Início", options=df['UF Início'].unique())
+            with col2:
+                uf_destino_filter = st.multiselect("Filtrar por UF Destino", options=df['UF Destino'].unique())
+            with col3:
+                peso_filter = st.slider("Filtrar por Peso Bruto (kg)", 
+                                      float(df['Peso Bruto (kg)'].min()), 
+                                      float(df['Peso Bruto (kg)'].max()),
+                                      (float(df['Peso Bruto (kg)'].min()), float(df['Peso Bruto (kg)'].max())))
+            
+            # Aplicar filtros
+            filtered_df = df.copy()
+            if uf_filter:
+                filtered_df = filtered_df[filtered_df['UF Início'].isin(uf_filter)]
+            if uf_destino_filter:
+                filtered_df = filtered_df[filtered_df['UF Destino'].isin(uf_destino_filter)]
+            filtered_df = filtered_df[
+                (filtered_df['Peso Bruto (kg)'] >= peso_filter[0]) & 
+                (filtered_df['Peso Bruto (kg)'] <= peso_filter[1])
+            ]
+            
+            # Exibir dataframe
+            colunas_principais = [
+                'Arquivo', 'nCT', 'Data Emissão', 'Emitente', 'Remetente', 
+                'Destinatário', 'UF Início', 'UF Destino', 'Peso Bruto (kg)', 'Valor Prestação'
+            ]
+            
+            st.dataframe(filtered_df[colunas_principais], use_container_width=True)
+            
+            with st.expander("📋 Ver todos os campos detalhados"):
+                st.dataframe(filtered_df, use_container_width=True)
+            
+            # Estatísticas
+            st.subheader("📈 Estatísticas")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            col1.metric("Total Valor Prestação", f"R$ {filtered_df['Valor Prestação'].sum():,.2f}")
+            col2.metric("Peso Bruto Total", f"{filtered_df['Peso Bruto (kg)'].sum():,.2f} kg")
+            col3.metric("Média Peso/CT-e", f"{filtered_df['Peso Bruto (kg)'].mean():,.2f} kg")
+            col4.metric("CT-es com NFe", f"{filtered_df[filtered_df['Chave NFe'] != 'N/A'].shape[0]}")
+            
+            if not filtered_df.empty:
+                exemplo = filtered_df.iloc[0]
+                st.info(f"**Exemplo de extração:** Peso Bruto = {exemplo['Peso Bruto (kg)']} kg")
+            
+            # Gráficos - CORRIGIDO: sem dependência do statsmodels
+            col_chart1, col_chart2 = st.columns(2)
+            
+            with col_chart1:
+                st.subheader("📊 Distribuição por Peso Bruto")
+                if not filtered_df.empty:
+                    fig_peso = px.histogram(
+                        filtered_df, 
+                        x='Peso Bruto (kg)',
+                        title="Distribuição dos CT-es por Peso Bruto",
+                        nbins=20
+                    )
+                    st.plotly_chart(fig_peso, use_container_width=True)
+            
+            with col_chart2:
+                st.subheader("📈 Relação Peso x Valor")
+                if not filtered_df.empty:
+                    # Gráfico de dispersão sem trendline problemático
+                    fig_relacao = px.scatter(
+                        filtered_df,
+                        x='Peso Bruto (kg)',
+                        y='Valor Prestação',
+                        title="Relação entre Peso Bruto e Valor da Prestação"
+                    )
+                    
+                    # Adiciona linha de tendência simples se desejado
+                    if st.checkbox("Mostrar linha de tendência", key="trendline"):
+                        add_simple_trendline(fig_relacao, 
+                                           filtered_df['Peso Bruto (kg)'].values, 
+                                           filtered_df['Valor Prestação'].values)
+                    
+                    st.plotly_chart(fig_relacao, use_container_width=True)
+            
+        else:
+            st.info("Nenhum CT-e processado ainda. Faça upload de arquivos na aba 'Upload'.")
     
     with tab3:
-        show_export_interface()
-
-def show_upload_interface():
-    """Interface de upload segura"""
-    st.header("Upload de Arquivos XML")
-    
-    uploaded_files = st.file_uploader(
-        "Selecione os arquivos XML de CT-e", 
-        type=['xml'], 
-        accept_multiple_files=True,
-        key="mass_upload",
-        help="Selecione até 10.000 arquivos por vez para melhor performance"
-    )
-    
-    if uploaded_files:
-        st.success(f"✅ {len(uploaded_files):,} arquivos selecionados")
+        st.header("Exportar para Excel")
+        df = processor.get_dataframe()
         
-        # Verificar limites
-        if len(uploaded_files) > 10000:
-            st.warning("""
-            ⚠️ **Número elevado de arquivos**
-            Para melhor performance, recomendamos processar até 10.000 arquivos por vez.
-            """)
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🚀 Iniciar Processamento", type="primary", use_container_width=True):
-                if len(uploaded_files) > 50000:
-                    st.error("❌ **Limite máximo excedido** - Máximo: 50.000 arquivos")
-                else:
-                    process_uploaded_files_safe(uploaded_files)
-        
-        with col2:
-            if st.button("🔄 Reiniciar Sistema", type="secondary", use_container_width=True):
-                reset_processing_state()
-                st.rerun()
-
-def process_uploaded_files_safe(uploaded_files):
-    """Processa arquivos uploadados de forma segura"""
-    try:
-        # Container de progresso
-        progress_placeholder = st.empty()
-        
-        with progress_placeholder.container():
-            st.subheader("📈 Progresso do Processamento")
-            progress_bar = show_progress_interface()
+        if not df.empty:
+            st.success(f"Pronto para exportar {len(df)} registros")
             
-            # Processar arquivos
-            with st.spinner("Iniciando processamento..."):
-                results, errors = process_large_volume_safe(uploaded_files)
+            export_option = st.radio("Formato de exportação:", 
+                                   ["Excel (.xlsx)", "CSV (.csv)"])
             
-            # Resultados finais
-            st.success(f"""
-            **Processamento Concluído!**
-            - ✅ Arquivos processados com sucesso: {len(results):,}
-            - ❌ Erros encontrados: {len(errors):,}
-            - 📊 Taxa de sucesso: {(len(results)/len(uploaded_files))*100:.1f}%
-            """)
+            st.subheader("Selecionar Colunas para Exportação")
+            todas_colunas = df.columns.tolist()
+            colunas_selecionadas = st.multiselect(
+                "Selecione as colunas para exportar:",
+                options=todas_colunas,
+                default=todas_colunas
+            )
             
-            # Salvar resultados
-            st.session_state.processed_data = results
+            df_export = df[colunas_selecionadas] if colunas_selecionadas else df
             
-            # Mostrar erros se houver
-            if errors:
-                with st.expander("📋 Detalhes dos Erros (Primeiros 50)"):
-                    for error in errors[:50]:
-                        st.error(error)
-                    if len(errors) > 50:
-                        st.info(f"... e mais {len(errors) - 50} erros")
+            if export_option == "Excel (.xlsx)":
+                show_processing_animation("Gerando arquivo Excel...")
+                
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    df_export.to_excel(writer, sheet_name='Dados_CTe', index=False)
+                
+                output.seek(0)
+                
+                st.download_button(
+                    label="📥 Baixar Planilha Excel",
+                    data=output,
+                    file_name="dados_cte.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
             
-            # Limpar memória
-            gc.collect()
+            else:
+                show_processing_animation("Gerando arquivo CSV...")
+                
+                csv = df_export.to_csv(index=False).encode('utf-8')
+                
+                st.download_button(
+                    label="📥 Baixar Arquivo CSV",
+                    data=csv,
+                    file_name="dados_cte.csv",
+                    mime="text/csv"
+                )
             
-    except Exception as e:
-        st.error(f"Erro durante o processamento: {str(e)}")
-        st.code(traceback.format_exc())
-
-def show_dashboard_interface():
-    """Dashboard seguro para dados processados"""
-    if not st.session_state.processed_data:
-        st.info("💡 Nenhum dado processado ainda. Faça upload de arquivos XML na aba 'Upload'.")
-        return
-    
-    df = pd.DataFrame(st.session_state.processed_data)
-    st.success(f"📊 Dashboard - {len(df):,} registros carregados")
-    
-    # Filtros rápidos
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        uf_options = [uf for uf in df['UF Início'].unique() if uf != 'N/A']
-        uf_filter = st.multiselect("Filtrar por UF", options=uf_options)
-    with col2:
-        tipo_options = [tipo for tipo in df['Tipo de Peso Encontrado'].unique() if tipo != 'N/A']
-        tipo_peso_filter = st.multiselect("Filtrar por Tipo de Peso", options=tipo_options)
-    with col3:
-        # Amostragem para grandes volumes
-        if len(df) > 10000:
-            sample_size = st.slider("Amostra para gráficos", 1000, 10000, 5000)
-            df_display = df.sample(min(sample_size, len(df)))
+            with st.expander("📋 Prévia dos dados a serem exportados"):
+                st.dataframe(df_export.head(10))
+                
         else:
-            df_display = df
-    
-    # Aplicar filtros
-    if uf_filter:
-        df_display = df_display[df_display['UF Início'].isin(uf_filter)]
-    if tipo_peso_filter:
-        df_display = df_display[df_display['Tipo de Peso Encontrado'].isin(tipo_peso_filter)]
-    
-    # Métricas
-    st.subheader("📈 Métricas Principais")
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Valor Total", f"R$ {df_display['Valor Prestação'].sum():,.0f}")
-    col2.metric("Peso Total", f"{df_display['Peso Bruto (kg)'].sum():,.0f} kg")
-    col3.metric("CT-es com NFe", f"{df_display[df_display['Chave NFe'] != 'N/A'].shape[0]:,}")
-    col4.metric("Tipos de Peso", df_display['Tipo de Peso Encontrado'].nunique())
-    
-    # Gráficos
-    if len(df_display) > 0:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Gráfico de distribuição por UF
-            uf_counts = df_display['UF Início'].value_counts().head(10)
-            if len(uf_counts) > 0:
-                fig_uf = px.bar(uf_counts, x=uf_counts.values, y=uf_counts.index, 
-                               orientation='h', title="Top 10 UFs")
-                st.plotly_chart(fig_uf, use_container_width=True)
-        
-        with col2:
-            # Gráfico de tipos de peso
-            tipo_counts = df_display['Tipo de Peso Encontrado'].value_counts()
-            if len(tipo_counts) > 0:
-                fig_tipo = px.pie(tipo_counts, values=tipo_counts.values, 
-                                 names=tipo_counts.index, title="Distribuição por Tipo de Peso")
-                st.plotly_chart(fig_tipo, use_container_width=True)
-        
-        # Tabela de preview
-        with st.expander("📋 Visualizar Dados (Primeiras 100 linhas)"):
-            st.dataframe(df_display.head(100), use_container_width=True)
+            st.warning("Nenhum dado disponível para exportação.")
 
-def show_export_interface():
-    """Interface de exportação segura"""
-    if not st.session_state.processed_data:
-        st.info("💡 Nenhum dado para exportar. Processe alguns arquivos primeiro.")
-        return
-    
-    df = pd.DataFrame(st.session_state.processed_data)
-    st.success(f"📥 Exportar {len(df):,} registros")
-    
-    # Opções de exportação
-    export_option = st.radio("Formato de exportação:", 
-                           ["CSV (.csv) - Recomendado para grandes volumes", 
-                            "Excel (.xlsx) - Até 100.000 registros"])
-    
-    # Seleção de colunas
-    st.subheader("Selecionar Colunas para Exportação")
-    todas_colunas = df.columns.tolist()
-    colunas_principais = [col for col in todas_colunas if col not in ['Data Processamento', 'Documento Destinatário']]
-    
-    colunas_selecionadas = st.multiselect(
-        "Selecione as colunas para exportar:",
-        options=todas_colunas,
-        default=colunas_principais
-    )
-    
-    if colunas_selecionadas and st.button("💾 Gerar Arquivo de Exportação", type="primary"):
-        df_export = df[colunas_selecionadas]
-        
-        with st.spinner("Gerando arquivo de exportação..."):
-            try:
-                if export_option.startswith("CSV"):
-                    csv_data = df_export.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        label=f"📥 Baixar CSV ({len(df_export):,} registros)",
-                        data=csv_data,
-                        file_name="dados_cte_massivo.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-                else:
-                    output = BytesIO()
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        df_export.to_excel(writer, sheet_name='Dados_CTe', index=False)
-                    output.seek(0)
-                    
-                    st.download_button(
-                        label=f"📥 Baixar Excel ({len(df_export):,} registros)",
-                        data=output,
-                        file_name="dados_cte_massivo.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
-                    
-            except Exception as e:
-                st.error(f"Erro na exportação: {str(e)}")
-
-# --- CSS ---
+# --- CSS E CONFIGURAÇÃO DE ESTILO ---
 def load_css():
     st.markdown("""
     <style>
-        .main-header {
-            font-size: 2.5rem;
-            font-weight: 800;
+        .cover-container {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ed 100%);
+            padding: 3rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
             text-align: center;
-            margin: 1rem 0;
+        }
+        .cover-logo {
+            max-width: 300px;
+            margin-bottom: 1.5rem;
+        }
+        .cover-title {
+            font-size: 2.8rem;
+            font-weight: 800;
+            margin-bottom: 1rem;
             background: linear-gradient(90deg, #2c3e50, #3498db);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
+        .cover-subtitle {
+            font-size: 1.2rem;
+            color: #7f8c8d;
+            margin-bottom: 0;
+        }
+        .header {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin: 1.5rem 0 1rem 0;
+            padding-left: 10px;
+            border-left: 5px solid #2c3e50;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+            padding: 1.8rem;
+            margin-bottom: 1.8rem;
+        }
         .stButton>button {
             width: 100%;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .spinner {
+            animation: spin 2s linear infinite;
+            display: inline-block;
+            font-size: 24px;
         }
     </style>
     """, unsafe_allow_html=True)
 
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
-    """Função principal com tratamento seguro de erros"""
-    try:
-        # Garantir que o session state está inicializado
-        initialize_session_state()
-        
-        load_css()
-        
-        st.markdown('<div class="main-header">⚡ Sistema de Processamento Massivo de CT-e</div>', 
-                    unsafe_allow_html=True)
-        st.markdown("### Processamento seguro para grandes volumes de XML")
-        
-        processador_cte_massivo()
-        
-    except Exception as e:
-        st.error(f"Erro crítico na aplicação: {str(e)}")
-        st.code(traceback.format_exc())
-        
-        # Tentar recuperar
-        if st.button("🔄 Tentar Recuperar"):
-            initialize_session_state()
-            st.rerun()
+    """Função principal que gerencia o fluxo da aplicação."""
+    load_css()
+    
+    st.markdown("""
+    <div class="cover-container">
+        <img src="https://raw.githubusercontent.com/DaniloNs-creator/final/7ea6ab2a610ef8f0c11be3c34f046e7ff2cdfc6a/haefele_logo.png" class="cover-logo">
+        <h1 class="cover-title">Sistema de Processamento de Arquivos</h1>
+        <p class="cover-subtitle">Processamento de TXT e CT-e para análise de dados</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    tab1, tab2 = st.tabs(["📄 Processador TXT", "🚚 Processador CT-e"])
+    
+    with tab1:
+        processador_txt()
+    
+    with tab2:
+        processador_cte()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"Ocorreu um erro inesperado: {str(e)}")
+        st.code(traceback.format_exc())
