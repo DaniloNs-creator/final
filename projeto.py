@@ -148,10 +148,33 @@ def processador_txt():
             st.error(f"Erro inesperado: {str(e)}")
             st.info("Tente novamente ou verifique o arquivo.")
 
-# --- PROCESSADOR CT-E SEM ARMAZENAMENTO ---
+# --- PROCESSADOR CT-E COM EXTRAÇÃO CORRETA DA NFe ---
 class CTeProcessorDirect:
     def __init__(self):
         self.processed_data = []
+    
+    def extract_nfe_number_from_key(self, chave_acesso):
+        """
+        Extrai o número da NF-e da chave de acesso conforme padrão oficial
+        Estrutura da chave de acesso (44 dígitos):
+        Posições 01-04: UF
+        Posições 05-08: AAMM (ano e mês)
+        Posições 09-20: CNPJ
+        Posições 21-22: Modelo
+        Posições 23-25: Série
+        Posições 26-34: Número da NF-e (9 dígitos)
+        Posições 35-43: Código numérico
+        Posição 44: DV
+        """
+        if not chave_acesso or len(chave_acesso) != 44:
+            return None
+        
+        try:
+            # O número da NF-e está nas posições 26-34 (índices 25-33 em zero-index)
+            numero_nfe = chave_acesso[25:34]
+            return numero_nfe
+        except Exception:
+            return None
     
     def extract_cte_data(self, xml_content, filename):
         """Extrai dados específicos do CT-e diretamente para planilha"""
@@ -229,10 +252,8 @@ class CTeProcessorDirect:
             # Extrai chave da NFe associada (se existir)
             infNFe_chave = find_text(root, './/cte:infNFe/cte:chave')
             
-            # Extrai apenas o número da NFe da chave de acesso (últimos 9 dígitos)
-            numero_nfe = None
-            if infNFe_chave and len(infNFe_chave) >= 9:
-                numero_nfe = infNFe_chave[-9:]
+            # CORREÇÃO: Extrai o número da NFe usando a função específica
+            numero_nfe = self.extract_nfe_number_from_key(infNFe_chave) if infNFe_chave else None
             
             # Formata data no padrão DD/MM/AA
             data_formatada = None
@@ -339,15 +360,37 @@ class CTeProcessorDirect:
         self.processed_data = []
 
 def processador_cte():
-    """Interface para o sistema de CT-e sem armazenamento"""
+    """Interface para o sistema de CT-e com extração correta da NFe"""
     # Inicializar processador
     processor = CTeProcessorDirect()
     
     st.title("🚚 Processador de CT-e para Power BI")
     st.markdown("### Processa arquivos XML de CT-e e gera planilha para análise")
     
+    # Informação sobre a extração correta da NFe
+    with st.expander("ℹ️ Informações sobre a extração da NF-e", expanded=False):
+        st.markdown("""
+        **Correção aplicada na extração do número da NF-e:**
+        
+        - **Antes**: Extraía os últimos 9 dígitos da chave (incorreto)
+        - **Agora**: Extrai as posições 26-34 da chave de acesso (correto)
+        
+        **Estrutura da chave de acesso da NF-e (44 dígitos):**
+        ```
+        Exemplo: 41250902473058000188550010003460161233348440
+        Posições 01-04: UF (4125)
+        Posições 05-08: AAMM (0902) 
+        Posições 09-20: CNPJ (473058000188)
+        Posições 21-22: Modelo (55)
+        Posições 23-25: Série (001)
+        Posições 26-34: **Número da NF-e (000346016)** ← Extraído corretamente
+        Posições 35-43: Código numérico (123334844)
+        Posição 44: DV (0)
+        ```
+        """)
+    
     # Navegação por abas
-    tab1, tab2, tab3 = st.tabs(["Upload", "Visualizar Dados", "Exportar"])
+    tab1, tab2, tab3 = st.tabs(["📤 Upload", "👀 Visualizar Dados", "📥 Exportar"])
     
     with tab1:
         st.header("Upload de CT-es")
@@ -361,6 +404,13 @@ def processador_cte():
                     success, message = processor.process_single_file(uploaded_file)
                     if success:
                         st.success(message)
+                        
+                        # Mostra exemplo da extração da NFe
+                        df = processor.get_dataframe()
+                        if not df.empty:
+                            ultimo_cte = df.iloc[-1]
+                            if ultimo_cte['Chave NFe'] != 'N/A':
+                                st.info(f"**Exemplo de extração:** Chave {ultimo_cte['Chave NFe']} → Número NF-e: {ultimo_cte['Número NFe']}")
                     else:
                         st.error(message)
         
@@ -378,6 +428,12 @@ def processador_cte():
                     ✅ Sucessos: {results['success']}  
                     ❌ Erros: {results['errors']}
                     """)
+                    
+                    # Mostra estatísticas de extração de NFe
+                    df = processor.get_dataframe()
+                    if not df.empty:
+                        ctes_com_nfe = df[df['Chave NFe'] != 'N/A'].shape[0]
+                        st.info(f"**Extração de NF-e:** {ctes_com_nfe} CT-es possuem NF-e associada")
                     
                     if results['errors'] > 0:
                         with st.expander("Ver mensagens detalhadas"):
@@ -415,10 +471,10 @@ def processador_cte():
             if emitente_filter:
                 filtered_df = filtered_df[filtered_df['Emitente'].isin(emitente_filter)]
             
-            # Exibir dataframe com colunas principais
+            # Exibir dataframe com colunas principais incluindo Número NFe
             colunas_principais = [
                 'Arquivo', 'nCT', 'Data Emissão', 'Emitente', 'Remetente', 
-                'Destinatário', 'UF Início', 'UF Destino', 'Valor Prestação'
+                'Destinatário', 'UF Início', 'UF Destino', 'Número NFe', 'Valor Prestação'
             ]
             
             st.dataframe(filtered_df[colunas_principais], use_container_width=True)
@@ -435,6 +491,11 @@ def processador_cte():
             col2.metric("Média por CT-e", f"R$ {filtered_df['Valor Prestação'].mean():,.2f}")
             col3.metric("Maior Valor", f"R$ {filtered_df['Valor Prestação'].max():,.2f}")
             col4.metric("CT-es com NFe", f"{filtered_df[filtered_df['Chave NFe'] != 'N/A'].shape[0]}")
+            
+            # Exemplo de extração de NFe
+            if not filtered_df.empty and filtered_df['Chave NFe'].iloc[0] != 'N/A':
+                exemplo = filtered_df.iloc[0]
+                st.info(f"**Exemplo de extração:** Chave {exemplo['Chave NFe']} → Número NF-e: {exemplo['Número NFe']}")
             
             # Gráficos
             col_chart1, col_chart2 = st.columns(2)
