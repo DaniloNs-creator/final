@@ -40,7 +40,7 @@ CTE_NAMESPACES = {
 # Configurações de performance
 MAX_WORKERS = min(32, (os.cpu_count() or 1) * 4)  # Otimizado para I/O
 BATCH_SIZE = 100  # Processar em lotes para evitar memory leaks
-MAX_MEMORY_USAGE = 85  %  # Limite de uso de memória
+MAX_MEMORY_USAGE = 85  # Limite de uso de memória
 
 # Inicialização do estado da sessão
 if 'selected_xml' not in st.session_state:
@@ -584,15 +584,16 @@ def processador_cte():
     with tab2:
         st.header("Configurações de Performance")
         
-        st.slider("Tamanho do lote", 50, 500, BATCH_SIZE, key="batch_size", 
-                 help="Número de arquivos processados por lote")
-        st.slider("Número de threads", 1, 32, MAX_WORKERS, key="max_workers",
-                 help="Número de threads simultâneas")
+        # Configurações ajustáveis
+        batch_size = st.slider("Tamanho do lote", 50, 500, BATCH_SIZE, 
+                             help="Número de arquivos processados por lote")
+        max_workers = st.slider("Número de threads", 1, 32, MAX_WORKERS,
+                              help="Número de threads simultâneas")
         
         if st.button("🔄 Aplicar Configurações"):
             global BATCH_SIZE, MAX_WORKERS
-            BATCH_SIZE = st.session_state.batch_size
-            MAX_WORKERS = st.session_state.max_workers
+            BATCH_SIZE = batch_size
+            MAX_WORKERS = max_workers
             st.success("Configurações aplicadas!")
         
         st.subheader("Gerenciamento de Memória")
