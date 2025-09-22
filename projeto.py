@@ -234,6 +234,41 @@ class CTeProcessorDirect:
             if infNFe_chave and len(infNFe_chave) >= 9:
                 numero_nfe = infNFe_chave[-9:]
             
+            # EXTRAIR PESO DA MERCADORIA
+            peso_mercadoria = None
+            # Tenta encontrar o peso na estrutura infQ (informações de quantidade)
+            infQ_peso = find_text(root, './/cte:infQ/cte:qCarga')
+            if infQ_peso:
+                try:
+                    peso_mercadoria = float(infQ_peso)
+                except (ValueError, TypeError):
+                    peso_mercadoria = None
+            
+            # Se não encontrou no infQ, tenta em outras localizações comuns
+            if peso_mercadoria is None:
+                # Tenta na estrutura de valores prestação de serviço
+                vPrest_peso = find_text(root, './/cte:vPrest/cte:qCarga')
+                if vPrest_peso:
+                    try:
+                        peso_mercadoria = float(vPrest_peso)
+                    except (ValueError, TypeError):
+                        peso_mercadoria = None
+            
+            # Se ainda não encontrou, tenta em locais alternativos
+            if peso_mercadoria is None:
+                # Busca por qualquer tag que possa conter peso
+                for peso_tag in ['qCarga', 'peso', 'Peso', 'pesoCarga', 'qCarga']:
+                    peso_element = root.find(f'.//{{*}}{peso_tag}')
+                    if peso_element is not None and peso_element.text:
+                        try:
+                            peso_mercadoria = float(peso_element.text)
+                            break
+                        except (ValueError, TypeError):
+                            continue
+            
+            # Formata peso para exibição
+            peso_formatado = f"{peso_mercadoria:,.3f}" if peso_mercadoria is not None else "N/A"
+            
             # Formata data no padrão DD/MM/AA
             data_formatada = None
             if dhEmi:
@@ -276,6 +311,8 @@ class CTeProcessorDirect:
                 'UF Destino': dest_UF or 'N/A',
                 'Chave NFe': infNFe_chave or 'N/A',
                 'Número NFe': numero_nfe or 'N/A',
+                'Peso Mercadoria (kg)': peso_mercadoria or 0.0,
+                'Peso Formatado': peso_formatado,
                 'Data Processamento': datetime.now().strftime('%d/%m/%Y %H:%M:%S')
             }
             
@@ -415,10 +452,10 @@ def processador_cte():
             if emitente_filter:
                 filtered_df = filtered_df[filtered_df['Emitente'].isin(emitente_filter)]
             
-            # Exibir dataframe com colunas principais
+            # Exibir dataframe com colunas principais (incluindo peso)
             colunas_principais = [
                 'Arquivo', 'nCT', 'Data Emissão', 'Emitente', 'Remetente', 
-                'Destinatário', 'UF Início', 'UF Destino', 'Valor Prestação'
+                'Destinatário', 'UF Início', 'UF Destino', 'Valor Prestação', 'Peso Formatado'
             ]
             
             st.dataframe(filtered_df[colunas_principais], use_container_width=True)
@@ -427,16 +464,16 @@ def processador_cte():
             with st.expander("📋 Ver todos os campos detalhados"):
                 st.dataframe(filtered_df, use_container_width=True)
             
-            # Estatísticas
+            # Estatísticas (incluindo estatísticas de peso)
             st.subheader("📈 Estatísticas")
             col1, col2, col3, col4 = st.columns(4)
             
             col1.metric("Total Valor Prestação", f"R$ {filtered_df['Valor Prestação'].sum():,.2f}")
             col2.metric("Média por CT-e", f"R$ {filtered_df['Valor Prestação'].mean():,.2f}")
-            col3.metric("Maior Valor", f"R$ {filtered_df['Valor Prestação'].max():,.2f}")
+            col3.metric("Total Peso (kg)", f"{filtered_df['Peso Mercadoria (kg)'].sum():,.3f}")
             col4.metric("CT-es com NFe", f"{filtered_df[filtered_df['Chave NFe'] != 'N/A'].shape[0]}")
             
-            # Gráficos
+            # Gráficos adicionais com informações de peso
             col_chart1, col_chart2 = st.columns(2)
             
             with col_chart1:
@@ -451,6 +488,22 @@ def processador_cte():
                     st.plotly_chart(fig_uf, use_container_width=True)
             
             with col_chart2:
+                st.subheader("⚖️ Peso por Emitente")
+                if not filtered_df.empty:
+                    peso_por_emitente = filtered_df.groupby('Emitente')['Peso Mercadoria (kg)'].sum().sort_values(ascending=False).head(10)
+                    fig_peso = px.bar(
+                        x=peso_por_emitente.values,
+                        y=peso_por_emitente.index,
+                        orientation='h',
+                        title="Top 10 Emitentes por Peso (kg)",
+                        labels={'x': 'Peso Total (kg)', 'y': 'Emitente'}
+                    )
+                    st.plotly_chart(fig_peso, use_container_width=True)
+            
+            # Gráficos adicionais
+            col_chart3, col_chart4 = st.columns(2)
+            
+            with col_chart3:
                 st.subheader("📈 Valor por Emitente")
                 if not filtered_df.empty:
                     valor_por_emitente = filtered_df.groupby('Emitente')['Valor Prestação'].sum().sort_values(ascending=False).head(10)
@@ -462,6 +515,18 @@ def processador_cte():
                         labels={'x': 'Valor Total (R$)', 'y': 'Emitente'}
                     )
                     st.plotly_chart(fig_emitente, use_container_width=True)
+            
+            with col_chart4:
+                st.subheader("📦 Relação Peso x Valor")
+                if not filtered_df.empty:
+                    fig_relacao = px.scatter(
+                        filtered_df,
+                        x='Peso Mercadoria (kg)',
+                        y='Valor Prestação',
+                        title="Relação entre Peso e Valor do Frete",
+                        hover_data=['Emitente', 'Destinatário']
+                    )
+                    st.plotly_chart(fig_relacao, use_container_width=True)
             
         else:
             st.info("Nenhum CT-e processado ainda. Faça upload de arquivos na aba 'Upload'.")
