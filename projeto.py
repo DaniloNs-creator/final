@@ -37,10 +37,13 @@ CTE_NAMESPACES = {
     'cte': 'http://www.portalfiscal.inf.br/cte'
 }
 
-# Configurações de performance
-MAX_WORKERS = min(32, (os.cpu_count() or 1) * 4)  # Otimizado para I/O
-BATCH_SIZE = 100  # Processar em lotes para evitar memory leaks
-MAX_MEMORY_USAGE = 85  # Limite de uso de memória
+# Configurações de performance (agora no session_state)
+if 'batch_size' not in st.session_state:
+    st.session_state.batch_size = 100
+if 'max_workers' not in st.session_state:
+    st.session_state.max_workers = min(32, (os.cpu_count() or 1) * 4)
+if 'max_memory_usage' not in st.session_state:
+    st.session_state.max_memory_usage = 85
 
 # Inicialização do estado da sessão
 if 'selected_xml' not in st.session_state:
@@ -63,7 +66,7 @@ def get_memory_usage():
 
 def check_memory_limit():
     """Verifica se o uso de memória está dentro do limite"""
-    return get_memory_usage() < MAX_MEMORY_USAGE
+    return get_memory_usage() < st.session_state.max_memory_usage
 
 # --- ANIMAÇÕES DE CARREGAMENTO OTIMIZADAS ---
 def show_loading_animation(message="Processando...", progress=None):
@@ -383,15 +386,14 @@ class CTeProcessorOptimized:
         
         progress_bar = st.progress(0)
         status_text = st.empty()
-        results_placeholder = st.empty()
         
         # Divide os arquivos em lotes
-        batches = [uploaded_files[i:i + BATCH_SIZE] 
-                  for i in range(0, total_files, BATCH_SIZE)]
+        batches = [uploaded_files[i:i + st.session_state.batch_size] 
+                  for i in range(0, total_files, st.session_state.batch_size)]
         
         total_batches = len(batches)
         
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        with ThreadPoolExecutor(max_workers=st.session_state.max_workers) as executor:
             future_to_batch = {
                 executor.submit(self.process_batch, batch): i 
                 for i, batch in enumerate(batches)
@@ -488,9 +490,9 @@ def processador_cte():
     with st.expander("⚡ Informações de Performance", expanded=False):
         st.markdown(f"""
         **Configurações otimizadas para grandes volumes:**
-        - Processamento em lotes de {BATCH_SIZE} arquivos
-        - Até {MAX_WORKERS} threads simultâneas
-        - Limite de memória: {MAX_MEMORY_USAGE}%
+        - Processamento em lotes de {st.session_state.batch_size} arquivos
+        - Até {st.session_state.max_workers} threads simultâneas
+        - Limite de memória: {st.session_state.max_memory_usage}%
         - Detecção automática de duplicatas
         """)
         
@@ -549,7 +551,6 @@ def processador_cte():
                                 if file_info.filename.lower().endswith('.xml'):
                                     with zf.open(file_info) as xml_file:
                                         # Cria um objeto similar ao uploaded_file
-                                        from io import BytesIO
                                         xml_content = xml_file.read()
                                         virtual_file = BytesIO(xml_content)
                                         virtual_file.name = file_info.filename
@@ -570,34 +571,49 @@ def processador_cte():
                         results = processor.process_multiple_files_optimized(xml_files)
                         processing_time = time.time() - start_time
                         
+                        success_rate = (results['success'] / total_files * 100) if total_files > 0 else 0
+                        
                         st.success(f"""
                         **Processamento concluído em {processing_time:.1f}s!**  
-                        ✅ Sucessos: {results['success']}  
+                        ✅ Sucessos: {results['success']} ({success_rate:.1f}%)  
                         ❌ Erros: {results['errors']}  
-                        ⚡ Velocidade: {results['success']/processing_time:.1f} arquivos/segundo
+                        ⚡ Velocidade: {results['success']/max(processing_time, 0.1):.1f} arquivos/segundo
                         """)
                         
                         df = processor.get_dataframe()
                         if not df.empty:
-                            st.info(f"**Dados carregados:** {len(df)} registros válidos")
+                            peso_total = df['Peso Bruto (kg)'].sum() if 'Peso Bruto (kg)' in df.columns else 0
+                            valor_total = df['Valor Prestação'].sum()
+                            st.info(f"""
+                            **Dados carregados:** 
+                            - {len(df)} registros válidos
+                            - Peso total: {peso_total:,.2f} kg
+                            - Valor total: R$ {valor_total:,.2f}
+                            """)
     
     with tab2:
         st.header("Configurações de Performance")
         
         # Configurações ajustáveis
-        batch_size = st.slider("Tamanho do lote", 50, 500, BATCH_SIZE, 
-                             help="Número de arquivos processados por lote")
-        max_workers = st.slider("Número de threads", 1, 32, MAX_WORKERS,
-                              help="Número de threads simultâneas")
+        new_batch_size = st.slider("Tamanho do lote", 50, 500, st.session_state.batch_size, 
+                                 help="Número de arquivos processados por lote")
+        new_max_workers = st.slider("Número de threads", 1, 32, st.session_state.max_workers,
+                                  help="Número de threads simultâneas")
+        new_memory_limit = st.slider("Limite de memória (%)", 50, 95, st.session_state.max_memory_usage,
+                                   help="Limite máximo de uso de memória")
         
         if st.button("🔄 Aplicar Configurações"):
-            global BATCH_SIZE, MAX_WORKERS
-            BATCH_SIZE = batch_size
-            MAX_WORKERS = max_workers
+            st.session_state.batch_size = new_batch_size
+            st.session_state.max_workers = new_max_workers
+            st.session_state.max_memory_usage = new_memory_limit
             st.success("Configurações aplicadas!")
         
         st.subheader("Gerenciamento de Memória")
-        st.info(f"Uso atual de memória: {get_memory_usage():.1f}%")
+        memory_usage = get_memory_usage()
+        st.info(f"Uso atual de memória: {memory_usage:.1f}%")
+        
+        if memory_usage > st.session_state.max_memory_usage:
+            st.warning("⚠️ Uso de memória acima do limite recomendado!")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -619,15 +635,17 @@ def processador_cte():
             # Filtros otimizados
             col1, col2 = st.columns(2)
             with col1:
-                uf_filter = st.multiselect("Filtrar por UF", options=df['UF Início'].unique())
+                uf_options = df['UF Início'].unique() if 'UF Início' in df.columns else []
+                uf_filter = st.multiselect("Filtrar por UF", options=uf_options)
             with col2:
                 if 'Peso Bruto (kg)' in df.columns:
-                    peso_min, peso_max = df['Peso Bruto (kg)'].min(), df['Peso Bruto (kg)'].max()
-                    peso_filter = st.slider("Filtrar por Peso Bruto (kg)", peso_min, peso_max, (peso_min, peso_max))
+                    peso_min = df['Peso Bruto (kg)'].min()
+                    peso_max = df['Peso Bruto (kg)'].max()
+                    peso_filter = st.slider("Filtrar por Peso Bruto (kg)", float(peso_min), float(peso_max), (float(peso_min), float(peso_max)))
             
             # Aplicar filtros
             filtered_df = df.copy()
-            if uf_filter:
+            if uf_filter and 'UF Início' in df.columns:
                 filtered_df = filtered_df[filtered_df['UF Início'].isin(uf_filter)]
             if 'Peso Bruto (kg)' in df.columns:
                 filtered_df = filtered_df[
@@ -636,7 +654,7 @@ def processador_cte():
                 ]
             
             # Exibição otimizada
-            st.dataframe(filtered_df.head(1000), use_container_width=True)  # Limite para performance
+            st.dataframe(filtered_df.head(1000), use_container_width=True)
             
             if len(filtered_df) > 1000:
                 st.info(f"Mostrando 1000 de {len(filtered_df)} registros")
@@ -645,14 +663,17 @@ def processador_cte():
             if not filtered_df.empty:
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("Valor Total", f"R$ {filtered_df['Valor Prestação'].sum():,.0f}")
+                    valor_total = filtered_df['Valor Prestação'].sum() if 'Valor Prestação' in filtered_df.columns else 0
+                    st.metric("Valor Total", f"R$ {valor_total:,.0f}")
                 with col2:
                     if 'Peso Bruto (kg)' in filtered_df.columns:
-                        st.metric("Peso Total", f"{filtered_df['Peso Bruto (kg)'].sum():,.0f} kg")
+                        peso_total = filtered_df['Peso Bruto (kg)'].sum()
+                        st.metric("Peso Total", f"{peso_total:,.0f} kg")
                 with col3:
-                    st.metric("Média/CT-e", f"R$ {filtered_df['Valor Prestação'].mean():,.0f}")
+                    valor_medio = filtered_df['Valor Prestação'].mean() if 'Valor Prestação' in filtered_df.columns else 0
+                    st.metric("Média/CT-e", f"R$ {valor_medio:,.0f}")
         else:
-            st.info("Nenhum CT-e processado ainda.")
+            st.info("Nenhum CT-e processado ainda. Faça upload de arquivos na aba 'Upload'.")
     
     with tab4:
         st.header("Exportar Dados")
@@ -698,8 +719,12 @@ def processador_cte():
                     file_name="dados_cte.csv",
                     mime="text/csv"
                 )
+            
+            with st.expander("📋 Prévia dos dados a serem exportados"):
+                st.dataframe(df.head(10))
+                
         else:
-            st.warning("Nenhum dado para exportar")
+            st.warning("Nenhum dado disponível para exportação.")
 
 # --- CSS E CONFIGURAÇÃO DE ESTILO ---
 def load_css():
@@ -720,6 +745,18 @@ def load_css():
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
+        .cover-subtitle {
+            font-size: 1.2rem;
+            color: #7f8c8d;
+            margin-bottom: 0;
+        }
+        .header {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin: 1.5rem 0 1rem 0;
+            padding-left: 10px;
+            border-left: 5px solid #2c3e50;
+        }
         .card {
             background: white;
             border-radius: 12px;
@@ -727,12 +764,24 @@ def load_css():
             padding: 1.8rem;
             margin-bottom: 1.8rem;
         }
+        .stButton>button {
+            width: 100%;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .spinner {
+            animation: spin 2s linear infinite;
+            display: inline-block;
+            font-size: 24px;
+        }
     </style>
     """, unsafe_allow_html=True)
 
 # --- APLICAÇÃO PRINCIPAL ---
 def main():
-    """Função principal otimizada"""
+    """Função principal que gerencia o fluxo da aplicação."""
     load_css()
     
     st.markdown("""
@@ -754,5 +803,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        st.error(f"Erro: {str(e)}")
+        st.error(f"Ocorreu um erro inesperado: {str(e)}")
         st.code(traceback.format_exc())
