@@ -38,6 +38,10 @@ if 'selected_xml' not in st.session_state:
     st.session_state.selected_xml = None
 if 'cte_data' not in st.session_state:
     st.session_state.cte_data = None
+if 'processed_txt_files' not in st.session_state:
+    st.session_state.processed_txt_files = []
+if 'processed_cte_files' not in st.session_state:
+    st.session_state.processed_cte_files = []
 
 # --- ANIMAÇÕES DE CARREGAMENTO ---
 def show_loading_animation(message="Processando..."):
@@ -71,23 +75,19 @@ def show_success_animation(message="Concluído!"):
         time.sleep(1.5)
     success_placeholder.empty()
 
-# --- FUNÇÕES DO PROCESSADOR DE ARQUIVOS ---
-def processador_txt():
-    st.title("📄 Processador de Arquivos TXT")
-    st.markdown("""
-    <div class="card">
-        Remova linhas indesejadas de arquivos TXT. Carregue seu arquivo e defina os padrões a serem removidos.
-    </div>
-    """, unsafe_allow_html=True)
-
-    def detectar_encoding(conteudo):
+# --- PROCESSADOR TXT COM SUPORTE A MÚLTIPLOS ARQUIVOS ---
+class TXTProcessor:
+    def __init__(self):
+        self.processed_files = []
+    
+    def detectar_encoding(self, conteudo):
         """Detecta o encoding do conteúdo do arquivo"""
         resultado = chardet.detect(conteudo)
         return resultado['encoding']
-
-    def processar_arquivo(conteudo, padroes):
+    
+    def processar_arquivo_txt(self, conteudo, filename, padroes):
         """
-        Processa o conteúdo do arquivo removendo linhas indesejadas e realizando substituições
+        Processa um único arquivo TXT removendo linhas indesejadas
         """
         try:
             substituicoes = {
@@ -97,7 +97,7 @@ def processador_txt():
                 "SEGURO INTERNACIONAL": "SEG INTERN"
             }
             
-            encoding = detectar_encoding(conteudo)
+            encoding = self.detectar_encoding(conteudo)
             
             try:
                 texto = conteudo.decode(encoding)
@@ -114,17 +114,83 @@ def processador_txt():
                         linha = linha.replace(original, substituto)
                     linhas_processadas.append(linha)
             
-            return "\n".join(linhas_processadas), len(linhas)
+            resultado = "\n".join(linhas_processadas)
+            
+            return {
+                'filename': filename,
+                'conteudo': resultado,
+                'linhas_originais': len(linhas),
+                'linhas_processadas': len(linhas_processadas),
+                'linhas_removidas': len(linhas) - len(linhas_processadas)
+            }
         
         except Exception as e:
-            st.error(f"Erro ao processar o arquivo: {str(e)}")
-            return None, 0
+            return {
+                'filename': filename,
+                'erro': str(e),
+                'conteudo': None
+            }
+    
+    def processar_multiplos_arquivos(self, uploaded_files, padroes):
+        """Processa múltiplos arquivos TXT"""
+        resultados = {
+            'sucessos': 0,
+            'erros': 0,
+            'arquivos': []
+        }
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        for i, uploaded_file in enumerate(uploaded_files):
+            status_text.text(f"Processando {i+1}/{len(uploaded_files)}: {uploaded_file.name}")
+            progress_bar.progress((i + 1) / len(uploaded_files))
+            
+            conteudo = uploaded_file.getvalue()
+            resultado = self.processar_arquivo_txt(conteudo, uploaded_file.name, padroes)
+            
+            if 'erro' not in resultado:
+                resultados['sucessos'] += 1
+                self.processed_files.append(resultado)
+            else:
+                resultados['erros'] += 1
+            
+            resultados['arquivos'].append(resultado)
+        
+        progress_bar.empty()
+        status_text.empty()
+        
+        return resultados
+    
+    def get_arquivos_processados(self):
+        """Retorna lista de arquivos processados"""
+        return self.processed_files
+    
+    def limpar_dados(self):
+        """Limpa os dados processados"""
+        self.processed_files = []
 
+def processador_txt():
+    st.title("📄 Processador de Arquivos TXT - Múltiplos Arquivos")
+    st.markdown("""
+    <div class="card">
+        Remova linhas indesejadas de múltiplos arquivos TXT simultaneamente. 
+        Carregue vários arquivos e defina os padrões a serem removidos.
+    </div>
+    """, unsafe_allow_html=True)
+    
+    processor = TXTProcessor()
+    
     # Padrões padrão para remoção
     padroes_default = ["-------", "SPED EFD-ICMS/IPI"]
     
-    # Upload do arquivo
-    arquivo = st.file_uploader("Selecione o arquivo TXT", type=['txt'])
+    # Upload de múltiplos arquivos
+    uploaded_files = st.file_uploader(
+        "Selecione os arquivos TXT (múltiplos)", 
+        type=['txt'], 
+        accept_multiple_files=True,
+        key="txt_multiple"
+    )
     
     # Opções avançadas
     with st.expander("⚙️ Configurações avançadas", expanded=False):
@@ -137,45 +203,144 @@ def processador_txt():
             p.strip() for p in padroes_adicionais.split(",") 
             if p.strip()
         ] if padroes_adicionais else padroes_default
-
-    if arquivo is not None:
-        if st.button("🔄 Processar Arquivo TXT"):
-            try:
-                show_loading_animation("Analisando arquivo TXT...")
-                conteudo = arquivo.read()
-                show_processing_animation("Processando linhas...")
-                resultado, total_linhas = processar_arquivo(conteudo, padroes)
-                
-                if resultado is not None:
-                    show_success_animation("Arquivo processado com sucesso!")
+        
+        st.info(f"**Padrões ativos:** {', '.join(padroes)}")
+    
+    if uploaded_files:
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            if st.button("🔄 Processar Todos os Arquivos TXT", key="process_all_txt"):
+                try:
+                    show_loading_animation(f"Iniciando processamento de {len(uploaded_files)} arquivos...")
                     
-                    linhas_processadas = len(resultado.splitlines())
+                    resultados = processor.processar_multiplos_arquivos(uploaded_files, padroes)
+                    
+                    show_success_animation("Processamento em lote concluído!")
+                    
                     st.success(f"""
                     **Processamento concluído!**  
-                    ✔️ Linhas originais: {total_linhas}  
-                    ✔️ Linhas processadas: {linhas_processadas}  
-                    ✔️ Linhas removidas: {total_linhas - linhas_processadas}
+                    ✅ Arquivos processados com sucesso: {resultados['sucessos']}  
+                    ❌ Arquivos com erro: {resultados['erros']}
                     """)
-
-                    st.subheader("Prévia do resultado")
-                    st.text_area("Conteúdo processado", resultado, height=300)
-
-                    buffer = BytesIO()
-                    buffer.write(resultado.encode('utf-8'))
-                    buffer.seek(0)
                     
-                    st.download_button(
-                        label="⬇️ Baixar arquivo processado",
-                        data=buffer,
-                        file_name=f"processado_{arquivo.name}",
-                        mime="text/plain"
-                    )
+                    # Salvar no session state
+                    st.session_state.processed_txt_files = processor.get_arquivos_processados()
+                    
+                except Exception as e:
+                    st.error(f"Erro inesperado: {str(e)}")
+        
+        with col2:
+            if st.button("🗑️ Limpar Arquivos Processados", type="secondary"):
+                processor.limpar_dados()
+                st.session_state.processed_txt_files = []
+                st.success("Dados limpos com sucesso!")
+                time.sleep(1)
+                st.rerun()
+    
+    # Exibir resultados
+    arquivos_processados = st.session_state.processed_txt_files
+    
+    if arquivos_processados:
+        st.subheader(f"📋 Resultados do Processamento ({len(arquivos_processados)} arquivos)")
+        
+        # Estatísticas gerais
+        total_linhas_originais = sum(arq['linhas_originais'] for arq in arquivos_processados)
+        total_linhas_processadas = sum(arq['linhas_processadas'] for arq in arquivos_processados)
+        total_linhas_removidas = total_linhas_originais - total_linhas_processadas
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total de Arquivos", len(arquivos_processados))
+        col2.metric("Linhas Originais", total_linhas_originais)
+        col3.metric("Linhas Processadas", total_linhas_processadas)
+        col4.metric("Linhas Removidas", total_linhas_removidas)
+        
+        # Tabs para navegação
+        tab1, tab2, tab3 = st.tabs(["📊 Visualizar Arquivos", "👀 Prévia dos Conteúdos", "📥 Download em Lote"])
+        
+        with tab1:
+            st.subheader("Lista de Arquivos Processados")
+            dados_tabela = []
+            for arq in arquivos_processados:
+                dados_tabela.append({
+                    'Arquivo': arq['filename'],
+                    'Linhas Originais': arq['linhas_originais'],
+                    'Linhas Processadas': arq['linhas_processadas'],
+                    'Linhas Removidas': arq['linhas_removidas'],
+                    'Taxa Redução': f"{(arq['linhas_removidas']/arq['linhas_originais']*100):.1f}%" if arq['linhas_originais'] > 0 else "0%"
+                })
             
-            except Exception as e:
-                st.error(f"Erro inesperado: {str(e)}")
-                st.info("Tente novamente ou verifique o arquivo.")
+            df_arquivos = pd.DataFrame(dados_tabela)
+            st.dataframe(df_arquivos, use_container_width=True)
+        
+        with tab2:
+            st.subheader("Prévia dos Conteúdos Processados")
+            
+            arquivo_selecionado = st.selectbox(
+                "Selecione um arquivo para visualizar:",
+                options=[arq['filename'] for arq in arquivos_processados]
+            )
+            
+            arquivo = next((arq for arq in arquivos_processados if arq['filename'] == arquivo_selecionado), None)
+            
+            if arquivo:
+                st.write(f"**Arquivo:** {arquivo['filename']}")
+                st.write(f"**Estatísticas:** {arquivo['linhas_originais']} → {arquivo['linhas_processadas']} linhas ({arquivo['linhas_removidas']} removidas)")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.text_area("Conteúdo Processado", arquivo['conteudo'], height=400)
+                
+                with col2:
+                    # Exemplo das primeiras linhas removidas (se aplicável)
+                    st.info("**Informações do processamento:**")
+                    st.write(f"- Redução de: {arquivo['linhas_removidas']} linhas")
+                    st.write(f"- Eficiência: {(arquivo['linhas_removidas']/arquivo['linhas_originais']*100):.1f}%")
+        
+        with tab3:
+            st.subheader("Download dos Arquivos Processados")
+            
+            # Download individual
+            st.write("**Download Individual:**")
+            for arq in arquivos_processados:
+                buffer = BytesIO()
+                buffer.write(arq['conteudo'].encode('utf-8'))
+                buffer.seek(0)
+                
+                st.download_button(
+                    label=f"⬇️ {arq['filename']}",
+                    data=buffer,
+                    file_name=f"processado_{arq['filename']}",
+                    mime="text/plain",
+                    key=f"download_{arq['filename']}"
+                )
+            
+            # Download em lote (ZIP)
+            st.write("**Download em Lote (ZIP):**")
+            if st.button("📦 Gerar Pacote ZIP com Todos os Arquivos"):
+                show_processing_animation("Criando arquivo ZIP...")
+                
+                import zipfile
+                zip_buffer = BytesIO()
+                
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                    for arq in arquivos_processados:
+                        zip_file.writestr(
+                            f"processado_{arq['filename']}",
+                            arq['conteudo'].encode('utf-8')
+                        )
+                
+                zip_buffer.seek(0)
+                
+                st.download_button(
+                    label="📥 Baixar Todos os Arquivos (ZIP)",
+                    data=zip_buffer,
+                    file_name="arquivos_processados.zip",
+                    mime="application/zip"
+                )
 
-# --- PROCESSADOR CT-E COM EXTRAÇÃO DO PESO BRUTO E PESO BASE DE CÁLCULO ---
+# --- PROCESSADOR CT-E COM SUPORTE A MÚLTIPLOS ARQUIVOS ---
 class CTeProcessorDirect:
     def __init__(self):
         self.processed_data = []
@@ -350,7 +515,7 @@ class CTeProcessorDirect:
                 'Emitente': emit_xNome or 'N/A',
                 'Valor Prestação': vTPrest,
                 'Peso Bruto (kg)': peso_bruto,
-                'Tipo de Peso Encontrado': tipo_peso_encontrado,  # NOVO CAMPO
+                'Tipo de Peso Encontrado': tipo_peso_encontrado,
                 'Remetente': rem_xNome or 'N/A',
                 'Destinatário': dest_xNome or 'N/A',
                 'Documento Destinatário': documento_destinatario,
@@ -461,8 +626,8 @@ def processador_cte():
     """Interface para o sistema de CT-e com extração do peso bruto"""
     processor = CTeProcessorDirect()
     
-    st.title("🚚 Processador de CT-e para Power BI")
-    st.markdown("### Processa arquivos XML de CT-e e gera planilha para análise")
+    st.title("🚚 Processador de CT-e para Power BI - Múltiplos Arquivos")
+    st.markdown("### Processa múltiplos arquivos XML de CT-e simultaneamente e gera planilha para análise")
     
     with st.expander("ℹ️ Informações sobre a extração do Peso", expanded=True):
         st.markdown("""
@@ -492,84 +657,58 @@ def processador_cte():
         **Resultado:** O sistema mostrará qual tipo de peso foi encontrado em cada CT-e
         """)
     
-    tab1, tab2, tab3 = st.tabs(["📤 Upload", "👀 Visualizar Dados", "📥 Exportar"])
+    tab1, tab2, tab3 = st.tabs(["📤 Upload em Lote", "👀 Visualizar Dados", "📥 Exportar"])
     
     with tab1:
-        st.header("Upload de CT-es")
-        upload_option = st.radio("Selecione o tipo de upload:", 
-                                ["Upload Individual", "Upload em Lote"])
+        st.header("Upload de Múltiplos CT-es")
         
-        if upload_option == "Upload Individual":
-            uploaded_file = st.file_uploader("Selecione um arquivo XML de CT-e", type=['xml'], key="single_cte")
-            if uploaded_file and st.button("📊 Processar CT-e", key="process_single"):
-                show_loading_animation("Analisando estrutura do XML...")
-                show_processing_animation("Extraindo dados do CT-e...")
-                
-                success, message = processor.process_single_file(uploaded_file)
-                if success:
-                    show_success_animation("CT-e processado com sucesso!")
-                    
-                    df = processor.get_dataframe()
-                    if not df.empty:
-                        ultimo_cte = df.iloc[-1]
-                        st.info(f"""
-                        **Extração bem-sucedida:**
-                        - **Peso encontrado:** {ultimo_cte['Peso Bruto (kg)']} kg
-                        - **Tipo de peso:** {ultimo_cte['Tipo de Peso Encontrado']}
-                        """)
-                else:
-                    st.error(message)
+        uploaded_files = st.file_uploader(
+            "Selecione os arquivos XML de CT-e (múltiplos)", 
+            type=['xml'], 
+            accept_multiple_files=True,
+            key="cte_multiple"
+        )
         
-        else:
-            uploaded_files = st.file_uploader("Selecione múltiplos arquivos XML de CT-e", 
-                                            type=['xml'], 
-                                            accept_multiple_files=True,
-                                            key="multiple_cte")
-            if uploaded_files and st.button("📊 Processar Todos", key="process_multiple"):
-                show_loading_animation(f"Iniciando processamento de {len(uploaded_files)} arquivos...")
-                
-                results = processor.process_multiple_files(uploaded_files)
-                show_success_animation("Processamento em lote concluído!")
-                
-                st.success(f"""
-                **Processamento concluído!**  
-                ✅ Sucessos: {results['success']}  
-                ❌ Erros: {results['errors']}
-                """)
-                
-                df = processor.get_dataframe()
-                if not df.empty:
-                    # Estatísticas dos tipos de peso encontrados
-                    tipos_peso = df['Tipo de Peso Encontrado'].value_counts()
-                    peso_total = df['Peso Bruto (kg)'].sum()
+        if uploaded_files:
+            st.info(f"📁 **{len(uploaded_files)} arquivo(s) selecionado(s)**")
+            
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                if st.button("📊 Processar Todos os CT-es", key="process_all_cte"):
+                    show_loading_animation(f"Iniciando processamento de {len(uploaded_files)} arquivos...")
                     
-                    st.info(f"""
-                    **Estatísticas de extração:**
-                    - Peso bruto total: {peso_total:,.2f} kg
-                    - Peso médio por CT-e: {df['Peso Bruto (kg)'].mean():,.2f} kg
-                    - Tipos de peso encontrados:
+                    results = processor.process_multiple_files(uploaded_files)
+                    show_success_animation("Processamento em lote concluído!")
+                    
+                    st.success(f"""
+                    **Processamento concluído!**  
+                    ✅ Sucessos: {results['success']}  
+                    ❌ Erros: {results['errors']}
                     """)
                     
-                    for tipo, quantidade in tipos_peso.items():
-                        st.write(f"  - **{tipo}**: {quantidade} CT-e(s)")
-                
-                if results['errors'] > 0:
-                    with st.expander("Ver mensagens detalhadas"):
-                        for msg in results['messages']:
-                            st.write(f"- {msg}")
-        
-        if st.button("🗑️ Limpar Dados Processados", type="secondary"):
-            processor.clear_data()
-            st.success("Dados limpos com sucesso!")
-            time.sleep(1)
-            st.rerun()
+                    # Salvar no session state
+                    st.session_state.processed_cte_files = processor.get_dataframe().to_dict('records')
+                    
+                    if results['errors'] > 0:
+                        with st.expander("Ver mensagens detalhadas"):
+                            for msg in results['messages']:
+                                st.write(f"- {msg}")
+            
+            with col2:
+                if st.button("🗑️ Limpar Dados Processados", type="secondary"):
+                    processor.clear_data()
+                    st.session_state.processed_cte_files = []
+                    st.success("Dados limpos com sucesso!")
+                    time.sleep(1)
+                    st.rerun()
     
     with tab2:
         st.header("Dados Processados")
-        df = processor.get_dataframe()
         
-        if not df.empty:
-            st.write(f"Total de CT-es processados: {len(df)}")
+        if st.session_state.processed_cte_files:
+            df = pd.DataFrame(st.session_state.processed_cte_files)
+            st.write(f"📊 **Total de CT-es processados:** {len(df)}")
             
             # Filtros
             col1, col2, col3 = st.columns(3)
@@ -653,14 +792,14 @@ def processador_cte():
                     st.plotly_chart(fig_relacao, use_container_width=True)
             
         else:
-            st.info("Nenhum CT-e processado ainda. Faça upload de arquivos na aba 'Upload'.")
+            st.info("📝 Nenhum CT-e processado ainda. Faça upload de arquivos na aba 'Upload em Lote'.")
     
     with tab3:
         st.header("Exportar para Excel")
-        df = processor.get_dataframe()
         
-        if not df.empty:
-            st.success(f"Pronto para exportar {len(df)} registros")
+        if st.session_state.processed_cte_files:
+            df = pd.DataFrame(st.session_state.processed_cte_files)
+            st.success(f"📤 Pronto para exportar {len(df)} registros")
             
             export_option = st.radio("Formato de exportação:", 
                                    ["Excel (.xlsx)", "CSV (.csv)"])
@@ -707,7 +846,7 @@ def processador_cte():
                 st.dataframe(df_export.head(10))
                 
         else:
-            st.warning("Nenhum dado disponível para exportação.")
+            st.warning("⚠️ Nenhum dado disponível para exportação.")
 
 # --- CSS E CONFIGURAÇÃO DE ESTILO ---
 def load_css():
@@ -774,12 +913,12 @@ def main():
     st.markdown("""
     <div class="cover-container">
         <img src="https://raw.githubusercontent.com/DaniloNs-creator/final/7ea6ab2a610ef8f0c11be3c34f046e7ff2cdfc6a/haefele_logo.png" class="cover-logo">
-        <h1 class="cover-title">Sistema de Processamento de Arquivos</h1>
-        <p class="cover-subtitle">Processamento de TXT e CT-e para análise de dados</p>
+        <h1 class="cover-title">Sistema de Processamento de Múltiplos Arquivos</h1>
+        <p class="cover-subtitle">Processamento ilimitado de TXT e CT-e para análise de dados</p>
     </div>
     """, unsafe_allow_html=True)
     
-    tab1, tab2 = st.tabs(["📄 Processador TXT", "🚚 Processador CT-e"])
+    tab1, tab2 = st.tabs(["📄 Processador TXT (Múltiplos)", "🚚 Processador CT-e (Múltiplos)"])
     
     with tab1:
         processador_txt()
