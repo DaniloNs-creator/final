@@ -447,14 +447,15 @@ def processador_txt():
         "Selecione os arquivos TXT (múltiplos)", 
         type=['txt'], 
         accept_multiple_files=True,
-        key="txt_multiple"
+        key="txt_multiple_upload"
     )
     
     # Opções avançadas
     with st.expander("⚙️ Configurações avançadas", expanded=False):
         padroes_adicionais = st.text_input(
             "Padrões adicionais para remoção (separados por vírgula)",
-            help="Exemplo: padrão1, padrão2, padrão3"
+            help="Exemplo: padrão1, padrão2, padrão3",
+            key="txt_patterns_input"
         )
         
         padroes = padroes_default + [
@@ -468,7 +469,7 @@ def processador_txt():
         col1, col2 = st.columns([1, 1])
         
         with col1:
-            if st.button("🔄 Processar Todos os Arquivos TXT", key="process_all_txt"):
+            if st.button("🔄 Processar Todos os Arquivos TXT", key="process_all_txt_btn"):
                 try:
                     show_loading_animation(f"Iniciando processamento de {len(uploaded_files)} arquivos...")
                     
@@ -489,7 +490,7 @@ def processador_txt():
                     st.error(f"Erro inesperado: {str(e)}")
         
         with col2:
-            if st.button("🗑️ Limpar Arquivos Processados", type="secondary"):
+            if st.button("🗑️ Limpar Arquivos Processados", type="secondary", key="clear_txt_btn"):
                 processor.limpar_dados()
                 st.session_state.processed_txt_files = []
                 st.success("Dados limpos com sucesso!")
@@ -536,7 +537,8 @@ def processador_txt():
             
             arquivo_selecionado = st.selectbox(
                 "Selecione um arquivo para visualizar:",
-                options=[arq['filename'] for arq in arquivos_processados]
+                options=[arq['filename'] for arq in arquivos_processados],
+                key="txt_file_selector"
             )
             
             arquivo = next((arq for arq in arquivos_processados if arq['filename'] == arquivo_selecionado), None)
@@ -548,7 +550,7 @@ def processador_txt():
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.text_area("Conteúdo Processado", arquivo['conteudo'], height=400)
+                    st.text_area("Conteúdo Processado", arquivo['conteudo'], height=400, key="txt_content_area")
                 
                 with col2:
                     st.info("**Informações do processamento:**")
@@ -560,7 +562,7 @@ def processador_txt():
             
             # Download individual
             st.write("**Download Individual:**")
-            for arq in arquivos_processados:
+            for i, arq in enumerate(arquivos_processados):
                 buffer = BytesIO()
                 buffer.write(arq['conteudo'].encode('utf-8'))
                 buffer.seek(0)
@@ -570,12 +572,12 @@ def processador_txt():
                     data=buffer,
                     file_name=f"processado_{arq['filename']}",
                     mime="text/plain",
-                    key=f"download_{arq['filename']}"
+                    key=f"download_txt_{i}"
                 )
             
             # Download em lote (ZIP)
             st.write("**Download em Lote (ZIP):**")
-            if st.button("📦 Gerar Pacote ZIP com Todos os Arquivos"):
+            if st.button("📦 Gerar Pacote ZIP com Todos os Arquivos", key="generate_zip_btn"):
                 show_processing_animation("Criando arquivo ZIP...")
                 
                 zip_buffer = BytesIO()
@@ -592,7 +594,8 @@ def processador_txt():
                     label="📥 Baixar Todos os Arquivos (ZIP)",
                     data=zip_buffer,
                     file_name="arquivos_processados.zip",
-                    mime="application/zip"
+                    mime="application/zip",
+                    key="download_zip_btn"
                 )
 
 # --- PROCESSADOR CT-E COM BANCO DE DADOS INTEGRADO ---
@@ -805,8 +808,8 @@ def add_simple_trendline(fig, x, y):
         pass
 
 # --- INTERFACE DO BANCO DE DADOS ---
-def setup_xml_database_interface():
-    """Configura a interface do banco de dados"""
+def setup_xml_database_interface(key_suffix=""):
+    """Configura a interface do banco de dados com chave única"""
     st.title("💾 Banco de Dados de XML")
     
     # Inicializa o gerenciador do banco
@@ -824,12 +827,13 @@ def setup_xml_database_interface():
             "Selecione os arquivos XML", 
             type=['xml'], 
             accept_multiple_files=True,
-            key="db_upload"
+            key=f"db_upload{key_suffix}"
         )
         
-        tags = st.text_input("Tags (opcional)", help="Tags para facilitar buscas futuras")
+        tags = st.text_input("Tags (opcional)", help="Tags para facilitar buscas futuras", 
+                           key=f"db_tags{key_suffix}")
         
-        if uploaded_files and st.button("💾 Salvar no Banco de Dados"):
+        if uploaded_files and st.button("💾 Salvar no Banco de Dados", key=f"db_save_btn{key_suffix}"):
             progress_bar = st.progress(0)
             status_text = st.empty()
             
@@ -865,7 +869,7 @@ def setup_xml_database_interface():
             """)
             
             if error_messages:
-                with st.expander("Ver mensagens de erro"):
+                with st.expander("Ver mensagens de erro", key=f"error_expander{key_suffix}"):
                     for msg in error_messages:
                         st.error(msg)
     
@@ -875,17 +879,18 @@ def setup_xml_database_interface():
         col1, col2 = st.columns([3, 1])
         
         with col1:
-            search_term = st.text_input("Termo de busca")
+            search_term = st.text_input("Termo de busca", key=f"search_term{key_suffix}")
         
         with col2:
             search_type = st.selectbox(
                 "Tipo de busca",
-                ["all", "filename", "nCT", "emitente"]
+                ["all", "filename", "nCT", "emitente"],
+                key=f"search_type{key_suffix}"
             )
         
-        limit = st.slider("Limite de resultados", 10, 500, 100)
+        limit = st.slider("Limite de resultados", 10, 500, 100, key=f"search_limit{key_suffix}")
         
-        if st.button("🔍 Buscar") or search_term:
+        if st.button("🔍 Buscar", key=f"search_btn{key_suffix}") or search_term:
             results = db_manager.search_xml(search_term, search_type, limit)
             
             if results:
@@ -901,14 +906,14 @@ def setup_xml_database_interface():
                 
                 # Seleção para visualização detalhada
                 selected_id = st.selectbox("Selecionar XML para detalhes:", 
-                                         [f"{r[0]} - {r[1]}" for r in results])
+                                         [f"{r[0]} - {r[1]}" for r in results],
+                                         key=f"xml_selector{key_suffix}")
                 
-                if selected_id:
+                if selected_id and st.button("Visualizar XML", key=f"view_xml_btn{key_suffix}"):
                     xml_id = int(selected_id.split(' - ')[0])
-                    if st.button("Visualizar XML"):
-                        xml_data = db_manager.get_xml_content(xml_id)
-                        if xml_data:
-                            st.text_area("Conteúdo XML", xml_data[1], height=300)
+                    xml_data = db_manager.get_xml_content(xml_id)
+                    if xml_data:
+                        st.text_area("Conteúdo XML", xml_data[1], height=300, key=f"xml_content{key_suffix}")
             else:
                 st.info("Nenhum arquivo encontrado.")
     
@@ -921,25 +926,25 @@ def setup_xml_database_interface():
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
-                st.metric("Total de Arquivos", stats['total_files'])
+                st.metric("Total de Arquivos", stats['total_files'], key=f"metric_files{key_suffix}")
             
             with col2:
                 size_mb = stats['total_size_bytes'] / (1024 * 1024)
-                st.metric("Tamanho Total", f"{size_mb:.2f} MB")
+                st.metric("Tamanho Total", f"{size_mb:.2f} MB", key=f"metric_size{key_suffix}")
             
             with col3:
-                st.metric("Emitentes Únicos", stats['unique_emitters'])
+                st.metric("Emitentes Únicos", stats['unique_emitters'], key=f"metric_emitters{key_suffix}")
             
             with col4:
-                st.metric("Valor Total", f"R$ {stats['total_value']:,.2f}")
+                st.metric("Valor Total", f"R$ {stats['total_value']:,.2f}", key=f"metric_value{key_suffix}")
             
             col5, col6 = st.columns(2)
             with col5:
-                st.metric("Peso Total", f"{stats['total_weight']:,.2f} kg")
+                st.metric("Peso Total", f"{stats['total_weight']:,.2f} kg", key=f"metric_weight{key_suffix}")
             
             # Exportar dados
             st.subheader("Exportar Dados")
-            if st.button("📊 Exportar para DataFrame"):
+            if st.button("📊 Exportar para DataFrame", key=f"export_df_btn{key_suffix}"):
                 df = db_manager.export_to_dataframe()
                 st.dataframe(df, use_container_width=True)
                 
@@ -949,7 +954,8 @@ def setup_xml_database_interface():
                     label="📥 Baixar CSV",
                     data=csv,
                     file_name="dados_cte_banco.csv",
-                    mime="text/csv"
+                    mime="text/csv",
+                    key=f"download_csv{key_suffix}"
                 )
     
     with tab4:
@@ -958,7 +964,7 @@ def setup_xml_database_interface():
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("🔄 Otimizar Banco"):
+            if st.button("🔄 Otimizar Banco", key=f"optimize_btn{key_suffix}"):
                 try:
                     conn = sqlite3.connect(db_manager.db_path)
                     conn.execute("VACUUM")
@@ -967,13 +973,13 @@ def setup_xml_database_interface():
                 except Exception as e:
                     st.error(f"Erro: {e}")
             
-            if st.button("📋 Informações do Sistema"):
+            if st.button("📋 Informações do Sistema", key=f"info_btn{key_suffix}"):
                 st.info(f"**Caminho do banco:** {db_manager.db_path}")
                 st.info("**Capacidade estimada:** Suporte a 50.000+ XMLs")
                 st.info("**Recursos:** Prevenção de duplicatas, Busca indexada")
         
         with col2:
-            if st.button("🧹 Limpar Cache da Sessão"):
+            if st.button("🧹 Limpar Cache da Sessão", key=f"clear_cache_btn{key_suffix}"):
                 st.session_state.processed_cte_files = []
                 st.session_state.processed_txt_files = []
                 st.success("Cache limpo com sucesso!")
@@ -991,7 +997,7 @@ def processador_cte():
     with st.expander("ℹ️ Informações", expanded=True):
         st.markdown("""
         **Funcionalidades:**
-       - **Armazenamento permanente** no banco de dados
+        - **Armazenamento permanente** no banco de dados
         - **Prevenção de duplicatas** através de hash MD5
         - **Busca rápida** por múltiplos critérios
         - **Capacidade para 50.000+ XMLs**
@@ -1006,19 +1012,19 @@ def processador_cte():
             "Selecione os arquivos XML de CT-e", 
             type=['xml'], 
             accept_multiple_files=True,
-            key="cte_multiple"
+            key="cte_multiple_upload_main"
         )
         
         col1, col2 = st.columns(2)
         with col1:
-            save_to_db = st.checkbox("💾 Salvar no banco de dados", value=True)
+            save_to_db = st.checkbox("💾 Salvar no banco de dados", value=True, key="save_to_db_check")
         with col2:
-            tags = st.text_input("Tags para organização", value="cte,importado")
+            tags = st.text_input("Tags para organização", value="cte,importado", key="cte_tags_input")
         
         if uploaded_files:
             st.info(f"📁 **{len(uploaded_files)} arquivo(s) selecionado(s)**")
             
-            if st.button("📊 Processar e Salvar CT-es"):
+            if st.button("📊 Processar e Salvar CT-es", key="process_cte_btn"):
                 show_loading_animation(f"Processando {len(uploaded_files)} arquivos...")
                 
                 results = processor.process_multiple_files(uploaded_files, save_to_db, tags)
@@ -1036,7 +1042,7 @@ def processador_cte():
                     st.session_state.processed_cte_files = df.to_dict('records')
                 
                 if results['errors'] > 0:
-                    with st.expander("Ver mensagens detalhadas"):
+                    with st.expander("Ver mensagens detalhadas", key="cte_errors_expander"):
                         for msg in results['messages']:
                             st.write(f"- {msg}")
     
@@ -1045,16 +1051,17 @@ def processador_cte():
         
         # Opção de visualizar do banco ou da sessão
         view_option = st.radio("Fonte dos dados:", 
-                              ["Sessão Atual", "Banco de Dados"])
+                              ["Sessão Atual", "Banco de Dados"],
+                              key="data_source_radio")
         
         if view_option == "Sessão Atual" and st.session_state.processed_cte_files:
             df = pd.DataFrame(st.session_state.processed_cte_files)
-            display_data_interface(df)
+            display_data_interface(df, "session")
         elif view_option == "Banco de Dados":
-            limit = st.slider("Limite de registros", 10, 1000, 100)
+            limit = st.slider("Limite de registros", 10, 1000, 100, key="db_limit_slider")
             df = st.session_state.db_manager.export_to_dataframe(limit)
             if not df.empty:
-                display_data_interface(df)
+                display_data_interface(df, "database")
             else:
                 st.info("Nenhum dado encontrado no banco de dados.")
         else:
@@ -1064,7 +1071,8 @@ def processador_cte():
         st.header("Exportar Dados")
         
         export_source = st.radio("Fonte para exportação:", 
-                                ["Sessão Atual", "Banco de Dados"])
+                                ["Sessão Atual", "Banco de Dados"],
+                                key="export_source_radio")
         
         if export_source == "Sessão Atual" and st.session_state.processed_cte_files:
             df_export = pd.DataFrame(st.session_state.processed_cte_files)
@@ -1074,7 +1082,7 @@ def processador_cte():
         if not df_export.empty:
             st.success(f"📤 Pronto para exportar {len(df_export)} registros")
             
-            export_option = st.radio("Formato:", ["Excel (.xlsx)", "CSV (.csv)"])
+            export_option = st.radio("Formato:", ["Excel (.xlsx)", "CSV (.csv)"], key="export_format_radio")
             
             if export_option == "Excel (.xlsx)":
                 output = BytesIO()
@@ -1086,7 +1094,8 @@ def processador_cte():
                     label="📥 Baixar Excel",
                     data=output,
                     file_name="dados_cte.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_excel_btn"
                 )
             else:
                 csv = df_export.to_csv(index=False).encode('utf-8')
@@ -1094,28 +1103,32 @@ def processador_cte():
                     label="📥 Baixar CSV",
                     data=csv,
                     file_name="dados_cte.csv",
-                    mime="text/csv"
+                    mime="text/csv",
+                    key="download_csv_btn"
                 )
         else:
             st.warning("Nenhum dado disponível para exportação.")
     
     with tab4:
-        setup_xml_database_interface()
+        setup_xml_database_interface("_cte_tab")
 
-def display_data_interface(df):
+def display_data_interface(df, source_key):
     """Interface para exibição dos dados"""
     st.write(f"📊 **Total de registros:** {len(df)}")
     
     # Filtros
     col1, col2, col3 = st.columns(3)
     with col1:
-        uf_filter = st.multiselect("Filtrar por UF Início", options=df['UF Início'].unique())
+        uf_filter = st.multiselect("Filtrar por UF Início", options=df['UF Início'].unique(), 
+                                 key=f"uf_filter_{source_key}")
     with col2:
-        uf_destino_filter = st.multiselect("Filtrar por UF Destino", options=df['UF Destino'].unique())
+        uf_destino_filter = st.multiselect("Filtrar por UF Destino", options=df['UF Destino'].unique(),
+                                         key=f"uf_dest_filter_{source_key}")
     with col3:
         if 'Tipo de Peso Encontrado' in df.columns:
             tipo_peso_filter = st.multiselect("Filtrar por Tipo de Peso", 
-                                            options=df['Tipo de Peso Encontrado'].unique())
+                                            options=df['Tipo de Peso Encontrado'].unique(),
+                                            key=f"peso_filter_{source_key}")
     
     # Aplicar filtros
     filtered_df = df.copy()
@@ -1123,7 +1136,7 @@ def display_data_interface(df):
         filtered_df = filtered_df[filtered_df['UF Início'].isin(uf_filter)]
     if uf_destino_filter:
         filtered_df = filtered_df[filtered_df['UF Destino'].isin(uf_destino_filter)]
-    if 'Tipo de Peso Encontrado' in df.columns and tipo_peso_filter:
+    if 'Tipo de Peso Encontrado' in df.columns and 'tipo_peso_filter' in locals():
         filtered_df = filtered_df[filtered_df['Tipo de Peso Encontrado'].isin(tipo_peso_filter)]
     
     # Exibir dados
@@ -1133,10 +1146,10 @@ def display_data_interface(df):
     st.subheader("📈 Estatísticas")
     col1, col2, col3, col4 = st.columns(4)
     
-    col1.metric("Valor Total", f"R$ {filtered_df['Valor Prestação'].sum():,.2f}")
-    col2.metric("Peso Total", f"{filtered_df['Peso Bruto (kg)'].sum():,.2f} kg")
-    col3.metric("Média Peso", f"{filtered_df['Peso Bruto (kg)'].mean():,.2f} kg")
-    col4.metric("Registros", len(filtered_df))
+    col1.metric("Valor Total", f"R$ {filtered_df['Valor Prestação'].sum():,.2f}", key=f"val_total_{source_key}")
+    col2.metric("Peso Total", f"{filtered_df['Peso Bruto (kg)'].sum():,.2f} kg", key=f"peso_total_{source_key}")
+    col3.metric("Média Peso", f"{filtered_df['Peso Bruto (kg)'].mean():,.2f} kg", key=f"media_peso_{source_key}")
+    col4.metric("Registros", len(filtered_df), key=f"registros_{source_key}")
 
 # --- CSS E CONFIGURAÇÃO DE ESTILO ---
 def load_css():
@@ -1197,7 +1210,7 @@ def main():
         processador_cte()
     
     with tab3:
-        setup_xml_database_interface()
+        setup_xml_database_interface("_main")
 
 if __name__ == "__main__":
     try:
