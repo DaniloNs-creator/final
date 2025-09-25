@@ -597,6 +597,8 @@ def processador_txt():
                     mime="application/zip",
                     key="download_zip_txt"
                 )
+    else:
+        st.info("Nenhum arquivo TXT processado ainda. Faça upload de arquivos acima.")
 
 # --- PROCESSADOR CT-E COM BANCO DE DADOS INTEGRADO ---
 class CTeProcessorWithDB:
@@ -869,7 +871,7 @@ def setup_xml_database_interface(key_suffix=""):
             """)
             
             if error_messages:
-                with st.expander("Ver mensagens de erro", key=f"error_expander{key_suffix}"):
+                with st.expander("Ver mensagens de erro"):
                     for msg in error_messages:
                         st.error(msg)
     
@@ -915,7 +917,7 @@ def setup_xml_database_interface(key_suffix=""):
                     if xml_data:
                         st.text_area("Conteúdo XML", xml_data[1], height=300, key=f"xml_content{key_suffix}")
             else:
-                st.info("Nenhum arquivo encontrado.", key=f"no_results{key_suffix}")
+                st.info("Nenhum arquivo encontrado.")
     
     with tab3:
         st.header("Estatísticas do Banco de Dados")
@@ -926,21 +928,21 @@ def setup_xml_database_interface(key_suffix=""):
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
-                st.metric("Total de Arquivos", stats['total_files'], key=f"metric_files{key_suffix}")
+                st.metric("Total de Arquivos", stats['total_files'])
             
             with col2:
                 size_mb = stats['total_size_bytes'] / (1024 * 1024)
-                st.metric("Tamanho Total", f"{size_mb:.2f} MB", key=f"metric_size{key_suffix}")
+                st.metric("Tamanho Total", f"{size_mb:.2f} MB")
             
             with col3:
-                st.metric("Emitentes Únicos", stats['unique_emitters'], key=f"metric_emitters{key_suffix}")
+                st.metric("Emitentes Únicos", stats['unique_emitters'])
             
             with col4:
-                st.metric("Valor Total", f"R$ {stats['total_value']:,.2f}", key=f"metric_value{key_suffix}")
+                st.metric("Valor Total", f"R$ {stats['total_value']:,.2f}")
             
             col5, col6 = st.columns(2)
             with col5:
-                st.metric("Peso Total", f"{stats['total_weight']:,.2f} kg", key=f"metric_weight{key_suffix}")
+                st.metric("Peso Total", f"{stats['total_weight']:,.2f} kg")
             
             # Exportar dados
             st.subheader("Exportar Dados")
@@ -957,6 +959,8 @@ def setup_xml_database_interface(key_suffix=""):
                     mime="text/csv",
                     key=f"download_csv{key_suffix}"
                 )
+        else:
+            st.info("Nenhum dado disponível no banco.")
     
     with tab4:
         st.header("Manutenção do Banco de Dados")
@@ -1042,9 +1046,11 @@ def processador_cte():
                     st.session_state.processed_cte_files = df.to_dict('records')
                 
                 if results['errors'] > 0:
-                    with st.expander("Ver mensagens detalhadas", key="messages_cte"):
+                    with st.expander("Ver mensagens detalhadas"):
                         for msg in results['messages']:
                             st.write(f"- {msg}")
+        else:
+            st.info("Selecione os arquivos XML de CT-e para processar.")
     
     with tab2:
         st.header("Dados Processados")
@@ -1063,9 +1069,9 @@ def processador_cte():
             if not df.empty:
                 display_data_interface(df, "banco")
             else:
-                st.info("Nenhum dado encontrado no banco de dados.", key="no_data_bd")
+                st.info("Nenhum dado encontrado no banco de dados.")
         else:
-            st.info("Nenhum CT-e processado ainda.", key="no_data_cte")
+            st.info("Nenhum CT-e processado ainda.")
     
     with tab3:
         st.header("Exportar Dados")
@@ -1107,7 +1113,7 @@ def processador_cte():
                     key="download_csv_cte"
                 )
         else:
-            st.warning("Nenhum dado disponível para exportação.", key="no_export_data")
+            st.warning("Nenhum dado disponível para exportação.")
     
     with tab4:
         setup_xml_database_interface("_cte_tab")
@@ -1144,10 +1150,10 @@ def display_data_interface(df, source):
     st.subheader("📈 Estatísticas")
     col1, col2, col3, col4 = st.columns(4)
     
-    col1.metric("Valor Total", f"R$ {filtered_df['Valor Prestação'].sum():,.2f}", key=f"valor_total_{source}")
-    col2.metric("Peso Total", f"{filtered_df['Peso Bruto (kg)'].sum():,.2f} kg", key=f"peso_total_{source}")
-    col3.metric("Média Peso", f"{filtered_df['Peso Bruto (kg)'].mean():,.2f} kg", key=f"media_peso_{source}")
-    col4.metric("Registros", len(filtered_df), key=f"registros_{source}")
+    col1.metric("Valor Total", f"R$ {filtered_df['Valor Prestação'].sum():,.2f}")
+    col2.metric("Peso Total", f"{filtered_df['Peso Bruto (kg)'].sum():,.2f} kg")
+    col3.metric("Média Peso", f"{filtered_df['Peso Bruto (kg)'].mean():,.2f} kg")
+    col4.metric("Registros", len(filtered_df))
 
 # --- CSS E CONFIGURAÇÃO DE ESTILO ---
 def load_css():
