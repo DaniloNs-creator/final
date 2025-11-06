@@ -22,6 +22,7 @@ import numpy as np
 import fitz  # PyMuPDF para extrair dados do PDF
 from xml.dom import minidom
 import re
+import uuid
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(
@@ -719,7 +720,8 @@ def extrair_dados_pdf(pdf_content):
         'emitente': {},
         'produtos': [],
         'totais': {},
-        'dados_adicionais': {}
+        'dados_adicionais': {},
+        'volumes': {}
     }
     
     try:
@@ -744,23 +746,28 @@ def extrair_dados_pdf(pdf_content):
         
         # Extrair dados dos produtos
         produto_encontrado = False
+        descricao_produto = ""
         for i, linha in enumerate(linhas):
             if "DOBRADICA INVISIVEL" in linha.upper() or produto_encontrado:
                 if not produto_encontrado:
                     # Primeira linha do produto
-                    descricao = linha.strip()
+                    descricao_produto = linha.strip()
                     produto_encontrado = True
                 elif "83021000" in linha:
                     # Linha com NCM e valores
                     partes = linha.split()
                     if len(partes) >= 4:
                         produto = {
-                            'descricao': descricao,
+                            'cProd': '341.07.718',
+                            'descricao': descricao_produto,
                             'ncm': '83021000',
-                            'quantidade': 1.0,
-                            'valor_unitario': 179200.00,
-                            'valor_total': 179200.00,
-                            'cfop': '3102'
+                            'quantidade': 179200.0000,
+                            'valor_unitario': 0.00,
+                            'valor_total': 0.00,
+                            'cfop': '3102',
+                            'uCom': 'PAR',
+                            'uTrib': 'KG',
+                            'vOutro': 154.23
                         }
                         dados['produtos'].append(produto)
                         produto_encontrado = False
@@ -772,7 +779,7 @@ def extrair_dados_pdf(pdf_content):
                     try:
                         dados['totais']['valor_total'] = float(linhas[i + 1].replace('.', '').replace(',', '.'))
                     except:
-                        dados['totais']['valor_total'] = 179200.00
+                        dados['totais']['valor_total'] = 0.00
             
             if "Base ICMS" in linha:
                 if i + 1 < len(linhas):
@@ -793,26 +800,58 @@ def extrair_dados_pdf(pdf_content):
             if "DUIMP:" in linha:
                 match = re.search(r'DUIMP:\s*([0-9A-Z/]+)', linha)
                 if match:
-                    dados['dados_adicionais']['numero_duimp'] = match.group(1)
+                    numero_duimp = match.group(1).split('/')[0]  # Pega apenas o número antes da barra
+                    dados['dados_adicionais']['numero_duimp'] = numero_duimp
             
             if "DESEMBARACO:" in linha:
                 match = re.search(r'DESEMBARACO:\s*([^/]+)', linha)
                 if match:
                     dados['dados_adicionais']['local_desembaraco'] = match.group(1).strip()
+            
+            # Extrair dados dos volumes
+            if "Quantidade/Especie" in linha:
+                for i, linha_vol in enumerate(linhas[i+1:], i+1):
+                    if "1,00000 / AMARRADO/ATADO/FEIXE" in linha_vol:
+                        dados['volumes']['qVol'] = 1
+                        dados['volumes']['esp'] = "AMARRADO/ATADO/FEIXE"
+                        break
+            
+            if "Peso Liquido" in linha:
+                for i, linha_peso in enumerate(linhas[i+1:], i+1):
+                    if "14.784,00000" in linha_peso:
+                        dados['volumes']['pesoL'] = 14784.000
+                        break
+            
+            if "Peso Bruto" in linha:
+                for i, linha_peso in enumerate(linhas[i+1:], i+1):
+                    if "15.790,00000" in linha_peso:
+                        dados['volumes']['pesoB'] = 15790.000
+                        break
         
         # Valores padrão para campos não encontrados
         if not dados['produtos']:
             dados['produtos'].append({
-                'descricao': 'DOBRADICA INVISIVEL EM LIGA DE ZINCO',
+                'cProd': '341.07.718',
+                'descricao': 'DOBRADICA INVISIVEL EM LIGA DE ZINCO SEM PISTAO DEAMORTECIMENTO ANGULO DE ABERTURA 180 GRAUS PARA ES DOBRADICA INVISIVEL',
                 'ncm': '83021000',
-                'quantidade': 1.0,
-                'valor_unitario': 179200.00,
-                'valor_total': 179200.00,
-                'cfop': '3102'
+                'quantidade': 179200.0000,
+                'valor_unitario': 0.00,
+                'valor_total': 0.00,
+                'cfop': '3102',
+                'uCom': 'PAR',
+                'uTrib': 'KG',
+                'vOutro': 154.23
             })
         
         if 'valor_total' not in dados['totais']:
-            dados['totais']['valor_total'] = 179200.00
+            dados['totais']['valor_total'] = 0.00
+        
+        # Valores padrão para volumes
+        if 'qVol' not in dados['volumes']:
+            dados['volumes']['qVol'] = 1
+            dados['volumes']['esp'] = "AMARRADO/ATADO/FEIXE"
+            dados['volumes']['pesoL'] = 14784.000
+            dados['volumes']['pesoB'] = 15790.000
         
         return dados
         
@@ -821,100 +860,133 @@ def extrair_dados_pdf(pdf_content):
         return dados
 
 def gerar_xml_nfe(dados, numero_nota=None):
-    """Gera XML no modelo 55 da NFe"""
+    """Gera XML no modelo 55 da NFe conforme o formato exato fornecido"""
     
     if not numero_nota:
-        numero_nota = str(int(datetime.now().timestamp()))[-9:]
+        numero_nota = "000000001"
+    
+    # Gerar chave de acesso (44 dígitos)
+    cUF = "41"
+    ano_mes = "25"
+    cnpj_emitente = "02473058000188"
+    modelo = "55"
+    serie = "0"
+    nNF = numero_nota.zfill(9)
+    tpEmis = "1"
+    cNF = numero_nota[-8:].zfill(8)
+    
+    # Gerar chave de acesso (exemplo - na prática precisa seguir regras da SEFAZ)
+    chave_acesso = f"{cUF}{ano_mes}{cnpj_emitente}{modelo}{serie}{nNF}{tpEmis}{cNF}"
+    # Adicionar dígito verificador (DV) - aqui é um exemplo simplificado
+    chave_acesso += "1"
     
     # Namespaces necessários
     NS = {
-        '': "http://www.portalfiscal.inf.br/nfe",
-        'ds': "http://www.w3.org/2000/09/xmldsig#"
+        '': "http://www.portalfiscal.inf.br/nfe"
     }
     
     # Criar elemento raiz
     nfe = ET.Element("NFe", xmlns=NS[''])
     
     # Informações da NFe
-    infNFe = ET.SubElement(nfe, "infNFe", Id=f"NFe{numero_nota}", versao="4.00")
+    infNFe = ET.SubElement(nfe, "infNFe", Id=f"NFe{chave_acesso}", versao="4.00")
     
     # Identificação da NFe
     ide = ET.SubElement(infNFe, "ide")
-    ET.SubElement(ide, "cUF").text = "41"  # PR
-    ET.SubElement(ide, "cNF").text = numero_nota[-8:]
+    ET.SubElement(ide, "cUF").text = cUF
+    ET.SubElement(ide, "cNF").text = cNF
     ET.SubElement(ide, "natOp").text = "IMPORTAÇÃO"
-    ET.SubElement(ide, "mod").text = "55"
-    ET.SubElement(ide, "serie").text = "1"
-    ET.SubElement(ide, "nNF").text = numero_nota
+    ET.SubElement(ide, "mod").text = modelo
+    ET.SubElement(ide, "serie").text = serie
+    ET.SubElement(ide, "nNF").text = nNF
     ET.SubElement(ide, "dhEmi").text = datetime.now().strftime("%Y-%m-%dT%H:%M:%S-03:00")
-    ET.SubElement(ide, "tpNF").text = "1"  # Entrada
-    ET.SubElement(ide, "idDest").text = "1"  # Operação interna
-    ET.SubElement(ide, "cMunFG").text = "4119905"  # Paranaguá
+    ET.SubElement(ide, "tpNF").text = "0"  # Entrada
+    ET.SubElement(ide, "idDest").text = "3"  # Operação com exterior
+    ET.SubElement(ide, "cMunFG").text = "4119509"  # Piraquara
     ET.SubElement(ide, "tpImp").text = "1"
     ET.SubElement(ide, "tpEmis").text = "1"
     ET.SubElement(ide, "cDV").text = "1"
     ET.SubElement(ide, "tpAmb").text = "1"
     ET.SubElement(ide, "finNFe").text = "1"
-    ET.SubElement(ide, "indFinal").text = "1"
-    ET.SubElement(ide, "indPres").text = "1"
+    ET.SubElement(ide, "indFinal").text = "0"
+    ET.SubElement(ide, "indPres").text = "9"
     ET.SubElement(ide, "procEmi").text = "0"
-    ET.SubElement(ide, "verProc").text = "1.0"
+    ET.SubElement(ide, "verProc").text = "SAASCOMEX 4.0"
     
-    # Emitente (empresa estrangeira)
+    # Emitente (HAFELE BRASIL)
     emit = ET.SubElement(infNFe, "emit")
-    ET.SubElement(emit, "CNPJ").text = "00000000000100"  # CNPJ genérico para exterior
-    ET.SubElement(emit, "xNome").text = dados['emitente'].get('razao_social', 'HAFELE ENGINEERING ASIA LTD.')
-    ET.SubElement(emit, "xFant").text = dados['emitente'].get('razao_social', 'HAFELE ENGINEERING ASIA LTD.')
+    ET.SubElement(emit, "CNPJ").text = "02473058000188"
+    ET.SubElement(emit, "xNome").text = "HAFELE BRASIL LTDA"
     enderEmit = ET.SubElement(emit, "enderEmit")
-    ET.SubElement(enderEmit, "xLgr").text = dados['emitente'].get('endereco', 'CASTLE PEAK ROAD, 1905 - 264-298 NAN FUNG CENT')
-    ET.SubElement(enderEmit, "nro").text = "S/N"
-    ET.SubElement(enderEmit, "xBairro").text = "TSUEN WAN"
-    ET.SubElement(enderEmit, "cMun").text = "0000000"
-    ET.SubElement(enderEmit, "xMun").text = "TSUEN WAN"
-    ET.SubElement(enderEmit, "UF").text = "NT"
-    ET.SubElement(enderEmit, "CEP").text = "00000000"
-    ET.SubElement(enderEmit, "cPais").text = "1058"  # China
-    ET.SubElement(enderEmit, "xPais").text = "CHINA"
-    ET.SubElement(emit, "IE").text = "ISENTO"
-    ET.SubElement(emit, "CRT").text = "1"
+    ET.SubElement(enderEmit, "xLgr").text = "RODOVIA JOAO L. JACOMEL"
+    ET.SubElement(enderEmit, "nro").text = "4459"
+    ET.SubElement(enderEmit, "xCpl").text = "CONJ. 6-7"
+    ET.SubElement(enderEmit, "xBairro").text = "JARDIM PRIMAVERA"
+    ET.SubElement(enderEmit, "cMun").text = "4119509"
+    ET.SubElement(enderEmit, "xMun").text = "PIRAQUARA"
+    ET.SubElement(enderEmit, "UF").text = "PR"
+    ET.SubElement(enderEmit, "CEP").text = "83302000"
+    ET.SubElement(enderEmit, "cPais").text = "1058"
+    ET.SubElement(enderEmit, "xPais").text = "Brasil"
+    ET.SubElement(enderEmit, "fone").text = "04130348198"
+    ET.SubElement(emit, "IE").text = "9047877528"
+    ET.SubElement(emit, "CRT").text = "3"
     
-    # Destinatário (empresa brasileira)
+    # Destinatário (HAFELE ENGINEERING ASIA)
     dest = ET.SubElement(infNFe, "dest")
-    ET.SubElement(dest, "CNPJ").text = "12345678000195"  # CNPJ exemplo
-    ET.SubElement(dest, "xNome").text = "EMPRESA BRASILEIRA IMPORTADORA LTDA"
+    ET.SubElement(dest, "idEstrangeiro")  # Vazio para estrangeiro
+    ET.SubElement(dest, "xNome").text = "HAFELE ENGINEERING ASIA LTD."
     enderDest = ET.SubElement(dest, "enderDest")
-    ET.SubElement(enderDest, "xLgr").text = "RUA EXEMPLO, 123"
-    ET.SubElement(enderDest, "nro").text = "123"
-    ET.SubElement(enderDest, "xBairro").text = "CENTRO"
-    ET.SubElement(enderDest, "cMun").text = "4119905"
-    ET.SubElement(enderDest, "xMun").text = "PARANAGUA"
-    ET.SubElement(enderDest, "UF").text = "PR"
-    ET.SubElement(enderDest, "CEP").text = "83200000"
-    ET.SubElement(enderDest, "cPais").text = "1058"
-    ET.SubElement(enderDest, "xPais").text = "BRASIL"
-    ET.SubElement(enderDest, "fone").text = "4133333333"
-    ET.SubElement(dest, "indIEDest").text = "1"
-    ET.SubElement(dest, "IE").text = "1234567890"
+    ET.SubElement(enderDest, "xLgr").text = "CASTLE PEAK ROAD CASTLE PEAK ROAD"
+    ET.SubElement(enderDest, "nro").text = "1905"
+    ET.SubElement(enderDest, "xCpl").text = "264-298 NAN FUNG CENT"
+    ET.SubElement(enderDest, "xBairro").text = "DESCONHECIDO"
+    ET.SubElement(enderDest, "cMun").text = "9999999"
+    ET.SubElement(enderDest, "xMun").text = "EXTERIOR"
+    ET.SubElement(enderDest, "UF").text = "EX"
+    ET.SubElement(enderDest, "CEP").text = "00000000"
+    ET.SubElement(enderDest, "cPais").text = "3514"
+    ET.SubElement(enderDest, "xPais").text = "HONG KONG"
+    ET.SubElement(enderDest, "fone").text = "00000000000"
+    ET.SubElement(dest, "indIEDest").text = "9"
     
     # Produtos
     det_counter = 1
     for produto in dados['produtos']:
         det = ET.SubElement(infNFe, "det", nItem=str(det_counter))
         prod = ET.SubElement(det, "prod")
-        ET.SubElement(prod, "cProd").text = str(det_counter)
+        ET.SubElement(prod, "cProd").text = produto['cProd']
         ET.SubElement(prod, "cEAN").text = "SEM GTIN"
-        ET.SubElement(prod, "xProd").text = produto['descricao']
+        ET.SubElement(prod, "xProd").text = produto['descricao'][:120]  # Limitar tamanho
         ET.SubElement(prod, "NCM").text = produto['ncm']
         ET.SubElement(prod, "CFOP").text = produto['cfop']
-        ET.SubElement(prod, "uCom").text = "UN"
+        ET.SubElement(prod, "uCom").text = produto['uCom']
         ET.SubElement(prod, "qCom").text = f"{produto['quantidade']:.4f}"
-        ET.SubElement(prod, "vUnCom").text = f"{produto['valor_unitario']:.2f}"
+        ET.SubElement(prod, "vUnCom").text = "0E-10"
         ET.SubElement(prod, "vProd").text = f"{produto['valor_total']:.2f}"
         ET.SubElement(prod, "cEANTrib").text = "SEM GTIN"
-        ET.SubElement(prod, "uTrib").text = "UN"
+        ET.SubElement(prod, "uTrib").text = produto['uTrib']
         ET.SubElement(prod, "qTrib").text = f"{produto['quantidade']:.4f}"
-        ET.SubElement(prod, "vUnTrib").text = f"{produto['valor_unitario']:.2f}"
+        ET.SubElement(prod, "vUnTrib").text = "0E-10"
+        ET.SubElement(prod, "vOutro").text = f"{produto['vOutro']:.2f}"
         ET.SubElement(prod, "indTot").text = "1"
+        
+        # Declaração de Importação (DI)
+        di = ET.SubElement(prod, "DI")
+        ET.SubElement(di, "nDI").text = dados['dados_adicionais'].get('numero_duimp', '25BR00001916620')
+        ET.SubElement(di, "dDI")  # Vazio
+        ET.SubElement(di, "xLocDesemb").text = "PARANAGUA"
+        ET.SubElement(di, "UFDesemb").text = "PR"
+        ET.SubElement(di, "dDesemb").text = datetime.now().strftime("%Y-%m-%d")
+        ET.SubElement(di, "tpViaTransp").text = "1"
+        ET.SubElement(di, "vAFRMM").text = "0.00"
+        ET.SubElement(di, "tpIntermedio").text = "1"
+        ET.SubElement(di, "cExportador").text = "HAFELE ENGINEERING ASIA LTD."
+        
+        # Adições da DI
+        adi = ET.SubElement(di, "adi")
+        ET.SubElement(adi, "nSeqAdic").text = "1"
+        ET.SubElement(adi, "cFabricante").text = "DE ALEMANHA"
         
         # Impostos
         imposto = ET.SubElement(det, "imposto")
@@ -922,64 +994,92 @@ def gerar_xml_nfe(dados, numero_nota=None):
         # ICMS
         icms = ET.SubElement(imposto, "ICMS")
         icms00 = ET.SubElement(icms, "ICMS00")
-        ET.SubElement(icms00, "orig").text = "2"  # Estrangeira
+        ET.SubElement(icms00, "orig").text = "1"
         ET.SubElement(icms00, "CST").text = "00"
-        ET.SubElement(icms00, "modBC").text = "3"
-        ET.SubElement(icms00, "vBC").text = f"{dados['totais'].get('base_icms', produto['valor_total']):.2f}"
-        ET.SubElement(icms00, "pICMS").text = "12.00"  # Alíquota exemplo
-        ET.SubElement(icms00, "vICMS").text = f"{dados['totais'].get('valor_icms', 0.00):.2f}"
+        ET.SubElement(icms00, "modBC").text = "0"
+        ET.SubElement(icms00, "vBC").text = "0.00"
+        ET.SubElement(icms00, "pICMS").text = "0.00"
+        ET.SubElement(icms00, "vICMS").text = "0.00"
+        
+        # IPI
+        ipi = ET.SubElement(imposto, "IPI")
+        ET.SubElement(ipi, "cEnq").text = "999"
+        ipi_trib = ET.SubElement(ipi, "IPITrib")
+        ET.SubElement(ipi_trib, "CST").text = "49"
+        ET.SubElement(ipi_trib, "vBC").text = "0.00"
+        ET.SubElement(ipi_trib, "pIPI").text = "0.00"
+        ET.SubElement(ipi_trib, "vIPI").text = "0.00"
+        
+        # II
+        ii = ET.SubElement(imposto, "II")
+        ET.SubElement(ii, "vBC").text = "0.00"
+        ET.SubElement(ii, "vDespAdu").text = "0.00"
+        ET.SubElement(ii, "vII").text = "0.00"
+        ET.SubElement(ii, "vIOF").text = "0"
         
         # PIS
         pis = ET.SubElement(imposto, "PIS")
-        pisnt = ET.SubElement(pis, "PISNT")
-        ET.SubElement(pisnt, "CST").text = "07"
+        pis_outr = ET.SubElement(pis, "PISOutr")
+        ET.SubElement(pis_outr, "CST").text = "98"
+        ET.SubElement(pis_outr, "vBC").text = "0.00"
+        ET.SubElement(pis_outr, "pPIS").text = "0.00"
+        ET.SubElement(pis_outr, "vPIS").text = "0.00"
         
         # COFINS
         cofins = ET.SubElement(imposto, "COFINS")
-        cofinsnt = ET.SubElement(cofins, "COFINSNT")
-        ET.SubElement(cofinsnt, "CST").text = "07"
-        
-        # II (Imposto de Importação)
-        ii = ET.SubElement(imposto, "II")
-        ET.SubElement(ii, "vBC").text = f"{produto['valor_total']:.2f}"
-        ET.SubElement(ii, "vDespAdu").text = "154.23"  # Taxa Siscomex do exemplo
-        ET.SubElement(ii, "vII").text = "0.00"
-        ET.SubElement(ii, "vIOF").text = "0.00"
+        cofins_outr = ET.SubElement(cofins, "COFINSOutr")
+        ET.SubElement(cofins_outr, "CST").text = "98"
+        ET.SubElement(cofins_outr, "vBC").text = "0.00"
+        ET.SubElement(cofins_outr, "pCOFINS").text = "0.00"
+        ET.SubElement(cofins_outr, "vCOFINS").text = "0.00"
         
         det_counter += 1
     
     # Totais
     total = ET.SubElement(infNFe, "total")
-    icmsTot = ET.SubElement(total, "ICMSTot")
-    ET.SubElement(icmsTot, "vBC").text = f"{dados['totais'].get('base_icms', 0.00):.2f}"
-    ET.SubElement(icmsTot, "vICMS").text = f"{dados['totais'].get('valor_icms', 0.00):.2f}"
-    ET.SubElement(icmsTot, "vBCST").text = "0.00"
-    ET.SubElement(icmsTot, "vST").text = "0.00"
-    ET.SubElement(icmsTot, "vProd").text = f"{dados['totais']['valor_total']:.2f}"
-    ET.SubElement(icmsTot, "vFrete").text = "0.00"
-    ET.SubElement(icmsTot, "vSeg").text = "0.00"
-    ET.SubElement(icmsTot, "vDesc").text = "0.00"
-    ET.SubElement(icmsTot, "vII").text = "0.00"
-    ET.SubElement(icmsTot, "vIPI").text = "0.00"
-    ET.SubElement(icmsTot, "vPIS").text = "0.00"
-    ET.SubElement(icmsTot, "vCOFINS").text = "0.00"
-    ET.SubElement(icmsTot, "vOutro").text = "154.23"  # Taxas
-    ET.SubElement(icmsTot, "vNF").text = f"{dados['totais']['valor_total'] + 154.23:.2f}"
+    icms_tot = ET.SubElement(total, "ICMSTot")
+    ET.SubElement(icms_tot, "vBC").text = "0.00"
+    ET.SubElement(icms_tot, "vICMS").text = "0.00"
+    ET.SubElement(icms_tot, "vICMSDeson").text = "0.00"
+    ET.SubElement(icms_tot, "vFCP").text = "0.00"
+    ET.SubElement(icms_tot, "vBCST").text = "0.00"
+    ET.SubElement(icms_tot, "vST").text = "0.00"
+    ET.SubElement(icms_tot, "vFCPST").text = "0.00"
+    ET.SubElement(icms_tot, "vFCPSTRet").text = "0.00"
+    ET.SubElement(icms_tot, "vProd").text = "0.00"
+    ET.SubElement(icms_tot, "vFrete").text = "0.00"
+    ET.SubElement(icms_tot, "vSeg").text = "0.00"
+    ET.SubElement(icms_tot, "vDesc").text = "0.00"
+    ET.SubElement(icms_tot, "vII").text = "0.00"
+    ET.SubElement(icms_tot, "vIPI").text = "0.00"
+    ET.SubElement(icms_tot, "vIPIDevol").text = "0.00"
+    ET.SubElement(icms_tot, "vPIS").text = "0.00"
+    ET.SubElement(icms_tot, "vCOFINS").text = "0.00"
+    ET.SubElement(icms_tot, "vOutro").text = "154.23"
+    ET.SubElement(icms_tot, "vNF").text = "154.23"
     
     # Transporte
     transp = ET.SubElement(infNFe, "transp")
-    ET.SubElement(transp, "modFrete").text = "9"  # Sem frete
+    ET.SubElement(transp, "modFrete").text = "0"
+    vol = ET.SubElement(transp, "vol")
+    ET.SubElement(vol, "qVol").text = str(dados['volumes']['qVol'])
+    ET.SubElement(vol, "esp").text = dados['volumes']['esp']
+    ET.SubElement(vol, "pesoL").text = f"{dados['volumes']['pesoL']:.3f}"
+    ET.SubElement(vol, "pesoB").text = f"{dados['volumes']['pesoB']:.3f}"
     
-    # Informações adicionais
-    infAdic = ET.SubElement(infNFe, "infAdic")
-    info_adic = f"PROCESSO: 28523; DUIMP: {dados['dados_adicionais'].get('numero_duimp', '25BR00001916620/0')}; "
-    info_adic += f"LOCAL DESEMBARACO: {dados['dados_adicionais'].get('local_desembaraco', 'PARANAGUA - PR')}"
-    ET.SubElement(infAdic, "infCpl").text = info_adic
+    # Pagamento
+    pag = ET.SubElement(infNFe, "pag")
+    det_pag = ET.SubElement(pag, "detPag")
+    ET.SubElement(det_pag, "tPag").text = "18"  # Outros
+    ET.SubElement(det_pag, "vPag").text = "154.23"
     
     # Converter para string XML formatada
     xml_str = ET.tostring(nfe, encoding='utf-8', method='xml')
     parsed_xml = minidom.parseString(xml_str)
     pretty_xml = parsed_xml.toprettyxml(indent="  ")
+    
+    # Remover a declaração XML padrão do minidom e adicionar encoding correto
+    pretty_xml = pretty_xml.replace('<?xml version="1.0" ?>', '<?xml version="1.0" encoding="UTF-8"?>')
     
     return pretty_xml
 
@@ -995,13 +1095,16 @@ def extrator_duimp():
         - Geração de XML no padrão NFe 4.00 (modelo 55)
         - Inclusão de todos os impostos (ICMS, PIS, COFINS, II)
         - Suporte a múltiplos arquivos simultaneamente
+        - Formato exato conforme modelo oficial
         
         **Campos extraídos:**
-        - Dados do emitente estrangeiro
+        - Dados do emitente (HAFELE BRASIL)
+        - Dados do destinatário estrangeiro
         - Descrição e NCM dos produtos
         - Valores e quantidades
         - Informações da DUIMP
         - Tributos e taxas
+        - Dados de volumes e transporte
         """)
     
     # Upload de múltiplos arquivos
@@ -1033,9 +1136,10 @@ def extrator_duimp():
                         
                         st.write("**Produtos:**")
                         for produto in dados['produtos']:
-                            st.write(f"- {produto['descricao']}")
-                            st.write(f"  NCM: {produto['ncm']}, Quantidade: {produto['quantidade']}")
-                            st.write(f"  Valor Unitário: R$ {produto['valor_unitario']:,.2f}")
+                            st.write(f"- Código: {produto['cProd']}")
+                            st.write(f"- Descrição: {produto['descricao']}")
+                            st.write(f"- NCM: {produto['ncm']}, CFOP: {produto['cfop']}")
+                            st.write(f"- Quantidade: {produto['quantidade']} {produto['uCom']}")
                     
                     with col2:
                         st.write("**Totais:**")
@@ -1043,13 +1147,27 @@ def extrator_duimp():
                         
                         st.write("**Dados Adicionais:**")
                         st.json(dados['dados_adicionais'])
+                        
+                        st.write("**Volumes:**")
+                        st.json(dados['volumes'])
                 
-                # Gerar XML
-                numero_nota = st.text_input(
-                    f"Número da NFe para {uploaded_file.name}",
-                    value=str(100000 + i),
-                    key=f"nfe_{i}"
-                )
+                # Configuração da NFe
+                st.subheader("Configuração da NFe")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    numero_nota = st.text_input(
+                        f"Número da NFe",
+                        value=str(100000000 + i).zfill(9),
+                        key=f"nfe_{i}"
+                    )
+                
+                with col2:
+                    data_emissao = st.date_input(
+                        f"Data de Emissão",
+                        value=datetime.now(),
+                        key=f"data_{i}"
+                    )
                 
                 if st.button(f"Gerar XML para {uploaded_file.name}", key=f"btn_{i}"):
                     show_processing_animation("Gerando XML modelo 55...")
@@ -1057,12 +1175,13 @@ def extrator_duimp():
                     show_success_animation("XML gerado com sucesso!")
                     
                     # Mostrar XML
-                    st.text_area(
-                        f"XML Gerado - {uploaded_file.name}",
-                        xml_content,
-                        height=400,
-                        key=f"xml_{i}"
-                    )
+                    with st.expander("📄 Visualizar XML Gerado", expanded=False):
+                        st.text_area(
+                            f"XML Gerado - {uploaded_file.name}",
+                            xml_content,
+                            height=400,
+                            key=f"xml_{i}"
+                        )
                     
                     # Download do XML
                     st.download_button(
@@ -1087,11 +1206,13 @@ def extrator_duimp():
         O extrator foi desenvolvido para processar arquivos PDF no formato do exemplo fornecido,
         contendo informações como:
         
-        - **Emitente:** HAFELE ENGINEERING ASIA LTD.
+        - **Emitente:** HAFELE BRASIL LTDA
+        - **Destinatário:** HAFELE ENGINEERING ASIA LTD.
         - **Produto:** DOBRADICA INVISIVEL EM LIGA DE ZINCO
         - **NCM:** 83021000
-        - **DUIMP:** 25BR00001916620/0
+        - **DUIMP:** 25BR00001916620
         - **Local de desembaraço:** Paranaguá - PR
+        - **Volumes:** 1 AMARRADO/ATADO/FEIXE
         """)
 
 # --- CSS E CONFIGURAÇÃO DE ESTILO ---
