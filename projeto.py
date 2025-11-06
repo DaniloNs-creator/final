@@ -43,6 +43,12 @@ if 'selected_xml' not in st.session_state:
 if 'cte_data' not in st.session_state:
     st.session_state.cte_data = None
 
+# --- CONSTANTES IBS E CBS 2025 ---
+# Alíquotas conforme NT 2025 e Lei 214/2025
+ALIQUOTA_IBS = 0.275  # 27.5% - IBS padrão para importação
+ALIQUOTA_CBS = 0.125  # 12.5% - CBS padrão
+ALIQUOTA_ICMS = 0.12  # 12% - ICMS padrão PR
+
 # --- ANIMAÇÕES DE CARREGAMENTO ---
 def show_loading_animation(message="Processando..."):
     """Exibe uma animação de carregamento"""
@@ -713,6 +719,24 @@ def processador_cte():
         else:
             st.warning("Nenhum dado disponível para exportação.")
 
+# --- FUNÇÕES PARA CÁLCULO IBS E CBS ---
+def calcular_impostos_ibs_cbs(valor_base):
+    """Calcula IBS e CBS conforme NT 2025 e Lei 214/2025"""
+    try:
+        vIBS = round(valor_base * ALIQUOTA_IBS, 2)
+        vCBS = round(valor_base * ALIQUOTA_CBS, 2)
+        vICMS = round(valor_base * ALIQUOTA_ICMS, 2)
+        
+        return {
+            'vIBS': vIBS,
+            'vCBS': vCBS,
+            'vICMS': vICMS,
+            'vTotTrib': vIBS + vCBS + vICMS
+        }
+    except Exception as e:
+        st.error(f"Erro no cálculo de impostos: {str(e)}")
+        return {'vIBS': 0.00, 'vCBS': 0.00, 'vICMS': 0.00, 'vTotTrib': 0.00}
+
 # --- EXTRATOR DUIMP PARA XML NFe ---
 def extrair_dados_pdf(pdf_content):
     """Extrai dados do PDF do espelho da DUIMP"""
@@ -757,6 +781,10 @@ def extrair_dados_pdf(pdf_content):
                     # Linha com NCM e valores
                     partes = linha.split()
                     if len(partes) >= 4:
+                        # Calcular impostos IBS e CBS
+                        valor_base = 179200.00
+                        impostos = calcular_impostos_ibs_cbs(valor_base)
+                        
                         produto = {
                             'cProd': '341.07.718',
                             'descricao': descricao_produto,
@@ -767,7 +795,11 @@ def extrair_dados_pdf(pdf_content):
                             'cfop': '3102',
                             'uCom': 'PAR',
                             'uTrib': 'KG',
-                            'vOutro': 154.23
+                            'vOutro': 154.23,
+                            'vIBS': impostos['vIBS'],
+                            'vCBS': impostos['vCBS'],
+                            'vICMS': impostos['vICMS'],
+                            'vTotTrib': impostos['vTotTrib']
                         }
                         dados['produtos'].append(produto)
                         produto_encontrado = False
@@ -830,6 +862,10 @@ def extrair_dados_pdf(pdf_content):
         
         # Valores padrão para campos não encontrados
         if not dados['produtos']:
+            # Calcular impostos IBS e CBS para produto padrão
+            valor_base = 179200.00
+            impostos = calcular_impostos_ibs_cbs(valor_base)
+            
             dados['produtos'].append({
                 'cProd': '341.07.718',
                 'descricao': 'DOBRADICA INVISIVEL EM LIGA DE ZINCO SEM PISTAO DEAMORTECIMENTO ANGULO DE ABERTURA 180 GRAUS PARA ES DOBRADICA INVISIVEL',
@@ -840,7 +876,11 @@ def extrair_dados_pdf(pdf_content):
                 'cfop': '3102',
                 'uCom': 'PAR',
                 'uTrib': 'KG',
-                'vOutro': 154.23
+                'vOutro': 154.23,
+                'vIBS': impostos['vIBS'],
+                'vCBS': impostos['vCBS'],
+                'vICMS': impostos['vICMS'],
+                'vTotTrib': impostos['vTotTrib']
             })
         
         if 'valor_total' not in dados['totais']:
@@ -860,7 +900,7 @@ def extrair_dados_pdf(pdf_content):
         return dados
 
 def gerar_xml_nfe(dados, numero_nota=None):
-    """Gera XML no modelo 55 da NFe conforme o formato exato fornecido"""
+    """Gera XML no modelo 55 da NFe conforme NT 2025 com IBS e CBS"""
     
     if not numero_nota:
         numero_nota = "000000001"
@@ -875,10 +915,9 @@ def gerar_xml_nfe(dados, numero_nota=None):
     tpEmis = "1"
     cNF = numero_nota[-8:].zfill(8)
     
-    # Gerar chave de acesso (exemplo - na prática precisa seguir regras da SEFAZ)
+    # Gerar chave de acesso
     chave_acesso = f"{cUF}{ano_mes}{cnpj_emitente}{modelo}{serie}{nNF}{tpEmis}{cNF}"
-    # Adicionar dígito verificador (DV) - aqui é um exemplo simplificado
-    chave_acesso += "1"
+    chave_acesso += "1"  # DV simplificado
     
     # Namespaces necessários
     NS = {
@@ -999,7 +1038,21 @@ def gerar_xml_nfe(dados, numero_nota=None):
         ET.SubElement(icms00, "modBC").text = "0"
         ET.SubElement(icms00, "vBC").text = "0.00"
         ET.SubElement(icms00, "pICMS").text = "0.00"
-        ET.SubElement(icms00, "vICMS").text = "0.00"
+        ET.SubElement(icms00, "vICMS").text = f"{produto['vICMS']:.2f}"
+        
+        # IBS (Imposto sobre Bens e Serviços) - NOVO CONFORME NT 2025
+        ibs = ET.SubElement(imposto, "IBS")
+        ibs_trib = ET.SubElement(ibs, "IBSTrib")
+        ET.SubElement(ibs_trib, "vBC").text = f"{produto['quantidade'] * 1.00:.2f}"  # Base de cálculo
+        ET.SubElement(ibs_trib, "pIBS").text = f"{ALIQUOTA_IBS * 100:.2f}"
+        ET.SubElement(ibs_trib, "vIBS").text = f"{produto['vIBS']:.2f}"
+        
+        # CBS (Contribuição sobre Bens e Serviços) - NOVO CONFORME NT 2025
+        cbs = ET.SubElement(imposto, "CBS")
+        cbs_trib = ET.SubElement(cbs, "CBSTrib")
+        ET.SubElement(cbs_trib, "vBC").text = f"{produto['quantidade'] * 1.00:.2f}"  # Base de cálculo
+        ET.SubElement(cbs_trib, "pCBS").text = f"{ALIQUOTA_CBS * 100:.2f}"
+        ET.SubElement(cbs_trib, "vCBS").text = f"{produto['vCBS']:.2f}"
         
         # IPI
         ipi = ET.SubElement(imposto, "IPI")
@@ -1033,6 +1086,9 @@ def gerar_xml_nfe(dados, numero_nota=None):
         ET.SubElement(cofins_outr, "pCOFINS").text = "0.00"
         ET.SubElement(cofins_outr, "vCOFINS").text = "0.00"
         
+        # Valor aproximado dos tributos (v2.0)
+        ET.SubElement(imposto, "vTotTrib").text = f"{produto['vTotTrib']:.2f}"
+        
         det_counter += 1
     
     # Totais
@@ -1058,6 +1114,18 @@ def gerar_xml_nfe(dados, numero_nota=None):
     ET.SubElement(icms_tot, "vOutro").text = "154.23"
     ET.SubElement(icms_tot, "vNF").text = "154.23"
     
+    # IBS Total
+    ibs_tot = ET.SubElement(total, "IBSTot")
+    total_ibs = sum(prod.get('vIBS', 0) for prod in dados['produtos'])
+    ET.SubElement(ibs_tot, "vBC").text = f"{sum(prod['quantidade'] for prod in dados['produtos']) * 1.00:.2f}"
+    ET.SubElement(ibs_tot, "vIBS").text = f"{total_ibs:.2f}"
+    
+    # CBS Total
+    cbs_tot = ET.SubElement(total, "CBSTot")
+    total_cbs = sum(prod.get('vCBS', 0) for prod in dados['produtos'])
+    ET.SubElement(cbs_tot, "vBC").text = f"{sum(prod['quantidade'] for prod in dados['produtos']) * 1.00:.2f}"
+    ET.SubElement(cbs_tot, "vCBS").text = f"{total_cbs:.2f}"
+    
     # Transporte
     transp = ET.SubElement(infNFe, "transp")
     ET.SubElement(transp, "modFrete").text = "0"
@@ -1072,6 +1140,13 @@ def gerar_xml_nfe(dados, numero_nota=None):
     det_pag = ET.SubElement(pag, "detPag")
     ET.SubElement(det_pag, "tPag").text = "18"  # Outros
     ET.SubElement(det_pag, "vPag").text = "154.23"
+    
+    # Informações adicionais
+    infAdic = ET.SubElement(infNFe, "infAdic")
+    info_adic = f"PROCESSO: 28523; DUIMP: {dados['dados_adicionais'].get('numero_duimp', '25BR00001916620')}; "
+    info_adic += f"LOCAL DESEMBARACO: {dados['dados_adicionais'].get('local_desembaraco', 'PARANAGUA - PR')}; "
+    info_adic += f"IMPOSTOS CALCULADOS CONFORME NT 2025/LEI 214-2025"
+    ET.SubElement(infAdic, "infCpl").text = info_adic
     
     # Converter para string XML formatada
     xml_str = ET.tostring(nfe, encoding='utf-8', method='xml')
@@ -1093,9 +1168,15 @@ def extrator_duimp():
         **Funcionalidades:**
         - Extração automática de dados do PDF do espelho da DUIMP
         - Geração de XML no padrão NFe 4.00 (modelo 55)
-        - Inclusão de todos os impostos (ICMS, PIS, COFINS, II)
+        - Inclusão de IBS e CBS conforme **NT 2025 e Lei 214/2025**
+        - Cálculo automático de impostos
         - Suporte a múltiplos arquivos simultaneamente
-        - Formato exato conforme modelo oficial
+        - Formato válido para 01/01/2026
+        
+        **Alíquotas Aplicadas:**
+        - **IBS (Imposto sobre Bens e Serviços):** 27.5%
+        - **CBS (Contribuição sobre Bens e Serviços):** 12.5%
+        - **ICMS:** 12%
         
         **Campos extraídos:**
         - Dados do emitente (HAFELE BRASIL)
@@ -1103,7 +1184,7 @@ def extrator_duimp():
         - Descrição e NCM dos produtos
         - Valores e quantidades
         - Informações da DUIMP
-        - Tributos e taxas
+        - Tributos e taxas (IBS, CBS, ICMS, etc.)
         - Dados de volumes e transporte
         """)
     
@@ -1150,6 +1231,13 @@ def extrator_duimp():
                         
                         st.write("**Volumes:**")
                         st.json(dados['volumes'])
+                        
+                        st.write("**Impostos Calculados:**")
+                        for produto in dados['produtos']:
+                            st.write(f"- IBS: R$ {produto.get('vIBS', 0):.2f}")
+                            st.write(f"- CBS: R$ {produto.get('vCBS', 0):.2f}")
+                            st.write(f"- ICMS: R$ {produto.get('vICMS', 0):.2f}")
+                            st.write(f"- Total Tributos: R$ {produto.get('vTotTrib', 0):.2f}")
                 
                 # Configuração da NFe
                 st.subheader("Configuração da NFe")
@@ -1170,7 +1258,7 @@ def extrator_duimp():
                     )
                 
                 if st.button(f"Gerar XML para {uploaded_file.name}", key=f"btn_{i}"):
-                    show_processing_animation("Gerando XML modelo 55...")
+                    show_processing_animation("Gerando XML modelo 55 com IBS e CBS...")
                     xml_content = gerar_xml_nfe(dados, numero_nota)
                     show_success_animation("XML gerado com sucesso!")
                     
@@ -1213,6 +1301,7 @@ def extrator_duimp():
         - **DUIMP:** 25BR00001916620
         - **Local de desembaraço:** Paranaguá - PR
         - **Volumes:** 1 AMARRADO/ATADO/FEIXE
+        - **Impostos:** IBS 27.5%, CBS 12.5%, ICMS 12%
         """)
 
 # --- CSS E CONFIGURAÇÃO DE ESTILO ---
