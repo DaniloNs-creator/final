@@ -72,6 +72,14 @@ st.markdown("""
         background-color: #c82333 !important;
     }
     
+    .generate-button {
+        background-color: #17a2b8 !important;
+    }
+    
+    .generate-button:hover {
+        background-color: #138496 !important;
+    }
+    
     /* Estilização dos campos de entrada */
     .stTextInput input, .stDateInput input, .stSelectbox select {
         border: 1px solid #ced4da;
@@ -199,6 +207,327 @@ def formatar_cpf(cpf):
         return f"{cpf[:3]}.{cpf[3:6]}.{cpf[6:9]}-{cpf[9:]}"
     return cpf
 
+# Função para formatar valores numéricos
+def formatar_valor(valor):
+    """Remove caracteres não numéricos e formata para o layout"""
+    if not valor:
+        return "0000000000000"
+    
+    # Remove R$, pontos, vírgulas e espaços
+    valor_limpo = ''.join(filter(str.isdigit, str(valor)))
+    
+    # Preenche com zeros à esquerda para ter 13 dígitos
+    return valor_limpo.zfill(13)
+
+# Função para formatar texto com tamanho fixo
+def formatar_texto(texto, tamanho):
+    """Formata texto para ter tamanho fixo, truncando ou preenchendo com espaços"""
+    if not texto:
+        texto = ""
+    
+    texto = str(texto)
+    if len(texto) > tamanho:
+        return texto[:tamanho]
+    else:
+        return texto.ljust(tamanho)
+
+# Função para formatar data
+def formatar_data(data):
+    """Formata data para DDMMAAAA"""
+    if isinstance(data, datetime):
+        return data.strftime("%d%m%Y")
+    elif isinstance(data, str):
+        try:
+            return datetime.strptime(data, "%Y-%m-%d").strftime("%d%m%Y")
+        except:
+            return "00000000"
+    else:
+        return "00000000"
+
+# Função para gerar arquivo TXT conforme layout TOTVS
+def gerar_arquivo_totvs():
+    """Gera o arquivo TXT no formato especificado pela TOTVS"""
+    
+    # Registro 0000 - Header
+    header = "0000"
+    header += formatar_texto("EMPRESA EXEMPLO", 35)  # Nome da empresa
+    header += formatar_texto("12345678000199", 14)   # CNPJ
+    header += datetime.now().strftime("%d%m%Y")      # Data geração
+    header += "001"                                   # Número sequencial
+    header += " " * 935                              # Brancos
+    header += "\n"
+    
+    # Registro 0100 - Dados do Funcionário
+    registro_0100 = "0100"
+    
+    # CPF (apenas números)
+    cpf_limpo = ''.join(filter(str.isdigit, st.session_state.get('cpf', '')))
+    registro_0100 += formatar_texto(cpf_limpo, 11)
+    
+    # Nome do funcionário
+    registro_0100 += formatar_texto(st.session_state.get('nome_completo', ''), 70)
+    
+    # Data de nascimento
+    registro_0100 += formatar_data(st.session_state.get('data_nascimento', ''))
+    
+    # Sexo
+    sexo = st.session_state.get('sexo', '')
+    if sexo == 'Masculino':
+        registro_0100 += "M"
+    elif sexo == 'Feminino':
+        registro_0100 += "F"
+    else:
+        registro_0100 += " "
+    
+    # Estado civil
+    estado_civil = st.session_state.get('estado_civil', '')
+    if estado_civil == 'Solteiro':
+        registro_0100 += "1"
+    elif estado_civil == 'Casado':
+        registro_0100 += "2"
+    else:
+        registro_0100 += "3"
+    
+    # Grau de instrução
+    grau_instrucao = st.session_state.get('grau_instrucao', '')
+    if 'Fundamental' in grau_instrucao:
+        registro_0100 += "01"
+    elif 'Médio' in grau_instrucao:
+        registro_0100 += "02"
+    elif 'Superior' in grau_instrucao:
+        registro_0100 += "03"
+    elif 'Pós' in grau_instrucao:
+        registro_0100 += "04"
+    else:
+        registro_0100 += "01"
+    
+    # Nacionalidade (1 - Brasileiro)
+    registro_0100 += "1"
+    
+    # Nome da mãe
+    registro_0100 += formatar_texto(st.session_state.get('nome_mae', ''), 70)
+    
+    # Nome do pai
+    registro_0100 += formatar_texto(st.session_state.get('nome_pai', ''), 70)
+    
+    # Endereço
+    registro_0100 += formatar_texto(st.session_state.get('endereco', ''), 60)
+    
+    # Bairro
+    registro_0100 += formatar_texto(st.session_state.get('bairro', ''), 40)
+    
+    # Cidade
+    cidade = st.session_state.get('cidade', '')
+    if ' - ' in cidade:
+        cidade_parts = cidade.split(' - ')
+        registro_0100 += formatar_texto(cidade_parts[0], 40)
+        registro_0100 += formatar_texto(cidade_parts[1] if len(cidade_parts) > 1 else '', 2)
+    else:
+        registro_0100 += formatar_texto(cidade, 40)
+        registro_0100 += "  "
+    
+    # CEP
+    cep_limpo = ''.join(filter(str.isdigit, st.session_state.get('cep', '')))
+    registro_0100 += formatar_texto(cep_limpo, 8)
+    
+    # Email
+    registro_0100 += formatar_texto(st.session_state.get('email', ''), 60)
+    
+    # Raça/Cor
+    raca_cor = st.session_state.get('raca_cor', '')
+    if raca_cor == 'Branca':
+        registro_0100 += "01"
+    elif raca_cor == 'Negra':
+        registro_0100 += "02"
+    elif raca_cor == 'Parda':
+        registro_0100 += "03"
+    elif raca_cor == 'Amarela':
+        registro_0100 += "04"
+    else:
+        registro_0100 += "01"
+    
+    # Brancos restantes
+    registro_0100 += " " * 572
+    registro_0100 += "\n"
+    
+    # Registro 0200 - Documentação
+    registro_0200 = "0200"
+    registro_0200 += formatar_texto(cpf_limpo, 11)
+    
+    # RG
+    rg_limpo = ''.join(filter(str.isdigit, st.session_state.get('rg', '')))
+    registro_0200 += formatar_texto(rg_limpo, 15)
+    
+    # Órgão expedidor
+    registro_0200 += formatar_texto(st.session_state.get('orgao_exp', ''), 10)
+    
+    # Data expedição RG
+    registro_0200 += formatar_data(st.session_state.get('data_expedicao', ''))
+    
+    # CTPS
+    ctps_limpo = ''.join(filter(str.isdigit, st.session_state.get('ctps', '')))
+    registro_0200 += formatar_texto(ctps_limpo, 11)
+    
+    # Série CTPS
+    registro_0200 += formatar_texto(st.session_state.get('serie', ''), 5)
+    
+    # UF CTPS
+    registro_0200 += formatar_texto(st.session_state.get('uf_ctps', ''), 2)
+    
+    # Data expedição CTPS
+    registro_0200 += formatar_data(st.session_state.get('data_exp_ctps', ''))
+    
+    # PIS/PASEP
+    pis_limpo = ''.join(filter(str.isdigit, st.session_state.get('pis', '')))
+    registro_0200 += formatar_texto(pis_limpo, 11)
+    
+    # Título eleitor
+    titulo_limpo = ''.join(filter(str.isdigit, st.session_state.get('titulo_eleitor', '')))
+    registro_0200 += formatar_texto(titulo_limpo, 12)
+    
+    # Zona eleitoral
+    registro_0200 += formatar_texto(st.session_state.get('zona', ''), 4)
+    
+    # Seção eleitoral
+    registro_0200 += formatar_texto(st.session_state.get('secao', ''), 4)
+    
+    # Carteira habilitação
+    registro_0200 += formatar_texto(st.session_state.get('carteira_habilitacao', ''), 15)
+    
+    # Categoria habilitação
+    registro_0200 += formatar_texto(st.session_state.get('categoria_hab', ''), 2)
+    
+    # Data validade CNH
+    registro_0200 += formatar_data(st.session_state.get('vencimento_hab', ''))
+    
+    # UF CNH
+    registro_0200 += formatar_texto(st.session_state.get('uf_hab', ''), 2)
+    
+    # Reservista
+    registro_0200 += formatar_texto(st.session_state.get('reservista', ''), 15)
+    
+    # Brancos restantes
+    registro_0200 += " " * 850
+    registro_0200 += "\n"
+    
+    # Registro 0300 - Dados Bancários
+    registro_0300 = "0300"
+    registro_0300 += formatar_texto(cpf_limpo, 11)
+    
+    # Banco
+    registro_0300 += formatar_texto(st.session_state.get('banco', ''), 3)
+    
+    # Agência
+    registro_0300 += formatar_texto(st.session_state.get('agencia', ''), 5)
+    
+    # Conta corrente
+    registro_0300 += formatar_texto(st.session_state.get('conta', ''), 10)
+    
+    # Chave PIX
+    registro_0300 += formatar_texto(st.session_state.get('chave_pix', ''), 77)
+    
+    # Brancos restantes
+    registro_0300 += " " * 882
+    registro_0300 += "\n"
+    
+    # Registro 0400 - Dependentes
+    # Dependente 1 (filha)
+    registro_0400 = "0400"
+    registro_0400 += formatar_texto(cpf_limpo, 11)
+    
+    # CPF do dependente
+    registro_0400 += formatar_texto("00217252923", 11)
+    
+    # Nome dependente
+    registro_0400 += formatar_texto("LAURA HELENA MATOS FERREIRA LEITE", 70)
+    
+    # Data nascimento dependente
+    registro_0400 += formatar_data("2024-03-13")
+    
+    # Sexo dependente
+    registro_0400 += "F"
+    
+    # IRRF
+    registro_0400 += "S"
+    
+    # Salário família
+    registro_0400 += "N"
+    
+    # Parentesco (06 - Filho(a))
+    registro_0400 += "06"
+    
+    # Brancos restantes
+    registro_0400 += " " * 864
+    registro_0400 += "\n"
+    
+    # Registro 0500 - Dados Empresa
+    registro_0500 = "0500"
+    registro_0500 += formatar_texto(cpf_limpo, 11)
+    
+    # Data admissão
+    registro_0500 += formatar_data(st.session_state.get('data_inicio', ''))
+    
+    # Cargo
+    registro_0500 += formatar_texto(st.session_state.get('cargo_funcao', ''), 50)
+    
+    # Salário
+    salario_limpo = ''.join(filter(str.isdigit, st.session_state.get('salario', '')))
+    registro_0500 += formatar_valor(salario_limpo)
+    
+    # Horário de trabalho
+    registro_0500 += formatar_texto(st.session_state.get('horario_trabalho', ''), 100)
+    
+    # Centro de custo
+    registro_0500 += formatar_texto(st.session_state.get('centro_custo', ''), 30)
+    
+    # Sindicato
+    registro_0500 += formatar_texto(st.session_state.get('sindicato', ''), 50)
+    
+    # Vale transporte
+    vt = st.session_state.get('vale_transporte', '')
+    registro_0500 += "S" if vt == "Sim" else "N"
+    
+    # Vale alimentação
+    va = st.session_state.get('vale_alimentacao', '')
+    registro_0500 += "S" if va == "Sim" else "N"
+    
+    # Vale refeição
+    vr = st.session_state.get('vale_refeicao', '')
+    registro_0500 += "S" if vr == "Sim" else "N"
+    
+    # Adicional noturno
+    an = st.session_state.get('adicional_noturno', '')
+    registro_0500 += "S" if an == "Sim" else "N"
+    
+    # Insalubridade
+    ins = st.session_state.get('insalubridade', '')
+    registro_0500 += "S" if ins == "Sim" else "N"
+    
+    # Periculosidade
+    per = st.session_state.get('periculosidade', '')
+    registro_0500 += "S" if per == "Sim" else "N"
+    
+    # Brancos restantes
+    registro_0500 += " " * 698
+    registro_0500 += "\n"
+    
+    # Registro 9900 - Trailer
+    trailer = "9900"
+    trailer += "0005"  # Quantidade de registros (header + 4 registros de dados)
+    trailer += " " * 984
+    trailer += "\n"
+    
+    # Concatena todos os registros
+    conteudo_arquivo = header + registro_0100 + registro_0200 + registro_0300 + registro_0400 + registro_0500 + trailer
+    
+    return conteudo_arquivo
+
+# Função para criar link de download
+def get_download_link(content, filename):
+    b64 = base64.b64encode(content.encode()).decode()
+    href = f'<a href="data:file/txt;base64,{b64}" download="{filename}" class="stButton button generate-button">📥 BAIXAR ARQUIVO TXT</a>'
+    return href
+
 # Função para inicializar o estado da sessão
 def initialize_session_state():
     if 'dados_pessoais_salvos' not in st.session_state:
@@ -215,6 +544,8 @@ def initialize_session_state():
         st.session_state.dados_empresa_salvos = False
     if 'formulario_enviado' not in st.session_state:
         st.session_state.formulario_enviado = False
+    if 'arquivo_gerado' not in st.session_state:
+        st.session_state.arquivo_gerado = False
 
 # Função principal do aplicativo
 def main():
@@ -557,7 +888,7 @@ def main():
         
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # Botão Enviar (apenas na última aba)
+        # Botão Enviar e Gerar TXT (apenas na última aba)
         st.markdown("<br>", unsafe_allow_html=True)
         
         col1, col2, col3 = st.columns([1, 2, 1])
@@ -582,6 +913,7 @@ def main():
                         st.error("Por favor, insira um CPF válido.")
                     else:
                         st.session_state.formulario_enviado = True
+                        st.session_state.arquivo_gerado = True
                         st.markdown("""
                         <div class="success-message">
                             <h3>✅ Formulário enviado com sucesso!</h3>
@@ -589,7 +921,7 @@ def main():
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        # Exibir resumo dos dados (opcional)
+                        # Exibir resumo dos dados
                         with st.expander("Ver Resumo dos Dados Enviados"):
                             st.write(f"**Nome:** {st.session_state.get('nome_completo', '')}")
                             st.write(f"**CPF:** {formatar_cpf(st.session_state.get('cpf', ''))}")
@@ -614,6 +946,36 @@ def main():
                     abas_pendentes.append("Dados Empresa")
                 
                 st.info(f"**Abas pendentes:** {', '.join(abas_pendentes)}")
+    
+    # Botão GERAR TXT (sempre visível após envio do formulário)
+    if st.session_state.formulario_enviado:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<div class="form-container">', unsafe_allow_html=True)
+        st.markdown('<h2 class="section-header">GERAR ARQUIVO TOTVS</h2>', unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("📄 GERAR ARQUIVO TXT TOTVS", key="gerar_txt", use_container_width=True, type="primary"):
+                try:
+                    conteudo_txt = gerar_arquivo_totvs()
+                    
+                    # Nome do arquivo com CPF e data
+                    cpf_limpo = ''.join(filter(str.isdigit, st.session_state.get('cpf', '')))
+                    nome_arquivo = f"CADASTRO_{cpf_limpo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+                    
+                    # Criar link de download
+                    st.markdown(get_download_link(conteudo_txt, nome_arquivo), unsafe_allow_html=True)
+                    
+                    # Exibir preview do arquivo
+                    with st.expander("Visualizar conteúdo do arquivo TXT"):
+                        st.text_area("Conteúdo do arquivo:", conteudo_txt, height=300)
+                    
+                    st.success("✅ Arquivo TXT gerado com sucesso! Clique no botão acima para baixar.")
+                    
+                except Exception as e:
+                    st.error(f"Erro ao gerar arquivo: {str(e)}")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
