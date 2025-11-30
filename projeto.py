@@ -6,13 +6,13 @@ import time
 
 # Configuração da página
 st.set_page_config(
-    page_title="Sistema de Cadastro - TOTVS",
+    page_title="Cadastro de Funcionário - TOTVS",
     page_icon="👨‍💼",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# CSS moderno e clean
+# CSS clean e discreto
 st.markdown("""
 <style>
     /* Reset e base */
@@ -23,69 +23,64 @@ st.markdown("""
     }
     
     .main {
-        background: #f8fafc;
+        background: #ffffff;
         min-height: 100vh;
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
     
-    /* Header */
+    /* Header discreto */
     .main-header {
-        font-size: 2.5rem;
-        font-weight: 700;
+        font-size: 1.8rem;
+        font-weight: 600;
         text-align: center;
-        color: #1e293b;
-        margin-bottom: 1.5rem;
-        padding-top: 2rem;
-        background: linear-gradient(135deg, #1e293b 0%, #475569 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+        color: #1f2937;
+        margin-bottom: 0.5rem;
+        padding-top: 1rem;
     }
     
     .header-subtitle {
         text-align: center;
-        color: #64748b;
-        font-size: 1.1rem;
-        margin-bottom: 3rem;
+        color: #6b7280;
+        font-size: 0.9rem;
+        margin-bottom: 2rem;
         font-weight: 400;
     }
     
     /* Container principal */
     .main-container {
-        max-width: 1400px;
+        max-width: 1200px;
         margin: 0 auto;
         background: white;
-        border-radius: 16px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        border-radius: 8px;
         overflow: hidden;
-        border: 1px solid #e2e8f0;
     }
     
-    /* Abas modernas */
+    /* Abas limpas */
     .stTabs [data-baseweb="tab-list"] {
         gap: 0;
-        background: #f8fafc;
-        padding: 0 24px;
-        border-bottom: 1px solid #e2e8f0;
+        background: #f9fafb;
+        padding: 0;
+        border-bottom: 1px solid #e5e7eb;
     }
     
     .stTabs [data-baseweb="tab"] {
-        height: 60px;
+        height: 50px;
         background: transparent !important;
-        color: #64748b !important;
+        color: #6b7280 !important;
         font-weight: 500;
         border: none !important;
         border-radius: 0 !important;
         margin: 0 !important;
-        padding: 0 24px !important;
+        padding: 0 20px !important;
         position: relative;
         transition: all 0.2s ease;
         border-bottom: 2px solid transparent !important;
+        font-size: 0.9rem;
     }
     
     .stTabs [data-baseweb="tab"]:hover {
-        color: #334155 !important;
-        background: #f1f5f9 !important;
+        color: #374151 !important;
+        background: #f3f4f6 !important;
     }
     
     .stTabs [aria-selected="true"] {
@@ -97,34 +92,25 @@ st.markdown("""
     /* Containers de formulário */
     .form-container {
         background: white;
-        padding: 2rem;
+        padding: 1.5rem;
         animation: fadeIn 0.3s ease-out;
     }
     
     .section-header {
-        font-size: 1.5rem;
+        font-size: 1.2rem;
         font-weight: 600;
-        color: #1e293b;
+        color: #1f2937;
         margin-bottom: 1.5rem;
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-    }
-    
-    .section-header::before {
-        content: '';
-        width: 4px;
-        height: 24px;
-        background: #2563eb;
-        border-radius: 2px;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid #f3f4f6;
     }
     
     /* Grid responsivo */
     .form-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: 1.5rem;
-        margin-bottom: 2rem;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.5rem;
     }
     
     /* Campos de entrada */
@@ -132,8 +118,8 @@ st.markdown("""
     .stDateInput>div>div>input, 
     .stSelectbox>div>div>select {
         border: 1px solid #d1d5db;
-        border-radius: 8px;
-        padding: 12px 16px;
+        border-radius: 6px;
+        padding: 10px 12px;
         font-size: 14px;
         transition: all 0.2s ease;
         background: white;
@@ -143,34 +129,31 @@ st.markdown("""
     .stDateInput>div>div>input:focus, 
     .stSelectbox>div>div>select:focus {
         border-color: #2563eb;
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
         outline: none;
     }
     
-    /* Radio buttons modernos */
+    /* Radio buttons */
     .stRadio>div {
-        gap: 12px;
+        gap: 8px;
         flex-wrap: wrap;
     }
     
     .stRadio>div>label {
-        background: #f8fafc;
-        padding: 12px 20px;
-        border-radius: 8px;
-        border: 1px solid #e2e8f0;
+        background: #f9fafb;
+        padding: 10px 16px;
+        border-radius: 6px;
+        border: 1px solid #e5e7eb;
         transition: all 0.2s ease;
         flex: 1;
-        min-width: 120px;
+        min-width: 100px;
         text-align: center;
+        font-size: 0.9rem;
     }
     
     .stRadio>div>label:hover {
         border-color: #2563eb;
         background: #f0f4ff;
-    }
-    
-    .stRadio>div>label[data-baseweb="radio"]>div:first-child {
-        border-color: #64748b;
     }
     
     /* Botões */
@@ -179,17 +162,17 @@ st.markdown("""
         color: white;
         font-weight: 500;
         border: none;
-        padding: 12px 32px;
-        border-radius: 8px;
+        padding: 10px 24px;
+        border-radius: 6px;
         width: 100%;
         transition: all 0.2s ease;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        font-size: 0.9rem;
     }
     
     .stButton button:hover {
         background: #1d4ed8;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        transform: none;
+        box-shadow: none;
     }
     
     .save-button button {
@@ -208,35 +191,25 @@ st.markdown("""
         background: #6d28d9 !important;
     }
     
-    .generate-button button {
-        background: #dc2626 !important;
-    }
-    
-    .generate-button button:hover {
-        background: #b91c1c !important;
-    }
-    
     /* Tabela */
     .dependent-table {
         width: 100%;
         border-collapse: collapse;
-        margin: 1.5rem 0;
-        border-radius: 8px;
-        overflow: hidden;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        margin: 1rem 0;
+        font-size: 0.9rem;
     }
     
     .dependent-table th {
-        background: #f8fafc;
+        background: #f9fafb;
         color: #374151;
-        padding: 12px 16px;
+        padding: 10px 12px;
         text-align: left;
         font-weight: 600;
         border-bottom: 1px solid #e5e7eb;
     }
     
     .dependent-table td {
-        padding: 12px 16px;
+        padding: 10px 12px;
         border-bottom: 1px solid #f3f4f6;
     }
     
@@ -244,41 +217,44 @@ st.markdown("""
         background: #f9fafb;
     }
     
-    /* Mensagens */
+    /* Mensagens discretas */
     .success-message {
         background: #f0fdf4;
         color: #166534;
-        padding: 1.25rem;
-        border-radius: 8px;
+        padding: 1rem;
+        border-radius: 6px;
         border: 1px solid #bbf7d0;
         margin: 1rem 0;
+        font-size: 0.9rem;
     }
     
     .save-message {
         background: #f0f9ff;
         color: #0369a1;
-        padding: 1rem 1.25rem;
-        border-radius: 8px;
+        padding: 0.875rem 1rem;
+        border-radius: 6px;
         border: 1px solid #bae6fd;
         margin: 1rem 0;
+        font-size: 0.9rem;
     }
     
     .warning-message {
         background: #fffbeb;
         color: #92400e;
-        padding: 1rem 1.25rem;
-        border-radius: 8px;
+        padding: 0.875rem 1rem;
+        border-radius: 6px;
         border: 1px solid #fed7aa;
         margin: 1rem 0;
+        font-size: 0.9rem;
     }
     
-    /* Progresso */
+    /* Progresso discreto */
     .progress-container {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin: 2rem 0;
-        padding: 0 2rem;
+        margin: 1.5rem 0;
+        padding: 0 1rem;
     }
     
     .progress-step {
@@ -290,24 +266,23 @@ st.markdown("""
     }
     
     .step-number {
-        width: 32px;
-        height: 32px;
+        width: 28px;
+        height: 28px;
         border-radius: 50%;
-        background: #e2e8f0;
-        color: #64748b;
+        background: #f3f4f6;
+        color: #6b7280;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-weight: 600;
-        font-size: 14px;
-        margin-bottom: 0.5rem;
+        font-weight: 500;
+        font-size: 0.8rem;
+        margin-bottom: 0.25rem;
         transition: all 0.3s ease;
-        z-index: 2;
     }
     
     .step-label {
-        font-size: 12px;
-        color: #64748b;
+        font-size: 0.75rem;
+        color: #6b7280;
         font-weight: 500;
         text-align: center;
     }
@@ -315,7 +290,6 @@ st.markdown("""
     .progress-step.active .step-number {
         background: #2563eb;
         color: white;
-        box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
     }
     
     .progress-step.completed .step-number {
@@ -329,102 +303,100 @@ st.markdown("""
     
     .progress-connector {
         flex: 1;
-        height: 2px;
-        background: #e2e8f0;
-        margin: 0 8px;
+        height: 1px;
+        background: #e5e7eb;
+        margin: 0 4px;
         position: relative;
-        top: -24px;
+        top: -14px;
     }
     
     .progress-connector.completed {
         background: #059669;
     }
     
-    /* Cards informativos */
+    /* Cards informativos discretos */
     .info-card {
-        background: #f0f9ff;
-        border: 1px solid #bae6fd;
-        border-radius: 8px;
-        padding: 1.25rem;
-        margin: 1.5rem 0;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        padding: 1rem;
+        margin: 1rem 0;
+        font-size: 0.9rem;
     }
     
     .info-card h3 {
-        color: #0369a1;
-        margin-bottom: 0.5rem;
-        font-size: 1rem;
+        color: #374151;
+        margin-bottom: 0.25rem;
+        font-size: 0.9rem;
         font-weight: 600;
     }
     
     .info-card p {
-        color: #64748b;
-        font-size: 0.9rem;
-        line-height: 1.5;
+        color: #6b7280;
+        font-size: 0.8rem;
+        line-height: 1.4;
     }
     
-    /* Indicadores obrigatórios */
-    .required-field {
-        color: #dc2626;
-        font-weight: 600;
-    }
-    
+    /* Labels dos campos */
     .field-label {
         font-weight: 500;
         color: #374151;
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.25rem;
         display: block;
-        font-size: 14px;
+        font-size: 0.9rem;
     }
     
-    /* Animações */
+    .field-label.required::after {
+        content: '*';
+        color: #dc2626;
+        margin-left: 2px;
+    }
+    
+    /* Animações suaves */
     @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-    
-    @keyframes slideIn {
-        from { transform: translateX(-20px); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
+        from { opacity: 0; }
+        to { opacity: 1; }
     }
     
     /* Utilitários */
-    .text-center { text-align: center; }
+    .text-sm { font-size: 0.875rem; }
+    .text-xs { font-size: 0.75rem; }
     .mb-2 { margin-bottom: 0.5rem; }
-    .mb-4 { margin-bottom: 1rem; }
+    .mb-3 { margin-bottom: 0.75rem; }
     
     /* Responsividade */
     @media (max-width: 768px) {
         .main-header {
-            font-size: 2rem;
-            padding-top: 1rem;
+            font-size: 1.5rem;
+            padding-top: 0.5rem;
         }
         
         .form-container {
-            padding: 1.5rem;
+            padding: 1rem;
         }
         
         .form-grid {
             grid-template-columns: 1fr;
-            gap: 1rem;
+            gap: 0.75rem;
         }
         
         .stTabs [data-baseweb="tab"] {
-            padding: 0 16px !important;
-            font-size: 0.9rem;
+            padding: 0 12px !important;
+            font-size: 0.8rem;
         }
         
         .progress-container {
-            padding: 0 1rem;
+            padding: 0 0.5rem;
         }
         
         .step-label {
-            font-size: 10px;
+            font-size: 0.7rem;
         }
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Funções de validação e formatação (mantidas da versão anterior)
+# Funções de validação e formatação
 def validar_cpf(cpf):
     cpf = ''.join(filter(str.isdigit, cpf))
     if len(cpf) != 11: return False
@@ -540,7 +512,7 @@ def gerar_arquivo_totvs():
 
 def get_download_link(content, filename):
     b64 = base64.b64encode(content.encode()).decode()
-    return f'<a href="data:file/txt;base64,{b64}" download="{filename}" class="stButton button generate-button">📥 BAIXAR ARQUIVO TXT</a>'
+    return f'<a href="data:file/txt;base64,{b64}" download="{filename}" class="stButton button">📥 Baixar Arquivo TXT</a>'
 
 def initialize_session_state():
     defaults = {
@@ -552,17 +524,38 @@ def initialize_session_state():
         if key not in st.session_state:
             st.session_state[key] = value
 
+# Funções para campos com labels discretos
 def campo_obrigatorio(label, key, **kwargs):
-    return st.text_input(f"{label} <span class='required-field'>*</span>", key=key, **kwargs)
+    st.markdown(f'<div class="field-label required">{label}</div>', unsafe_allow_html=True)
+    return st.text_input("", key=key, **kwargs)
+
+def campo_opcional(label, key, **kwargs):
+    st.markdown(f'<div class="field-label">{label}</div>', unsafe_allow_html=True)
+    return st.text_input("", key=key, **kwargs)
 
 def selectbox_obrigatorio(label, key, options, **kwargs):
-    return st.selectbox(f"{label} <span class='required-field'>*</span>", options, key=key, **kwargs)
+    st.markdown(f'<div class="field-label required">{label}</div>', unsafe_allow_html=True)
+    return st.selectbox("", options, key=key, **kwargs)
+
+def selectbox_opcional(label, key, options, **kwargs):
+    st.markdown(f'<div class="field-label">{label}</div>', unsafe_allow_html=True)
+    return st.selectbox("", options, key=key, **kwargs)
 
 def date_input_obrigatorio(label, key, **kwargs):
-    return st.date_input(f"{label} <span class='required-field'>*</span>", key=key, **kwargs)
+    st.markdown(f'<div class="field-label required">{label}</div>', unsafe_allow_html=True)
+    return st.date_input("", key=key, **kwargs)
+
+def date_input_opcional(label, key, **kwargs):
+    st.markdown(f'<div class="field-label">{label}</div>', unsafe_allow_html=True)
+    return st.date_input("", key=key, **kwargs)
 
 def radio_obrigatorio(label, key, options, **kwargs):
-    return st.radio(f"{label} <span class='required-field'>*</span>", options, key=key, **kwargs)
+    st.markdown(f'<div class="field-label required">{label}</div>', unsafe_allow_html=True)
+    return st.radio("", options, key=key, **kwargs)
+
+def radio_opcional(label, key, options, **kwargs):
+    st.markdown(f'<div class="field-label">{label}</div>', unsafe_allow_html=True)
+    return st.radio("", options, key=key, **kwargs)
 
 def main():
     initialize_session_state()
@@ -570,10 +563,11 @@ def main():
     st.markdown('<div class="main">', unsafe_allow_html=True)
     st.markdown('<div class="main-container">', unsafe_allow_html=True)
     
-    st.markdown('<h1 class="main-header">Sistema de Cadastro de Funcionários</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="header-subtitle">Preencha o formulário completo para gerar o arquivo de integração TOTVS</p>', unsafe_allow_html=True)
+    # Header discreto
+    st.markdown('<h1 class="main-header">Cadastro de Funcionário</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="header-subtitle">Sistema de integração TOTVS</p>', unsafe_allow_html=True)
     
-    # Barra de progresso
+    # Barra de progresso discreta
     steps = [
         ("Dados Pessoais", st.session_state.dados_pessoais_salvos),
         ("Documentação", st.session_state.documentacao_salvos),
@@ -597,14 +591,14 @@ def main():
     
     # Abas
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "👤 Dados Pessoais", "📄 Documentação", "💳 Dados Bancários", 
-        "👨‍👩‍👧 Dependentes", "🎁 Benefícios", "🏢 Dados Empresa"
+        "👤 Dados Pessoais", "📄 Documentação", "💳 Bancários", 
+        "👨‍👩‍👧 Dependentes", "🎁 Benefícios", "🏢 Empresa"
     ])
     
     with tab1:
         st.session_state.current_tab = 0
         st.markdown('<div class="form-container">', unsafe_allow_html=True)
-        st.markdown('<h2 class="section-header">Dados Pessoais</h2>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">Dados Pessoais</div>', unsafe_allow_html=True)
         
         st.markdown('<div class="form-grid">', unsafe_allow_html=True)
         col1, col2, col3 = st.columns(3)
@@ -616,14 +610,14 @@ def main():
             data_nascimento = date_input_obrigatorio("Data de Nascimento", "data_nascimento", value=datetime(1999, 7, 8))
         
         with col2:
-            naturalidade = st.text_input("Naturalidade", value="ARCOVERDE - PE", key="naturalidade")
+            naturalidade = campo_opcional("Naturalidade", "naturalidade", value="ARCOVERDE - PE")
             endereco = campo_obrigatorio("Endereço", "endereco", value="R POETA FRANCISCO FERREIRA LEITE, 40, BL 04 AP 12")
             bairro = campo_obrigatorio("Bairro", "bairro", value="CRISTO REI")
             cidade = campo_obrigatorio("Cidade", "cidade", value="CURITIBA - PR")
         
         with col3:
             cep = campo_obrigatorio("CEP", "cep", value="80050-360")
-            nome_pai = st.text_input("Nome do Pai", value="ANTONIO MARCOS DA SILVA MATOS", key="nome_pai")
+            nome_pai = campo_opcional("Nome do Pai", "nome_pai", value="ANTONIO MARCOS DA SILVA MATOS")
             nome_mae = campo_obrigatorio("Nome da Mãe", "nome_mae", value="ANDRÉA DOS SANTOS MELO")
         
         col4, col5 = st.columns(2)
@@ -631,16 +625,16 @@ def main():
             grau_instrucao = selectbox_obrigatorio("Grau de Instrução", "grau_instrucao", 
                 ["Ensino Fundamental", "Ensino Médio", "Curso Superior", "Pós Graduação"], index=2)
         with col5:
-            email = st.text_input("E-mail", value="adriellymatos8@gmail.com", key="email")
+            email = campo_opcional("E-mail", "email", value="adriellymatos8@gmail.com")
             raca_cor = selectbox_obrigatorio("Raça/Cor", "raca_cor", 
                 ["Branca", "Negra", "Parda", "Amarela"], index=0)
         
         st.markdown('</div>', unsafe_allow_html=True)
         
-        if st.button("💾 Salvar Dados Pessoais", key="gravar_dados_pessoais", use_container_width=True):
+        if st.button("Salvar Dados Pessoais", key="gravar_dados_pessoais", use_container_width=True):
             if all([nome_completo, data_nascimento, endereco, bairro, cidade, cep, nome_mae]):
                 st.session_state.dados_pessoais_salvos = True
-                st.markdown('<div class="save-message"><strong>✅ Dados pessoais salvos com sucesso!</strong></div>', unsafe_allow_html=True)
+                st.markdown('<div class="save-message">Dados pessoais salvos com sucesso</div>', unsafe_allow_html=True)
                 time.sleep(1)
                 st.rerun()
             else:
@@ -651,7 +645,7 @@ def main():
     with tab2:
         st.session_state.current_tab = 1
         st.markdown('<div class="form-container">', unsafe_allow_html=True)
-        st.markdown('<h2 class="section-header">Documentação</h2>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">Documentação</div>', unsafe_allow_html=True)
         
         st.markdown('<div class="form-grid">', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
@@ -662,10 +656,10 @@ def main():
             data_expedicao = date_input_obrigatorio("Data de Expedição", "data_expedicao", value=datetime(2024, 5, 26))
             cpf = campo_obrigatorio("CPF", "cpf", value="060.375.391-46")
             if cpf and not validar_cpf(cpf):
-                st.error("CPF inválido!")
+                st.error("CPF inválido")
         
         with col2:
-            titulo_eleitor = st.text_input("Título de Eleitor", value="0268 4243 1929", key="titulo_eleitor")
+            titulo_eleitor = campo_opcional("Título de Eleitor", "titulo_eleitor", value="0268 4243 1929")
             ctps = campo_obrigatorio("CTPS", "ctps", value="7551374")
             serie = campo_obrigatorio("Série", "serie", value="00050")
             uf_ctps = campo_obrigatorio("UF", "uf_ctps", value="MS")
@@ -674,11 +668,11 @@ def main():
         
         st.markdown('</div>', unsafe_allow_html=True)
         
-        if st.button("💾 Salvar Documentação", key="gravar_documentacao", use_container_width=True):
+        if st.button("Salvar Documentação", key="gravar_documentacao", use_container_width=True):
             campos = [rg, orgao_exp, data_expedicao, cpf, ctps, serie, uf_ctps, data_exp_ctps, pis]
             if all(campos) and validar_cpf(cpf):
                 st.session_state.documentacao_salvos = True
-                st.markdown('<div class="save-message"><strong>✅ Documentação salva com sucesso!</strong></div>', unsafe_allow_html=True)
+                st.markdown('<div class="save-message">Documentação salva com sucesso</div>', unsafe_allow_html=True)
                 time.sleep(1)
                 st.rerun()
             else:
@@ -686,32 +680,123 @@ def main():
         
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # ... (outras abas similares - mantendo a estrutura mas com design clean)
+    with tab3:
+        st.session_state.current_tab = 2
+        st.markdown('<div class="form-container">', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">Dados Bancários</div>', unsafe_allow_html=True)
+        
+        st.markdown('<div class="info-card">', unsafe_allow_html=True)
+        st.markdown('<h3>Informação</h3><p>Todos os campos desta seção são opcionais</p>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            banco = campo_opcional("Banco", "banco", value="MÊNTORE BANK")
+        
+        with col2:
+            agencia = campo_opcional("Agência", "agencia")
+        
+        with col3:
+            conta = campo_opcional("Conta Corrente", "conta")
+        
+        chave_pix = campo_opcional("Chave PIX", "chave_pix")
+        
+        if st.button("Salvar Dados Bancários", key="gravar_dados_bancarios", use_container_width=True):
+            st.session_state.dados_bancarios_salvos = True
+            st.markdown('<div class="save-message">Dados bancários salvos com sucesso</div>', unsafe_allow_html=True)
+            time.sleep(1)
+            st.rerun()
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with tab4:
+        st.session_state.current_tab = 3
+        st.markdown('<div class="form-container">', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">Dependentes</div>', unsafe_allow_html=True)
+        
+        st.markdown('<div class="info-card">', unsafe_allow_html=True)
+        st.markdown('<h3>Informação</h3><p>Todos os campos desta seção são opcionais</p>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown("""
+        <table class="dependent-table">
+            <tr>
+                <th>Nome</th>
+                <th>CPF</th>
+                <th>Data de Nascimento</th>
+                <th>IRRF</th>
+                <th>Salário Família</th>
+            </tr>
+            <tr>
+                <td>LAURA HELENA MATOS FERREIRA LEITE</td>
+                <td>002.172.529-23</td>
+                <td>13/03/2024</td>
+                <td>SIM</td>
+                <td>NÃO</td>
+            </tr>
+        </table>
+        """, unsafe_allow_html=True)
+        
+        if st.button("Salvar Dependentes", key="gravar_dependentes", use_container_width=True):
+            st.session_state.dependentes_salvos = True
+            st.markdown('<div class="save-message">Dependentes salvos com sucesso</div>', unsafe_allow_html=True)
+            time.sleep(1)
+            st.rerun()
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    with tab5:
+        st.session_state.current_tab = 4
+        st.markdown('<div class="form-container">', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">Benefícios</div>', unsafe_allow_html=True)
+        
+        st.markdown('<div class="info-card">', unsafe_allow_html=True)
+        st.markdown('<h3>Informação</h3><p>Todos os campos desta seção são opcionais</p>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            vale_transporte = radio_opcional("Vale Transporte", "vale_transporte", ["Sim", "Não"], index=0)
+            vale_alimentacao = radio_opcional("Vale Alimentação", "vale_alimentacao", ["Sim", "Não"], index=0)
+        
+        with col2:
+            vale_refeicao = radio_opcional("Vale Refeição", "vale_refeicao", ["Sim", "Não"], index=1)
+            cesta_basica = radio_opcional("Cesta Básica", "cesta_basica", ["Sim", "Não"], index=1)
+        
+        if st.button("Salvar Benefícios", key="gravar_beneficios", use_container_width=True):
+            st.session_state.beneficios_salvos = True
+            st.markdown('<div class="save-message">Benefícios salvos com sucesso</div>', unsafe_allow_html=True)
+            time.sleep(1)
+            st.rerun()
+        
+        st.markdown('</div>', unsafe_allow_html=True)
     
     with tab6:
         st.session_state.current_tab = 5
         st.markdown('<div class="form-container">', unsafe_allow_html=True)
-        st.markdown('<h2 class="section-header">Dados da Empresa</h2>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">Dados da Empresa</div>', unsafe_allow_html=True)
         
         st.markdown('<div class="form-grid">', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         
         with col1:
-            empresa = st.text_input("Empresa", value="OBRA PRIMA S/A TECNOLOGIA E ADMINISTRAÇÃO DE SERVIÇOS", key="empresa")
+            empresa = campo_opcional("Empresa", "empresa", value="OBRA PRIMA S/A TECNOLOGIA E ADMINISTRAÇÃO DE SERVIÇOS")
             cargo_funcao = campo_obrigatorio("Cargo/Função", "cargo_funcao", value="ASSISTENTE I")
             data_inicio = date_input_obrigatorio("Data de Início", "data_inicio", value=datetime(2025, 11, 10))
         
         with col2:
             salario = campo_obrigatorio("Salário", "salario", value="R$ 2.946,15")
-            horario_trabalho = st.text_input("Horário de Trabalho", value="Das: 08:30 às 17:30 Intervalo: 12:00 às 13:00", key="horario_trabalho")
-            sindicato = st.text_input("Sindicato", value="SINEEPRES", key="sindicato")
+            horario_trabalho = campo_opcional("Horário de Trabalho", "horario_trabalho", value="Das: 08:30 às 17:30 Intervalo: 12:00 às 13:00")
+            sindicato = campo_opcional("Sindicato", "sindicato", value="SINEEPRES")
         
         st.markdown('</div>', unsafe_allow_html=True)
         
-        if st.button("💾 Salvar Dados da Empresa", key="gravar_dados_empresa", use_container_width=True):
+        if st.button("Salvar Dados da Empresa", key="gravar_dados_empresa", use_container_width=True):
             if all([cargo_funcao, data_inicio, salario]):
                 st.session_state.dados_empresa_salvos = True
-                st.markdown('<div class="save-message"><strong>✅ Dados da empresa salvos com sucesso!</strong></div>', unsafe_allow_html=True)
+                st.markdown('<div class="save-message">Dados da empresa salvos com sucesso</div>', unsafe_allow_html=True)
                 time.sleep(1)
                 st.rerun()
             else:
@@ -719,35 +804,33 @@ def main():
         
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # Botão final
+        # Botão final discreto
         todas_salvas = all([st.session_state.dados_pessoais_salvos, st.session_state.documentacao_salvos,
                            st.session_state.dados_bancarios_salvos, st.session_state.dependentes_salvos,
                            st.session_state.beneficios_salvos, st.session_state.dados_empresa_salvos])
         
         if todas_salvas:
-            if st.button("🚀 Enviar Formulário Completo", key="enviar_formulario", use_container_width=True, type="primary"):
+            if st.button("Enviar Formulário Completo", key="enviar_formulario", use_container_width=True):
                 st.session_state.formulario_enviado = True
                 st.markdown('''
                 <div class="success-message">
-                    <h3>✅ Formulário Enviado com Sucesso!</h3>
-                    <p>Seus dados foram registrados no sistema. Agora você pode gerar o arquivo TOTVS.</p>
+                    Formulário enviado com sucesso. Agora você pode gerar o arquivo TOTVS.
                 </div>
                 ''', unsafe_allow_html=True)
         else:
             st.markdown('''
             <div class="warning-message">
-                <strong>⚠️ Atenção</strong>
-                <p>Para enviar o formulário, é necessário salvar todas as abas anteriores.</p>
+                Para enviar o formulário, é necessário salvar todas as abas anteriores.
             </div>
             ''', unsafe_allow_html=True)
     
-    # Geração do arquivo
+    # Geração do arquivo discreta
     if st.session_state.formulario_enviado:
         st.markdown('<div class="form-container">', unsafe_allow_html=True)
-        st.markdown('<h2 class="section-header">Gerar Arquivo TOTVS</h2>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">Gerar Arquivo TOTVS</div>', unsafe_allow_html=True)
         
-        if st.button("⚡ Gerar Arquivo TXT TOTVS", key="gerar_txt", use_container_width=True, type="primary"):
-            with st.spinner("Gerando arquivo TOTVS..."):
+        if st.button("Gerar Arquivo TXT TOTVS", key="gerar_txt", use_container_width=True):
+            with st.spinner("Gerando arquivo..."):
                 time.sleep(1)
                 try:
                     conteudo_txt = gerar_arquivo_totvs()
@@ -756,13 +839,13 @@ def main():
                     
                     st.markdown(get_download_link(conteudo_txt, nome_arquivo), unsafe_allow_html=True)
                     
-                    with st.expander("📋 Visualizar Conteúdo do Arquivo"):
+                    with st.expander("Visualizar conteúdo do arquivo"):
                         st.text_area("", conteudo_txt, height=300, key="preview_arquivo")
                     
-                    st.success("✅ Arquivo TOTVS gerado com sucesso!")
+                    st.success("Arquivo gerado com sucesso")
                     
                 except Exception as e:
-                    st.error(f"❌ Erro ao gerar arquivo: {str(e)}")
+                    st.error(f"Erro ao gerar arquivo: {str(e)}")
         
         st.markdown('</div>', unsafe_allow_html=True)
     
