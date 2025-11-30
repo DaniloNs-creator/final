@@ -12,7 +12,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# CSS clean e discreto
+# CSS compacto e direto
 st.markdown("""
 <style>
     /* Reset e base */
@@ -28,21 +28,19 @@ st.markdown("""
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
     
-    /* Header discreto */
+    /* Header compacto */
     .main-header {
-        font-size: 1.8rem;
+        font-size: 1.5rem;
         font-weight: 600;
-        text-align: center;
         color: #1f2937;
-        margin-bottom: 0.5rem;
-        padding-top: 1rem;
+        margin-bottom: 0.25rem;
+        padding-top: 0.5rem;
     }
     
     .header-subtitle {
-        text-align: center;
         color: #6b7280;
-        font-size: 0.9rem;
-        margin-bottom: 2rem;
+        font-size: 0.8rem;
+        margin-bottom: 1rem;
         font-weight: 400;
     }
     
@@ -51,11 +49,9 @@ st.markdown("""
         max-width: 1200px;
         margin: 0 auto;
         background: white;
-        border-radius: 8px;
-        overflow: hidden;
     }
     
-    /* Abas limpas */
+    /* Abas compactas */
     .stTabs [data-baseweb="tab-list"] {
         gap: 0;
         background: #f9fafb;
@@ -64,18 +60,18 @@ st.markdown("""
     }
     
     .stTabs [data-baseweb="tab"] {
-        height: 50px;
+        height: 45px;
         background: transparent !important;
         color: #6b7280 !important;
         font-weight: 500;
         border: none !important;
         border-radius: 0 !important;
         margin: 0 !important;
-        padding: 0 20px !important;
+        padding: 0 16px !important;
         position: relative;
         transition: all 0.2s ease;
         border-bottom: 2px solid transparent !important;
-        font-size: 0.9rem;
+        font-size: 0.85rem;
     }
     
     .stTabs [data-baseweb="tab"]:hover {
@@ -89,18 +85,18 @@ st.markdown("""
         border-bottom: 2px solid #2563eb !important;
     }
     
-    /* Containers de formulário */
+    /* Containers de formulário compactos */
     .form-container {
         background: white;
-        padding: 1.5rem;
+        padding: 1rem;
         animation: fadeIn 0.3s ease-out;
     }
     
     .section-header {
-        font-size: 1.2rem;
+        font-size: 1.1rem;
         font-weight: 600;
         color: #1f2937;
-        margin-bottom: 1.5rem;
+        margin-bottom: 1rem;
         padding-bottom: 0.5rem;
         border-bottom: 1px solid #f3f4f6;
     }
@@ -109,18 +105,18 @@ st.markdown("""
     .form-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 1rem;
-        margin-bottom: 1.5rem;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
     }
     
-    /* Campos de entrada */
+    /* Campos de entrada compactos */
     .stTextInput>div>div>input, 
     .stDateInput>div>div>input, 
     .stSelectbox>div>div>select {
         border: 1px solid #d1d5db;
         border-radius: 6px;
-        padding: 10px 12px;
-        font-size: 14px;
+        padding: 8px 12px;
+        font-size: 0.85rem;
         transition: all 0.2s ease;
         background: white;
     }
@@ -133,22 +129,22 @@ st.markdown("""
         outline: none;
     }
     
-    /* Radio buttons */
+    /* Radio buttons compactos */
     .stRadio>div {
-        gap: 8px;
+        gap: 6px;
         flex-wrap: wrap;
     }
     
     .stRadio>div>label {
         background: #f9fafb;
-        padding: 10px 16px;
+        padding: 8px 12px;
         border-radius: 6px;
         border: 1px solid #e5e7eb;
         transition: all 0.2s ease;
         flex: 1;
-        min-width: 100px;
+        min-width: 90px;
         text-align: center;
-        font-size: 0.9rem;
+        font-size: 0.8rem;
     }
     
     .stRadio>div>label:hover {
@@ -156,23 +152,21 @@ st.markdown("""
         background: #f0f4ff;
     }
     
-    /* Botões */
+    /* Botões compactos */
     .stButton button {
         background: #2563eb;
         color: white;
         font-weight: 500;
         border: none;
-        padding: 10px 24px;
+        padding: 8px 20px;
         border-radius: 6px;
         width: 100%;
         transition: all 0.2s ease;
-        font-size: 0.9rem;
+        font-size: 0.85rem;
     }
     
     .stButton button:hover {
         background: #1d4ed8;
-        transform: none;
-        box-shadow: none;
     }
     
     .save-button button {
@@ -191,25 +185,25 @@ st.markdown("""
         background: #6d28d9 !important;
     }
     
-    /* Tabela */
+    /* Tabela compacta */
     .dependent-table {
         width: 100%;
         border-collapse: collapse;
-        margin: 1rem 0;
-        font-size: 0.9rem;
+        margin: 0.75rem 0;
+        font-size: 0.8rem;
     }
     
     .dependent-table th {
         background: #f9fafb;
         color: #374151;
-        padding: 10px 12px;
+        padding: 8px 10px;
         text-align: left;
         font-weight: 600;
         border-bottom: 1px solid #e5e7eb;
     }
     
     .dependent-table td {
-        padding: 10px 12px;
+        padding: 8px 10px;
         border-bottom: 1px solid #f3f4f6;
     }
     
@@ -217,44 +211,44 @@ st.markdown("""
         background: #f9fafb;
     }
     
-    /* Mensagens discretas */
+    /* Mensagens compactas */
     .success-message {
         background: #f0fdf4;
         color: #166534;
-        padding: 1rem;
+        padding: 0.75rem;
         border-radius: 6px;
         border: 1px solid #bbf7d0;
-        margin: 1rem 0;
-        font-size: 0.9rem;
+        margin: 0.75rem 0;
+        font-size: 0.85rem;
     }
     
     .save-message {
         background: #f0f9ff;
         color: #0369a1;
-        padding: 0.875rem 1rem;
+        padding: 0.75rem;
         border-radius: 6px;
         border: 1px solid #bae6fd;
-        margin: 1rem 0;
-        font-size: 0.9rem;
+        margin: 0.75rem 0;
+        font-size: 0.85rem;
     }
     
     .warning-message {
         background: #fffbeb;
         color: #92400e;
-        padding: 0.875rem 1rem;
+        padding: 0.75rem;
         border-radius: 6px;
         border: 1px solid #fed7aa;
-        margin: 1rem 0;
-        font-size: 0.9rem;
+        margin: 0.75rem 0;
+        font-size: 0.85rem;
     }
     
-    /* Progresso discreto */
+    /* Progresso compacto */
     .progress-container {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin: 1.5rem 0;
-        padding: 0 1rem;
+        margin: 1rem 0;
+        padding: 0 0.5rem;
     }
     
     .progress-step {
@@ -266,8 +260,8 @@ st.markdown("""
     }
     
     .step-number {
-        width: 28px;
-        height: 28px;
+        width: 24px;
+        height: 24px;
         border-radius: 50%;
         background: #f3f4f6;
         color: #6b7280;
@@ -275,13 +269,13 @@ st.markdown("""
         align-items: center;
         justify-content: center;
         font-weight: 500;
-        font-size: 0.8rem;
+        font-size: 0.7rem;
         margin-bottom: 0.25rem;
         transition: all 0.3s ease;
     }
     
     .step-label {
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         color: #6b7280;
         font-weight: 500;
         text-align: center;
@@ -305,45 +299,45 @@ st.markdown("""
         flex: 1;
         height: 1px;
         background: #e5e7eb;
-        margin: 0 4px;
+        margin: 0 2px;
         position: relative;
-        top: -14px;
+        top: -12px;
     }
     
     .progress-connector.completed {
         background: #059669;
     }
     
-    /* Cards informativos discretos */
+    /* Cards informativos compactos */
     .info-card {
         background: #f8fafc;
         border: 1px solid #e2e8f0;
         border-radius: 6px;
-        padding: 1rem;
-        margin: 1rem 0;
-        font-size: 0.9rem;
+        padding: 0.75rem;
+        margin: 0.75rem 0;
+        font-size: 0.8rem;
     }
     
     .info-card h3 {
         color: #374151;
         margin-bottom: 0.25rem;
-        font-size: 0.9rem;
+        font-size: 0.85rem;
         font-weight: 600;
     }
     
     .info-card p {
         color: #6b7280;
-        font-size: 0.8rem;
+        font-size: 0.75rem;
         line-height: 1.4;
     }
     
-    /* Labels dos campos */
+    /* Labels dos campos compactos */
     .field-label {
         font-weight: 500;
         color: #374151;
         margin-bottom: 0.25rem;
         display: block;
-        font-size: 0.9rem;
+        font-size: 0.85rem;
     }
     
     .field-label.required::after {
@@ -359,38 +353,37 @@ st.markdown("""
     }
     
     /* Utilitários */
-    .text-sm { font-size: 0.875rem; }
-    .text-xs { font-size: 0.75rem; }
+    .text-sm { font-size: 0.8rem; }
+    .text-xs { font-size: 0.7rem; }
+    .mb-1 { margin-bottom: 0.25rem; }
     .mb-2 { margin-bottom: 0.5rem; }
-    .mb-3 { margin-bottom: 0.75rem; }
     
     /* Responsividade */
     @media (max-width: 768px) {
         .main-header {
-            font-size: 1.5rem;
-            padding-top: 0.5rem;
+            font-size: 1.3rem;
         }
         
         .form-container {
-            padding: 1rem;
+            padding: 0.75rem;
         }
         
         .form-grid {
             grid-template-columns: 1fr;
-            gap: 0.75rem;
+            gap: 0.5rem;
         }
         
         .stTabs [data-baseweb="tab"] {
-            padding: 0 12px !important;
-            font-size: 0.8rem;
+            padding: 0 10px !important;
+            font-size: 0.75rem;
         }
         
         .progress-container {
-            padding: 0 0.5rem;
+            padding: 0 0.25rem;
         }
         
         .step-label {
-            font-size: 0.7rem;
+            font-size: 0.65rem;
         }
     }
 </style>
@@ -563,15 +556,15 @@ def main():
     st.markdown('<div class="main">', unsafe_allow_html=True)
     st.markdown('<div class="main-container">', unsafe_allow_html=True)
     
-    # Header discreto
-    st.markdown('<h1 class="main-header">Cadastro de Funcionário</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="header-subtitle">Sistema de integração TOTVS</p>', unsafe_allow_html=True)
+    # Header compacto no topo
+    st.markdown('<div class="main-header">Cadastro de Funcionário</div>', unsafe_allow_html=True)
+    st.markdown('<div class="header-subtitle">Sistema de integração TOTVS</div>', unsafe_allow_html=True)
     
-    # Barra de progresso discreta
+    # Barra de progresso compacta
     steps = [
         ("Dados Pessoais", st.session_state.dados_pessoais_salvos),
         ("Documentação", st.session_state.documentacao_salvos),
-        ("Dados Bancários", st.session_state.dados_bancarios_salvos),
+        ("Bancários", st.session_state.dados_bancarios_salvos),
         ("Dependentes", st.session_state.dependentes_salvos),
         ("Benefícios", st.session_state.beneficios_salvos),
         ("Empresa", st.session_state.dados_empresa_salvos)
@@ -589,7 +582,7 @@ def main():
         ''', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Abas
+    # Abas compactas
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "👤 Dados Pessoais", "📄 Documentação", "💳 Bancários", 
         "👨‍👩‍👧 Dependentes", "🎁 Benefícios", "🏢 Empresa"
@@ -804,7 +797,7 @@ def main():
         
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # Botão final discreto
+        # Botão final compacto
         todas_salvas = all([st.session_state.dados_pessoais_salvos, st.session_state.documentacao_salvos,
                            st.session_state.dados_bancarios_salvos, st.session_state.dependentes_salvos,
                            st.session_state.beneficios_salvos, st.session_state.dados_empresa_salvos])
@@ -812,19 +805,11 @@ def main():
         if todas_salvas:
             if st.button("Enviar Formulário Completo", key="enviar_formulario", use_container_width=True):
                 st.session_state.formulario_enviado = True
-                st.markdown('''
-                <div class="success-message">
-                    Formulário enviado com sucesso. Agora você pode gerar o arquivo TOTVS.
-                </div>
-                ''', unsafe_allow_html=True)
+                st.markdown('<div class="success-message">Formulário enviado com sucesso</div>', unsafe_allow_html=True)
         else:
-            st.markdown('''
-            <div class="warning-message">
-                Para enviar o formulário, é necessário salvar todas as abas anteriores.
-            </div>
-            ''', unsafe_allow_html=True)
+            st.markdown('<div class="warning-message">Salve todas as abas para enviar</div>', unsafe_allow_html=True)
     
-    # Geração do arquivo discreta
+    # Geração do arquivo compacta
     if st.session_state.formulario_enviado:
         st.markdown('<div class="form-container">', unsafe_allow_html=True)
         st.markdown('<div class="section-header">Gerar Arquivo TOTVS</div>', unsafe_allow_html=True)
@@ -839,8 +824,8 @@ def main():
                     
                     st.markdown(get_download_link(conteudo_txt, nome_arquivo), unsafe_allow_html=True)
                     
-                    with st.expander("Visualizar conteúdo do arquivo"):
-                        st.text_area("", conteudo_txt, height=300, key="preview_arquivo")
+                    with st.expander("Visualizar conteúdo"):
+                        st.text_area("", conteudo_txt, height=200, key="preview_arquivo")
                     
                     st.success("Arquivo gerado com sucesso")
                     
