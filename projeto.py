@@ -1,1021 +1,830 @@
 import streamlit as st
-import PyPDF2
-import pandas as pd
+import pdfplumber
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 import re
+import os
+import tempfile
 from datetime import datetime
-import io
 import json
+from typing import Dict, List, Any, Tuple
+import io
 
-# Configuração da página
-st.set_page_config(
-    page_title="Conversor DUIMP - Mesmo Layout XML",
-    page_icon="📐",
-    layout="wide"
-)
-
-# Título do aplicativo
-st.title("📐 Conversor DUIMP - Mesmo Layout do XML Exemplo")
-st.markdown("### Extrai dados do PDF e gera XML no MESMO FORMATO do exemplo")
-
-# Barra lateral
-with st.sidebar:
-    st.header("📐 Layout")
-    st.success("""
-    **Mesmo formato do:**
-    - M-DUIMP-8686868686.xml
-    - Mesma estrutura de tags
-    - Mesmo ordenamento
-    - Mesma formatação
-    """)
+class DUIMPExactConverter:
+    """Converte PDF para XML mantendo o layout EXATO do modelo"""
     
-    st.header("⚙️ Configurações")
-    num_adicoes = st.slider("Número de adições no XML", 1, 10, 5)
-    
-    st.header("📊 Status")
-    status_placeholder = st.empty()
-
-# ============================================
-# FUNÇÃO PARA EXTRAIR DADOS COMPLETOS DO PDF
-# ============================================
-
-def extract_complete_pdf_data(pdf_file):
-    """Extrai dados completos do PDF no formato específico"""
-    try:
-        pdf_reader = PyPDF2.PdfReader(pdf_file)
-        dados = {
-            "geral": {},
-            "itens": [],
-            "tributos": {},
-            "documentos": [],
-            "carga": {},
-            "transporte": {}
-        }
+    def __init__(self):
+        self.xml_template = None
+        self.xml_structure = {}
+        self.item_counter = 1
+        self.adicao_counter = 1
         
-        # Processar todas as páginas
-        for page_num, page in enumerate(pdf_reader.pages):
-            text = page.extract_text()
-            lines = text.split('\n')
-            
-            # ===== PÁGINA 1 =====
-            if page_num == 0:
-                for i, line in enumerate(lines):
-                    line = line.strip()
-                    
-                    # PROCESSO
-                    if "PROCESSO #" in line:
-                        dados["geral"]["numero_processo"] = line.replace("PROCESSO #", "").strip()
-                    
-                    # IMPORTADOR
-                    elif "HAFELE BRASIL" in line:
-                        dados["geral"]["importador_nome"] = "HAFELE BRASIL"
-                        # Procurar CNPJ na próxima linha
-                        if i+1 < len(lines):
-                            next_line = lines[i+1].strip()
-                            if "/" in next_line and "-" in next_line:
-                                dados["geral"]["importador_cnpj"] = next_line
-                    
-                    # NÚMERO DUIMP
-                    elif "Número" in line and "25BR" in line:
-                        for word in line.split():
-                            if "25BR" in word:
-                                dados["geral"]["numero_duimp"] = word
-                    
-                    # DATA CADASTRO
-                    elif "Data de Cadastro" in line:
-                        parts = line.split("Data de Cadastro")
-                        if len(parts) > 1:
-                            dados["geral"]["data_cadastro"] = parts[1].strip()
-                    
-                    # RESPONSÁVEL
-                    elif "Responsavel Legal" in line:
-                        parts = line.split("Responsavel Legal")
-                        if len(parts) > 1:
-                            dados["geral"]["responsavel_legal"] = parts[1].strip()
-                    
-                    # MOEDA
-                    elif "Moeda Negociada" in line:
-                        parts = line.split("-")
-                        if len(parts) > 1:
-                            dados["geral"]["moeda_negociada"] = parts[1].strip()
-                    
-                    # COTAÇÃO
-                    elif "Cotacao" in line and any(c.isdigit() for c in line):
-                        cotacao = re.search(r"[\d,]+", line)
-                        if cotacao:
-                            dados["geral"]["cotacao"] = cotacao.group()
-                    
-                    # VALORES VMLE
-                    elif "VMLE (US$)" in line:
-                        valores = re.findall(r"[\d.,]+", line)
-                        if len(valores) >= 2:
-                            dados["geral"]["vmle_usd"] = valores[0]
-                            dados["geral"]["vmle_brl"] = valores[1]
-                    
-                    # TRIBUTOS - II
-                    elif "| II" in line or "II |" in line:
-                        valores = re.findall(r"[\d.,]+", line)
-                        if len(valores) >= 3:
-                            dados["tributos"]["ii_calculado"] = valores[0]
-                            dados["tributos"]["ii_devido"] = valores[1]
-                            dados["tributos"]["ii_recolher"] = valores[2]
-                    
-                    # TRIBUTOS - PIS
-                    elif "| PIS" in line or "PIS |" in line:
-                        valores = re.findall(r"[\d.,]+", line)
-                        if len(valores) >= 3:
-                            dados["tributos"]["pis_calculado"] = valores[0]
-                            dados["tributos"]["pis_devido"] = valores[1]
-                            dados["tributos"]["pis_recolher"] = valores[2]
-                    
-                    # TRIBUTOS - COFINS
-                    elif "| COFINS" in line or "COFINS |" in line:
-                        valores = re.findall(r"[\d.,]+", line)
-                        if len(valores) >= 3:
-                            dados["tributos"]["cofins_calculado"] = valores[0]
-                            dados["tributos"]["cofins_devido"] = valores[1]
-                            dados["tributos"]["cofins_recolher"] = valores[2]
-                    
-                    # TAXA UTILIZAÇÃO
-                    elif "TAXA DE UTILIZACAO" in line:
-                        valores = re.findall(r"[\d.,]+", line)
-                        if valores:
-                            dados["tributos"]["taxa_utilizacao"] = valores[-1]
-                    
-                    # DADOS CARGA
-                    elif "Via de Transporte" in line:
-                        parts = line.split("-")
-                        if len(parts) > 1:
-                            dados["carga"]["via_transporte"] = parts[1].strip()
-                    
-                    elif "Data de Embarque" in line:
-                        parts = line.split("Data de Embarque")
-                        if len(parts) > 1:
-                            dados["carga"]["data_embarque"] = parts[1].strip()
-                    
-                    elif "Peso Bruto" in line:
-                        peso = re.search(r"[\d.,]+", line)
-                        if peso:
-                            dados["carga"]["peso_bruto"] = peso.group()
-                    
-                    elif "País de Procedencia" in line:
-                        parts = line.split("-")
-                        if len(parts) > 1:
-                            dados["carga"]["pais_procedencia"] = parts[1].strip()
-                    
-                    # SEGURO
-                    elif "Total (Moeda)" in line and i+1 < len(lines):
-                        seguro_moeda = re.search(r"[\d.,]+", line)
-                        if seguro_moeda:
-                            dados["geral"]["seguro_moeda"] = seguro_moeda.group()
-                            # Procurar valor em BRL na próxima linha
-                            if "Total (R$)" in lines[i+1]:
-                                seguro_brl = re.search(r"[\d.,]+", lines[i+1])
-                                if seguro_brl:
-                                    dados["geral"]["seguro_brl"] = seguro_brl.group()
-            
-            # ===== PÁGINA 2 =====
-            elif page_num == 1:
-                for i, line in enumerate(lines):
-                    line = line.strip()
-                    
-                    # FRETE
-                    if "Total (US$)" in line and i+1 < len(lines):
-                        frete_usd = re.search(r"[\d.,]+", line)
-                        if frete_usd:
-                            dados["geral"]["frete_usd"] = frete_usd.group()
-                            # Procurar valor em BRL na próxima linha
-                            if "Total (R$)" in lines[i+1]:
-                                frete_brl = re.search(r"[\d.,]+", lines[i+1])
-                                if frete_brl:
-                                    dados["geral"]["frete_brl"] = frete_brl.group()
-                    
-                    # DOCUMENTOS
-                    elif "CONHECIMENTO DE EMBARQUE" in line and i+1 < len(lines):
-                        num_doc = lines[i+1].replace("NUMERO", "").strip()
-                        dados["documentos"].append(("CONHECIMENTO", num_doc))
-                    
-                    elif "FATURA COMERCIAL" in line and i+1 < len(lines):
-                        num_doc = lines[i+1].replace("NUMERO", "").strip()
-                        dados["documentos"].append(("FATURA", num_doc))
-            
-            # ===== PÁGINA 3 ===== (ITENS)
-            elif page_num == 2:
-                item_atual = None
-                for i, line in enumerate(lines):
-                    line = line.strip()
-                    
-                    # INÍCIO DE ITEM (padrão: "1    ✗    8302.10.00")
-                    item_pattern = r'^(\d+)\s+[✓✗]?\s+([\d.]+)\s+(\d+)\s+(\d+)\s+([A-Z]+)\s+(\d+)'
-                    match = re.match(item_pattern, line)
-                    
-                    if match:
-                        if item_atual:
-                            dados["itens"].append(item_atual)
-                        
-                        item_atual = {
-                            "numero": match.group(1),
-                            "ncm": match.group(2),
-                            "codigo_produto": match.group(3),
-                            "versao": match.group(4),
-                            "condicao_venda": match.group(5),
-                            "fatura_invoice": match.group(6),
-                            "descricao": "",
-                            "codigo_interno": "",
-                            "quantidade": "",
-                            "peso_liquido": "",
-                            "valor_unitario": "",
-                            "valor_total": ""
-                        }
-                    
-                    # DENTRO DE UM ITEM
-                    elif item_atual:
-                        # DESCRIÇÃO
-                        if "DOBRADICA" in line or "PARAFUSO" in line or any(x in line for x in ["INVISIVEL", "LIGA", "ZINCO"]):
-                            if not item_atual["descricao"]:
-                                item_atual["descricao"] = line
-                        
-                        # CÓDIGO INTERNO
-                        elif "Código interno" in line:
-                            item_atual["codigo_interno"] = line.replace("Código interno", "").strip()
-                        
-                        # QUANTIDADE
-                        elif "Qtde Unid. Comercial" in line:
-                            qtd = re.search(r"[\d.,]+", line)
-                            if qtd:
-                                item_atual["quantidade"] = qtd.group()
-                        
-                        # PESO
-                        elif "Peso Líquido (KG)" in line:
-                            peso = re.search(r"[\d.,]+", line)
-                            if peso:
-                                item_atual["peso_liquido"] = peso.group()
-                        
-                        # VALOR UNITÁRIO
-                        elif "Valor Unit Cond Venda" in line:
-                            valor = re.search(r"[\d.,]+", line)
-                            if valor:
-                                item_atual["valor_unitario"] = valor.group()
-                        
-                        # VALOR TOTAL
-                        elif "Valor Tot. Cond Venda" in line:
-                            valor = re.search(r"[\d.,]+", line)
-                            if valor:
-                                item_atual["valor_total"] = valor.group()
-                
-                # Adicionar último item
-                if item_atual:
-                    dados["itens"].append(item_atual)
-        
-        return dados
-    
-    except Exception as e:
-        st.error(f"Erro ao extrair dados do PDF: {str(e)}")
-        return None
-
-# ============================================
-# FUNÇÃO PARA CRIAR XML NO MESMO LAYOUT
-# ============================================
-
-def create_xml_same_layout(pdf_data, num_adicoes=5):
-    """Cria XML no MESMO LAYOUT do exemplo, com dados do PDF"""
-    
-    # Criar estrutura XML
-    lista_declaracoes = ET.Element("ListaDeclaracoes")
-    duimp = ET.SubElement(lista_declaracoes, "duimp")
-    
-    # ===== CRIAR ADIÇÕES =====
-    for adicao_num in range(1, num_adicoes + 1):
-        adicao = ET.SubElement(duimp, "adicao")
-        
-        # Usar dados do item correspondente ou dados padrão
-        item_idx = (adicao_num - 1) % len(pdf_data["itens"]) if pdf_data["itens"] else 0
-        item = pdf_data["itens"][item_idx] if pdf_data["itens"] else {}
-        
-        # ===== ACRÉSCIMO =====
-        acrescimo = ET.SubElement(adicao, "acrescimo")
-        ET.SubElement(acrescimo, "codigoAcrescimo").text = "17"
-        ET.SubElement(acrescimo, "denominacao").text = "OUTROS ACRESCIMOS AO VALOR ADUANEIRO                        "
-        ET.SubElement(acrescimo, "moedaNegociadaCodigo").text = "978"
-        ET.SubElement(acrescimo, "moedaNegociadaNome").text = "EURO/COM.EUROPEIA"
-        ET.SubElement(acrescimo, "valorMoedaNegociada").text = format_number("171.93", 15)
-        ET.SubElement(acrescimo, "valorReais").text = format_number("1066.01", 15)
-        
-        # ===== CIDE =====
-        ET.SubElement(adicao, "cideValorAliquotaEspecifica").text = "00000000000"
-        ET.SubElement(adicao, "cideValorDevido").text = "000000000000000"
-        ET.SubElement(adicao, "cideValorRecolher").text = "000000000000000"
-        
-        # ===== RELAÇÃO COMPRADOR/VENDEDOR =====
-        ET.SubElement(adicao, "codigoRelacaoCompradorVendedor").text = "3"
-        ET.SubElement(adicao, "codigoVinculoCompradorVendedor").text = "1"
-        
-        # ===== COFINS =====
-        ET.SubElement(adicao, "cofinsAliquotaAdValorem").text = "00965"
-        ET.SubElement(adicao, "cofinsAliquotaEspecificaQuantidadeUnidade").text = "000000000"
-        ET.SubElement(adicao, "cofinsAliquotaEspecificaValor").text = "0000000000"
-        ET.SubElement(adicao, "cofinsAliquotaReduzida").text = "00000"
-        
-        # Usar valor do PDF ou padrão
-        cofins_valor = pdf_data.get("tributos", {}).get("cofins_recolher", "1375.74")
-        ET.SubElement(adicao, "cofinsAliquotaValorDevido").text = format_number(cofins_valor, 15)
-        ET.SubElement(adicao, "cofinsAliquotaValorRecolher").text = format_number(cofins_valor, 15)
-        
-        # ===== CONDIÇÃO DE VENDA =====
-        # Usar dados do PDF
-        incoterm = item.get("condicao_venda", "FOB")
-        ET.SubElement(adicao, "condicaoVendaIncoterm").text = incoterm if len(incoterm) <= 3 else incoterm[:3]
-        
-        # Local baseado no país do PDF
-        pais = pdf_data.get("carga", {}).get("pais_procedencia", "")
-        if "CHINA" in pais:
-            ET.SubElement(adicao, "condicaoVendaLocal").text = "CNYTN"
-        else:
-            ET.SubElement(adicao, "condicaoVendaLocal").text = "BRUGNERA"
-        
-        ET.SubElement(adicao, "condicaoVendaMetodoValoracaoCodigo").text = "01"
-        ET.SubElement(adicao, "condicaoVendaMetodoValoracaoNome").text = "METODO 1 - ART. 1 DO ACORDO (DECRETO 92930/86)"
-        ET.SubElement(adicao, "condicaoVendaMoedaCodigo").text = "978"
-        ET.SubElement(adicao, "condicaoVendaMoedaNome").text = "EURO/COM.EUROPEIA"
-        
-        # Valores do item
-        valor_moeda = item.get("valor_total", "2101.45")
-        ET.SubElement(adicao, "condicaoVendaValorMoeda").text = format_number(valor_moeda, 15)
-        
-        # Converter para BRL usando cotação do PDF
-        cotacao = float(pdf_data.get("geral", {}).get("cotacao", "5.3843").replace(",", "."))
-        valor_brl = float(valor_moeda.replace(".", "").replace(",", ".")) * cotacao
-        ET.SubElement(adicao, "condicaoVendaValorReais").text = format_number(str(valor_brl), 15)
-        
-        # ===== DADOS CAMBIAIS =====
-        ET.SubElement(adicao, "dadosCambiaisCoberturaCambialCodigo").text = "1"
-        ET.SubElement(adicao, "dadosCambiaisCoberturaCambialNome").text = "COM COBERTURA CAMBIAL E PAGAMENTO FINAL A PRAZO DE ATE' 180"
-        ET.SubElement(adicao, "dadosCambiaisInstituicaoFinanciadoraCodigo").text = "00"
-        ET.SubElement(adicao, "dadosCambiaisInstituicaoFinanciadoraNome").text = "N/I"
-        ET.SubElement(adicao, "dadosCambiaisMotivoSemCoberturaCodigo").text = "00"
-        ET.SubElement(adicao, "dadosCambiaisMotivoSemCoberturaNome").text = "N/I"
-        ET.SubElement(adicao, "dadosCambiaisValorRealCambio").text = "000000000000000"
-        
-        # ===== DADOS DA CARGA =====
-        ET.SubElement(adicao, "dadosCargaPaisProcedenciaCodigo").text = "000"
-        ET.SubElement(adicao, "dadosCargaUrfEntradaCodigo").text = "0000000"
-        ET.SubElement(adicao, "dadosCargaViaTransporteCodigo").text = "01"
-        ET.SubElement(adicao, "dadosCargaViaTransporteNome").text = "MARÍTIMA"
-        
-        # ===== DADOS DA MERCADORIA =====
-        ET.SubElement(adicao, "dadosMercadoriaAplicacao").text = "REVENDA"
-        ET.SubElement(adicao, "dadosMercadoriaCodigoNaladiNCCA").text = "0000000"
-        ET.SubElement(adicao, "dadosMercadoriaCodigoNaladiSH").text = "00000000"
-        
-        # NCM do item
-        ncm = item.get("ncm", "83021000").replace(".", "")
-        ET.SubElement(adicao, "dadosMercadoriaCodigoNcm").text = ncm if len(ncm) == 8 else ncm.ljust(8, '0')
-        
-        ET.SubElement(adicao, "dadosMercadoriaCondicao").text = "NOVA"
-        ET.SubElement(adicao, "dadosMercadoriaDescricaoTipoCertificado").text = "Sem Certificado"
-        ET.SubElement(adicao, "dadosMercadoriaIndicadorTipoCertificado").text = "1"
-        
-        # Quantidade do item
-        quantidade = item.get("quantidade", "4584.20")
-        ET.SubElement(adicao, "dadosMercadoriaMedidaEstatisticaQuantidade").text = format_number(quantidade, 14) + "00"
-        ET.SubElement(adicao, "dadosMercadoriaMedidaEstatisticaUnidade").text = "QUILOGRAMA LIQUIDO"
-        
-        # Descrição NCM baseada no código
-        ncm_desc = {
-            "83021000": "- Dobradiças",
-            "39263000": "- Guarnições para móveis, carroçarias ou semelhantes",
-            "73181200": "-- Outros parafusos para madeira",
-            "83024200": "-- Outros, para móveis",
-            "85051100": "-- De metal"
-        }
-        ncm_key = ncm[:8]
-        ET.SubElement(adicao, "dadosMercadoriaNomeNcm").text = ncm_desc.get(ncm_key, "- Produto importado")
-        
-        # Peso do item
-        peso = item.get("peso_liquido", "4584.200")
-        ET.SubElement(adicao, "dadosMercadoriaPesoLiquido").text = format_number(peso, 15)
-        
-        # ===== DCR =====
-        ET.SubElement(adicao, "dcrCoeficienteReducao").text = "00000"
-        ET.SubElement(adicao, "dcrIdentificacao").text = "00000000"
-        ET.SubElement(adicao, "dcrValorDevido").text = "000000000000000"
-        ET.SubElement(adicao, "dcrValorDolar").text = "000000000000000"
-        ET.SubElement(adicao, "dcrValorReal").text = "000000000000000"
-        ET.SubElement(adicao, "dcrValorRecolher").text = "000000000000000"
-        
-        # ===== FORNECEDOR =====
-        if adicao_num % 2 == 1:
-            ET.SubElement(adicao, "fornecedorCidade").text = "BRUGNERA"
-            ET.SubElement(adicao, "fornecedorLogradouro").text = "VIALE EUROPA"
-            ET.SubElement(adicao, "fornecedorNome").text = "ITALIANA FERRAMENTA S.R.L."
-            ET.SubElement(adicao, "fornecedorNumero").text = "17"
-        else:
-            ET.SubElement(adicao, "fornecedorCidade").text = "CIMADOLMO"
-            ET.SubElement(adicao, "fornecedorLogradouro").text = "AVENIDA VIA DELLA CARRERA"
-            ET.SubElement(adicao, "fornecedorNome").text = "UNION PLAST S.R.L."
-            ET.SubElement(adicao, "fornecedorNumero").text = "4"
-        
-        # ===== FRETE =====
-        ET.SubElement(adicao, "freteMoedaNegociadaCodigo").text = "978"
-        ET.SubElement(adicao, "freteMoedaNegociadaNome").text = "EURO/COM.EUROPEIA"
-        ET.SubElement(adicao, "freteValorMoedaNegociada").text = "000000000002353"
-        
-        frete_valor = pdf_data.get("geral", {}).get("frete_brl", "145.95")
-        ET.SubElement(adicao, "freteValorReais").text = format_number(frete_valor, 15)
-        
-        # ===== II =====
-        ET.SubElement(adicao, "iiAcordoTarifarioTipoCodigo").text = "0"
-        ET.SubElement(adicao, "iiAliquotaAcordo").text = "00000"
-        ET.SubElement(adicao, "iiAliquotaAdValorem").text = "01800"
-        ET.SubElement(adicao, "iiAliquotaPercentualReducao").text = "00000"
-        ET.SubElement(adicao, "iiAliquotaReduzida").text = "00000"
-        
-        ii_valor = pdf_data.get("tributos", {}).get("ii_recolher", "2566.16")
-        ET.SubElement(adicao, "iiAliquotaValorCalculado").text = format_number(ii_valor, 15)
-        ET.SubElement(adicao, "iiAliquotaValorDevido").text = format_number(ii_valor, 15)
-        ET.SubElement(adicao, "iiAliquotaValorRecolher").text = format_number(ii_valor, 15)
-        
-        ET.SubElement(adicao, "iiAliquotaValorReduzido").text = "000000000000000"
-        ET.SubElement(adicao, "iiBaseCalculo").text = "000000001425674"
-        ET.SubElement(adicao, "iiFundamentoLegalCodigo").text = "00"
-        ET.SubElement(adicao, "iiMotivoAdmissaoTemporariaCodigo").text = "00"
-        ET.SubElement(adicao, "iiRegimeTributacaoCodigo").text = "1"
-        ET.SubElement(adicao, "iiRegimeTributacaoNome").text = "RECOLHIMENTO INTEGRAL"
-        
-        # ===== IPI =====
-        ET.SubElement(adicao, "ipiAliquotaAdValorem").text = "00325"
-        ET.SubElement(adicao, "ipiAliquotaEspecificaCapacidadeRecipciente").text = "00000"
-        ET.SubElement(adicao, "ipiAliquotaEspecificaQuantidadeUnidadeMedida").text = "000000000"
-        ET.SubElement(adicao, "ipiAliquotaEspecificaTipoRecipienteCodigo").text = "00"
-        ET.SubElement(adicao, "ipiAliquotaEspecificaValorUnidadeMedida").text = "0000000000"
-        ET.SubElement(adicao, "ipiAliquotaNotaComplementarTIPI").text = "00"
-        ET.SubElement(adicao, "ipiAliquotaReduzida").text = "00000"
-        ET.SubElement(adicao, "ipiAliquotaValorDevido").text = "000000000054674"
-        ET.SubElement(adicao, "ipiAliquotaValorRecolher").text = "000000000054674"
-        ET.SubElement(adicao, "ipiRegimeTributacaoCodigo").text = "4"
-        ET.SubElement(adicao, "ipiRegimeTributacaoNome").text = "SEM BENEFICIO"
-        
-        # ===== MERCADORIA =====
-        mercadoria = ET.SubElement(adicao, "mercadoria")
-        
-        # Descrição do item
-        descricao = item.get("descricao", "PRODUTO IMPORTADO")
-        codigo_interno = item.get("codigo_interno", "00000000")
-        desc_completa = f"{codigo_interno} - {descricao[:80]}"
-        ET.SubElement(mercadoria, "descricaoMercadoria").text = desc_completa.ljust(200) + "\r"
-        
-        ET.SubElement(mercadoria, "numeroSequencialItem").text = f"{adicao_num:02d}"
-        
-        qtd_comercial = item.get("quantidade", "50000.0000")
-        ET.SubElement(mercadoria, "quantidade").text = format_number(qtd_comercial, 14) + "0000"
-        
-        ET.SubElement(mercadoria, "unidadeMedida").text = "PECA                "
-        
-        valor_unit = item.get("valor_unitario", "321.304")
-        ET.SubElement(mercadoria, "valorUnitario").text = format_number(valor_unit, 20)
-        
-        # ===== NÚMERO ADIÇÃO E DUIMP =====
-        ET.SubElement(adicao, "numeroAdicao").text = f"{adicao_num:03d}"
-        
-        numero_duimp = pdf_data.get("geral", {}).get("numero_duimp", "8686868686")
-        if len(numero_duimp) > 10:
-            numero_duimp = numero_duimp[-10:]
-        ET.SubElement(adicao, "numeroDUIMP").text = numero_duimp
-        
-        ET.SubElement(adicao, "numeroLI").text = "0000000000"
-        
-        # ===== PAÍS =====
-        ET.SubElement(adicao, "paisAquisicaoMercadoriaCodigo").text = "386"
-        ET.SubElement(adicao, "paisAquisicaoMercadoriaNome").text = "ITALIA"
-        ET.SubElement(adicao, "paisOrigemMercadoriaCodigo").text = "386"
-        ET.SubElement(adicao, "paisOrigemMercadoriaNome").text = "ITALIA"
-        
-        # ===== PIS/COFINS =====
-        ET.SubElement(adicao, "pisCofinsBaseCalculoAliquotaICMS").text = "00000"
-        ET.SubElement(adicao, "pisCofinsBaseCalculoFundamentoLegalCodigo").text = "00"
-        ET.SubElement(adicao, "pisCofinsBaseCalculoPercentualReducao").text = "00000"
-        ET.SubElement(adicao, "pisCofinsBaseCalculoValor").text = "000000001425674"
-        ET.SubElement(adicao, "pisCofinsFundamentoLegalReducaoCodigo").text = "00"
-        ET.SubElement(adicao, "pisCofinsRegimeTributacaoCodigo").text = "1"
-        ET.SubElement(adicao, "pisCofinsRegimeTributacaoNome).text").text = "RECOLHIMENTO INTEGRAL"
-        
-        # PIS
-        ET.SubElement(adicao, "pisPasepAliquotaAdValorem").text = "00210"
-        ET.SubElement(adicao, "pisPasepAliquotaEspecificaQuantidadeUnidade").text = "000000000"
-        ET.SubElement(adicao, "pisPasepAliquotaEspecificaValor").text = "0000000000"
-        ET.SubElement(adicao, "pisPasepAliquotaReduzida").text = "00000"
-        
-        pis_valor = pdf_data.get("tributos", {}).get("pis_recolher", "299.38")
-        ET.SubElement(adicao, "pisPasepAliquotaValorDevido").text = format_number(pis_valor, 15)
-        ET.SubElement(adicao, "pisPasepAliquotaValorRecolher").text = format_number(pis_valor, 15)
-        
-        # ===== ICMS, CBS, IBS =====
-        ET.SubElement(adicao, "icmsBaseCalculoValor").text = "000000000160652"
-        ET.SubElement(adicao, "icmsBaseCalculoAliquota").text = "01800"
-        ET.SubElement(adicao, "icmsBaseCalculoValorImposto").text = "00000000019374"
-        ET.SubElement(adicao, "icmsBaseCalculoValorDiferido").text = "00000000009542"
-        ET.SubElement(adicao, "cbsIbsCst").text = "000"
-        ET.SubElement(adicao, "cbsIbsClasstrib").text = "000001"
-        ET.SubElement(adicao, "cbsBaseCalculoValor").text = "00000000160652"
-        ET.SubElement(adicao, "cbsBaseCalculoAliquota").text = "00090"
-        ET.SubElement(adicao, "cbsBaseCalculoAliquotaReducao").text = "00000"
-        ET.SubElement(adicao, "cbsBaseCalculoValorImposto").text = "00000000001445"
-        ET.SubElement(adicao, "ibsBaseCalculoValor").text = "000000000160652"
-        ET.SubElement(adicao, "ibsBaseCalculoAliquota").text = "00010"
-        ET.SubElement(adicao, "ibsBaseCalculoAliquotaReducao").text = "00000"
-        ET.SubElement(adicao, "ibsBaseCalculoValorImposto").text = "00000000000160"
-        
-        # ===== RELAÇÕES =====
-        ET.SubElement(adicao, "relacaoCompradorVendedor").text = "Fabricante é desconhecido"
-        
-        # ===== SEGURO =====
-        ET.SubElement(adicao, "seguroMoedaNegociadaCodigo").text = "220"
-        ET.SubElement(adicao, "seguroMoedaNegociadaNome").text = "DOLAR DOS EUA"
-        ET.SubElement(adicao, "seguroValorMoedaNegociada").text = "000000000000000"
-        
-        seguro_valor = pdf_data.get("geral", {}).get("seguro_brl", "14.89")
-        ET.SubElement(adicao, "seguroValorReais").text = format_number(seguro_valor, 15)
-        
-        # ===== SEQUENCIAL =====
-        ET.SubElement(adicao, "sequencialRetificacao").text = "00"
-        
-        # ===== VALORES =====
-        ET.SubElement(adicao, "valorMultaARecolher").text = "000000000000000"
-        ET.SubElement(adicao, "valorMultaARecolherAjustado").text = "000000000000000"
-        ET.SubElement(adicao, "valorReaisFreteInternacional").text = "000000000014595"
-        ET.SubElement(adicao, "valorReaisSeguroInternacional").text = format_number(seguro_valor, 15)
-        ET.SubElement(adicao, "valorTotalCondicaoVenda").text = "21014900800"
-        ET.SubElement(adicao, "vinculoCompradorVendedor").text = "Não há vinculação entre comprador e vendedor."
-    
-    # ===== ELEMENTOS GERAIS (MESMO LAYOUT) =====
-    
-    # Armazém
-    armazem = ET.SubElement(duimp, "armazem")
-    ET.SubElement(armazem, "nomeArmazem").text = "TCP       "
-    
-    # Armazenamento
-    ET.SubElement(duimp, "armazenamentoRecintoAduaneiroCodigo").text = "9801303"
-    ET.SubElement(duimp, "armazenamentoRecintoAduaneiroNome").text = "TCP - TERMINAL DE CONTEINERES DE PARANAGUA S/A"
-    ET.SubElement(duimp, "armazenamentoSetor").text = "002"
-    
-    # Canal
-    ET.SubElement(duimp, "canalSelecaoParametrizada").text = "001"
-    
-    # Caracterização
-    ET.SubElement(duimp, "caracterizacaoOperacaoCodigoTipo").text = "1"
-    ET.SubElement(duimp, "caracterizacaoOperacaoDescricaoTipo").text = "Importação Própria"
-    
-    # Carga
-    ET.SubElement(duimp, "cargaDataChegada").text = "20251120"
-    ET.SubElement(duimp, "cargaNumeroAgente").text = "N/I"
-    
-    # País baseado no PDF
-    pais = pdf_data.get("carga", {}).get("pais_procedencia", "")
-    if "CHINA" in pais:
-        ET.SubElement(duimp, "cargaPaisProcedenciaCodigo").text = "156"
-        ET.SubElement(duimp, "cargaPaisProcedenciaNome").text = "CHINA, REPUBLICA POPULAR"
-    else:
-        ET.SubElement(duimp, "cargaPaisProcedenciaCodigo").text = "386"
-        ET.SubElement(duimp, "cargaPaisProcedenciaNome").text = "ITALIA"
-    
-    # Peso do PDF
-    peso_bruto = pdf_data.get("carga", {}).get("peso_bruto", "53415.000")
-    ET.SubElement(duimp, "cargaPesoBruto").text = format_number(peso_bruto, 15)
-    
-    # Peso líquido total (soma dos itens)
-    peso_total = 0
-    for item in pdf_data["itens"]:
+    def analyze_model(self, xml_content: str):
+        """Analisa o XML modelo para entender a estrutura exata"""
         try:
-            peso = float(item.get("peso_liquido", "0").replace(".", "").replace(",", "."))
-            peso_total += peso
-        except:
-            pass
+            # Remove declaração XML para parsing
+            if xml_content.startswith('<?xml'):
+                lines = xml_content.split('\n', 1)
+                if len(lines) > 1:
+                    xml_content = lines[1]
+            
+            # Parse do XML
+            self.xml_template = xml_content
+            root = ET.fromstring(xml_content)
+            
+            # Extrai estrutura completa
+            self.xml_structure = {
+                'root': root.tag,
+                'namespaces': self._extract_namespaces(xml_content),
+                'adicao_template': self._extract_adicao_template(root),
+                'fixed_elements': self._extract_fixed_elements(root),
+                'element_order': self._extract_element_order(root)
+            }
+            
+            return True
+        except Exception as e:
+            st.error(f"Erro ao analisar XML modelo: {str(e)}")
+            return False
     
-    if peso_total == 0:
-        peso_total = 48686.100
+    def _extract_namespaces(self, xml_content: str) -> Dict:
+        """Extrai namespaces do XML"""
+        namespaces = {}
+        ns_matches = re.findall(r'xmlns(?::(\w+))?="([^"]+)"', xml_content)
+        for prefix, uri in ns_matches:
+            namespaces[prefix if prefix else 'default'] = uri
+        return namespaces
     
-    ET.SubElement(duimp, "cargaPesoLiquido").text = format_number(str(peso_total), 15)
-    
-    # URF
-    ET.SubElement(duimp, "cargaUrfEntradaCodigo").text = "0917800"
-    ET.SubElement(duimp, "cargaUrfEntradaNome").text = "PORTO DE PARANAGUA"
-    
-    # Conhecimento
-    ET.SubElement(duimp, "conhecimentoCargaEmbarqueData").text = "20251025"
-    ET.SubElement(duimp, "conhecimentoCargaEmbarqueLocal").text = "GENOVA"
-    ET.SubElement(duimp, "conhecimentoCargaId").text = "CEMERCANTE31032008"
-    ET.SubElement(duimp, "conhecimentoCargaIdMaster").text = "162505352452915"
-    ET.SubElement(duimp, "conhecimentoCargaTipoCodigo").text = "12"
-    ET.SubElement(duimp, "conhecimentoCargaTipoNome).text").text = "HBL - House Bill of Lading"
-    ET.SubElement(duimp, "conhecimentoCargaUtilizacao").text = "1"
-    ET.SubElement(duimp, "conhecimentoCargaUtilizacaoNome").text = "Total"
-    
-    # Datas
-    data_embarque = pdf_data.get("carga", {}).get("data_embarque", "12/10/2025")
-    try:
-        data_obj = datetime.strptime(data_embarque, "%d/%m/%Y")
-        ET.SubElement(duimp, "dataDesembaraco").text = data_obj.strftime("%Y%m%d")
-        ET.SubElement(duimp, "dataRegistro").text = data_obj.strftime("%Y%m%d")
-    except:
-        ET.SubElement(duimp, "dataDesembaraco").text = "20251124"
-        ET.SubElement(duimp, "dataRegistro").text = "20251124"
-    
-    # Documentos
-    ET.SubElement(duimp, "documentoChegadaCargaCodigoTipo").text = "1"
-    ET.SubElement(duimp, "documentoChegadaCargaNome").text = "Manifesto da Carga"
-    ET.SubElement(duimp, "documentoChegadaCargaNumero").text = "1625502058594"
-    
-    # Documentos do PDF
-    for doc_type, doc_num in pdf_data.get("documentos", []):
-        doc_inst = ET.SubElement(duimp, "documentoInstrucaoDespacho")
+    def _extract_adicao_template(self, root: ET.Element) -> Dict:
+        """Extrai template completo de uma adição"""
+        adicoes = root.findall('.//adicao')
+        if not adicoes:
+            return {}
         
-        if "CONHECIMENTO" in doc_type:
-            ET.SubElement(doc_inst, "codigoTipoDocumentoDespacho").text = "28"
-            ET.SubElement(doc_inst, "nomeDocumentoDespacho").text = "CONHECIMENTO DE CARGA                                       "
-        elif "FATURA" in doc_type:
-            ET.SubElement(doc_inst, "codigoTipoDocumentoDespacho").text = "01"
-            ET.SubElement(doc_inst, "nomeDocumentoDespacho").text = "FATURA COMERCIAL                                            "
-        else:
-            ET.SubElement(doc_inst, "codigoTipoDocumentoDespacho").text = "29"
-            ET.SubElement(doc_inst, "nomeDocumentoDespacho").text = "ROMANEIO DE CARGA                                           "
+        # Pega a primeira adição como template
+        template_adicao = adicoes[0]
         
-        ET.SubElement(doc_inst, "numeroDocumentoDespacho").text = doc_num.ljust(25)
+        # Converte para dicionário com estrutura
+        template_dict = self._element_to_dict(template_adicao)
+        
+        return template_dict
     
-    # Se não houver documentos, adicionar alguns padrões
-    if not pdf_data.get("documentos"):
-        documentos_padrao = [
-            ("28", "CONHECIMENTO DE CARGA", "372250376737202501"),
-            ("01", "FATURA COMERCIAL", "20250880"),
-            ("29", "ROMANEIO DE CARGA", "S/N"),
+    def _element_to_dict(self, element: ET.Element) -> Dict:
+        """Converte elemento XML para dicionário"""
+        result = {}
+        result['tag'] = element.tag
+        result['text'] = element.text.strip() if element.text and element.text.strip() else ''
+        result['attrib'] = element.attrib
+        result['children'] = []
+        
+        for child in element:
+            result['children'].append(self._element_to_dict(child))
+        
+        return result
+    
+    def _extract_fixed_elements(self, root: ET.Element) -> Dict:
+        """Extrai elementos fixos fora das adições"""
+        fixed = {}
+        
+        # Elementos que NÃO estão dentro de adições
+        for elem in root.find('.//duimp'):
+            if elem.tag != 'adicao':
+                fixed[elem.tag] = self._element_to_dict(elem)
+        
+        return fixed
+    
+    def _extract_element_order(self, root: ET.Element) -> List[str]:
+        """Extrai ordem dos elementos no duimp"""
+        order = []
+        for elem in root.find('.//duimp'):
+            order.append(elem.tag)
+        return order
+    
+    def extract_all_items_from_pdf(self, pdf_path: str) -> Tuple[List[Dict], Dict]:
+        """Extrai TODOS os itens do PDF, página por página"""
+        all_items = []
+        global_info = {
+            'numeroDUIMP': '8686868686',
+            'dataRegistro': '20251124',
+            'dataDesembaraco': '20251124',
+            'cargaDataChegada': '20251120',
+            'cargaPesoBruto': '000000053415000',
+            'cargaPesoLiquido': '000000048686100',
+            'conhecimentoCargaEmbarqueData': '20251025',
+            'totalAdicoes': '000'
+        }
+        
+        all_text = ""
+        
+        with pdfplumber.open(pdf_path) as pdf:
+            total_pages = len(pdf.pages)
+            
+            # Barra de progresso
+            if st.session_state.get('processing', False):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+            
+            for page_num, page in enumerate(pdf.pages):
+                # Atualiza progresso
+                if st.session_state.get('processing', False):
+                    progress = (page_num + 1) / total_pages
+                    progress_bar.progress(progress)
+                    status_text.text(f"Processando página {page_num + 1} de {total_pages}")
+                
+                # Extrai texto da página
+                page_text = page.extract_text()
+                if page_text:
+                    all_text += page_text + "\n---PAGE---\n"
+                    
+                    # Extrai itens desta página
+                    page_items = self._extract_items_from_page(page_text, page_num + 1)
+                    all_items.extend(page_items)
+            
+            if st.session_state.get('processing', False):
+                progress_bar.empty()
+                status_text.empty()
+        
+        # Extrai informações globais
+        global_info.update(self._extract_global_info(all_text))
+        
+        return all_items, global_info
+    
+    def _extract_items_from_page(self, page_text: str, page_num: int) -> List[Dict]:
+        """Extrai itens de uma página específica"""
+        items = []
+        
+        # NORMALIZA texto: remove múltiplos espaços, preserva quebras de linha importantes
+        page_text = re.sub(r'\s+', ' ', page_text)
+        page_text = re.sub(r'(?<=\n) ', '', page_text)  # Remove espaços no início da linha
+        
+        # Divide em linhas
+        lines = page_text.split('\n')
+        
+        current_item = {}
+        collecting_item = False
+        item_lines = []
+        
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Verifica se é início de um ITEM
+            is_item_start = (
+                re.match(r'^Item\s+\d+', line, re.IGNORECASE) or
+                re.match(r'^\d+\s*[-–]', line) or
+                re.match(r'^ADI[CÇ][AÃ]O\s+\d+', line, re.IGNORECASE)
+            )
+            
+            if is_item_start:
+                # Se já estava coletando um item, processa ele
+                if collecting_item and item_lines:
+                    item_data = self._parse_item_lines(item_lines, page_num)
+                    if item_data:
+                        items.append(item_data)
+                
+                # Inicia novo item
+                current_item = {'page': page_num, 'raw_lines': []}
+                collecting_item = True
+                item_lines = [line]
+            
+            elif collecting_item:
+                # Continua coletando linhas do item atual
+                item_lines.append(line)
+                
+                # Verifica se é fim do item (próximo item ou fim da seção)
+                if i < len(lines) - 1:
+                    next_line = lines[i + 1].strip()
+                    next_is_item = (
+                        re.match(r'^Item\s+\d+', next_line, re.IGNORECASE) or
+                        re.match(r'^\d+\s*[-–]', next_line) or
+                        re.match(r'^ADI[CÇ][AÃ]O\s+\d+', next_line, re.IGNORECASE) or
+                        any(keyword in next_line.upper() for keyword in ['TOTAL', 'RESUMO', 'FIM', 'CONCLU'])
+                    )
+                    
+                    if next_is_item:
+                        # Fim do item atual
+                        item_data = self._parse_item_lines(item_lines, page_num)
+                        if item_data:
+                            items.append(item_data)
+                        collecting_item = False
+        
+        # Processa o último item da página
+        if collecting_item and item_lines:
+            item_data = self._parse_item_lines(item_lines, page_num)
+            if item_data:
+                items.append(item_data)
+        
+        return items
+    
+    def _parse_item_lines(self, lines: List[str], page_num: int) -> Dict:
+        """Analisa linhas de um item e extrai informações"""
+        item_text = ' '.join(lines)
+        
+        # Padrões de extração baseados no layout do PDF fornecido
+        patterns = {
+            'item_num': r'(?:Item|ADI[CÇ][AÃ]O)\s+(\d+)',
+            'ncm': r'NCM\s*[:]?\s*([\d\.]+)',
+            'codigo_interno': r'C[ÓO]DIGO INTERNO\s*[:]?\s*([\d\.\-]+)',
+            'descricao': r'DENOMINA[ÇC][AÃ]O DO PRODUTO\s+(.+?)(?=(?:DESCRI|C[ÓO]DIGO|NCM|QUANTIDADE|VALOR|$))',
+            'descricao_detalhada': r'DESCRI[ÇC][AÃ]O DO PRODUTO\s+(.+?)(?=(?:C[ÓO]DIGO|NCM|QUANTIDADE|VALOR|$))',
+            'quantidade_comercial': r'QTDE UNID\. COMERCIAL\s+([\d\.,]+)',
+            'unidade_comercial': r'UNIDADE COMERCIAL\s+(\w+)',
+            'quantidade_estatistica': r'QTDE UNID\. ESTAT[ÍI]STICA\s+([\d\.,]+)',
+            'unidade_estatistica': r'UNIDAD ESTAT[ÍI]STICA\s+(.+)',
+            'peso_liquido': r'PESO L[ÍI]QUIDO\s*\(KG\)\s+([\d\.,]+)',
+            'valor_unitario': r'VALOR UNIT COND VENDA\s+([\d\.,]+)',
+            'valor_total': r'VALOR TOT\. COND VENDA\s+([\d\.,]+)',
+            'condicao_venda': r'CONDI[ÇC][AÃ]O DE VENDA\s+(\w+)',
+            'pais_origem': r'PA[ÍI]S ORIGEM\s+(.+)',
+            'fabricante': r'FABRICANTE/PRODUTOR.*?CONHECIDO\s+(\w+)',
+            'relacao_exportador': r'RELA[ÇC][AÃ]O EXPORTADOR E FABRIC\./PRODUTOR\s+(.+)'
+        }
+        
+        item_data = {'page': page_num}
+        
+        for key, pattern in patterns.items():
+            match = re.search(pattern, item_text, re.IGNORECASE | re.DOTALL)
+            if match:
+                value = match.group(1).strip()
+                
+                # Limpeza específica por campo
+                if key in ['quantidade_comercial', 'quantidade_estatistica', 'peso_liquido']:
+                    value = value.replace('.', '').replace(',', '')
+                elif key in ['valor_unitario', 'valor_total']:
+                    value = value.replace('.', '').replace(',', '.')
+                
+                item_data[key] = value
+        
+        # Se não encontrou descrição detalhada, usa a geral
+        if 'descricao_detalhada' not in item_data and 'descricao' in item_data:
+            item_data['descricao_detalhada'] = item_data['descricao']
+        
+        # Combina código interno com descrição para o XML
+        if 'codigo_interno' in item_data and 'descricao_detalhada' in item_data:
+            item_data['descricao_xml'] = f"{item_data['codigo_interno']} - {item_data['descricao_detalhada']}"
+        elif 'descricao_detalhada' in item_data:
+            item_data['descricao_xml'] = item_data['descricao_detalhada']
+        
+        # Formata NCM para 8 dígitos
+        if 'ncm' in item_data:
+            ncm_clean = re.sub(r'[^\d]', '', item_data['ncm'])
+            item_data['ncm_8digitos'] = ncm_clean[:8].zfill(8)
+        
+        return item_data if any(k in item_data for k in ['ncm', 'descricao_xml', 'quantidade_comercial']) else None
+    
+    def _extract_global_info(self, all_text: str) -> Dict:
+        """Extrai informações globais do PDF"""
+        info = {}
+        
+        # Número DUIMP
+        duimp_match = re.search(r'N[ÚU]MERO\s+(\d+[A-Z]+\d+)', all_text, re.IGNORECASE)
+        if duimp_match:
+            info['numeroDUIMP'] = duimp_match.group(1)
+        
+        # Datas
+        date_patterns = [
+            (r'DATA REGISTRO\s+(\d{2})/(\d{2})/(\d{4})', 'dataRegistro'),
+            (r'DATA DE CHEGADA\s+(\d{2})/(\d{2})/(\d{4})', 'cargaDataChegada'),
+            (r'DATA DE EMBARQUE\s+(\d{2})/(\d{2})/(\d{4})', 'conhecimentoCargaEmbarqueData'),
+            (r'DT\. EMBARQUE.*?(\d{2})/(\d{2})/(\d{4})', 'conhecimentoCargaEmbarqueData')
         ]
         
-        for codigo, nome, numero in documentos_padrao:
-            doc_inst = ET.SubElement(duimp, "documentoInstrucaoDespacho")
-            ET.SubElement(doc_inst, "codigoTipoDocumentoDespacho").text = codigo
-            ET.SubElement(doc_inst, "nomeDocumentoDespacho").text = f"{nome:<55}"
-            ET.SubElement(doc_inst, "numeroDocumentoDespacho").text = f"{numero:<25}"
+        for pattern, key in date_patterns:
+            match = re.search(pattern, all_text, re.IGNORECASE)
+            if match:
+                day, month, year = match.groups()
+                info[key] = f"{year}{month}{day}"
+        
+        # Pesos
+        peso_bruto_match = re.search(r'PESO BRUTO\s+([\d\.,]+)', all_text, re.IGNORECASE)
+        if peso_bruto_match:
+            peso = peso_bruto_match.group(1).replace('.', '').replace(',', '')
+            info['cargaPesoBruto'] = peso.zfill(15)
+        
+        peso_liq_match = re.search(r'PESO L[ÍI]QUIDO\s+([\d\.,]+)', all_text, re.IGNORECASE)
+        if peso_liq_match:
+            peso = peso_liq_match.group(1).replace('.', '').replace(',', '')
+            info['cargaPesoLiquido'] = peso.zfill(15)
+        
+        return info
     
-    # Embalagem
-    embalagem = ET.SubElement(duimp, "embalagem")
-    ET.SubElement(embalagem, "codigoTipoEmbalagem").text = "01"
-    ET.SubElement(embalagem, "nomeEmbalagem").text = "AMARRADO/ATADO/FEIXE                                             "
-    ET.SubElement(embalagem, "quantidadeVolume").text = "00001"
+    def format_for_xml(self, value: Any, field_type: str) -> str:
+        """Formata valores para o padrão XML"""
+        if value is None:
+            value = ""
+        
+        value = str(value).strip()
+        
+        if field_type == 'number_15':
+            # 15 dígitos, sem decimais
+            num = re.sub(r'[^\d]', '', value)
+            return num.zfill(15) if num else '0' * 15
+        
+        elif field_type == 'number_14':
+            # 14 dígitos, sem decimais
+            num = re.sub(r'[^\d]', '', value)
+            return num.zfill(14) if num else '0' * 14
+        
+        elif field_type == 'number_20_6':
+            # 20 dígitos, 6 casas decimais
+            clean = re.sub(r'[^\d,.]', '', value)
+            clean = clean.replace(',', '.')
+            if '.' in clean:
+                parts = clean.split('.')
+                int_part = parts[0] if parts[0] else "0"
+                dec_part = parts[1][:6] if len(parts) > 1 else "0"
+                dec_part = dec_part.ljust(6, '0')
+                num = int(int_part) * 10**6 + int(dec_part[:6])
+            else:
+                num = int(clean) * 10**6 if clean else 0
+            return str(num).zfill(20)
+        
+        elif field_type == 'number_15_2':
+            # 15 dígitos, 2 casas decimais
+            clean = re.sub(r'[^\d,.]', '', value)
+            clean = clean.replace(',', '.')
+            if '.' in clean:
+                parts = clean.split('.')
+                int_part = parts[0] if parts[0] else "0"
+                dec_part = parts[1][:2] if len(parts) > 1 else "0"
+                dec_part = dec_part.ljust(2, '0')
+                num = int(int_part) * 100 + int(dec_part[:2])
+            else:
+                num = int(clean) * 100 if clean else 0
+            return str(num).zfill(15)
+        
+        elif field_type == 'string_200':
+            # String com até 200 caracteres
+            return value[:200]
+        
+        elif field_type == 'ncm_8':
+            # NCM com 8 dígitos
+            ncm_clean = re.sub(r'[^\d]', '', value)
+            return ncm_clean[:8].zfill(8)
+        
+        elif field_type == 'date_yyyymmdd':
+            # Data no formato YYYYMMDD
+            match = re.search(r'(\d{2})/(\d{2})/(\d{4})', value)
+            if match:
+                day, month, year = match.groups()
+                return f"{year}{month}{day}"
+            return value
+        
+        else:
+            return value
     
-    # Frete
-    frete_usd = pdf_data.get("geral", {}).get("frete_usd", "250.00")
-    ET.SubElement(duimp, "freteCollect").text = format_number(frete_usd, 15)
-    ET.SubElement(duimp, "freteEmTerritorioNacional").text = "000000000000000"
-    ET.SubElement(duimp, "freteMoedaNegociadaCodigo").text = "978"
-    ET.SubElement(duimp, "freteMoedaNegociadaNome").text = "EURO/COM.EUROPEIA"
-    ET.SubElement(duimp, "fretePrepaid").text = "000000000000000"
-    ET.SubElement(duimp, "freteTotalDolares").text = "000000000028757"
-    ET.SubElement(duimp, "freteTotalMoeda").text = "25000"
+    def create_xml_from_items(self, items: List[Dict], global_info: Dict) -> str:
+        """Cria XML completo com layout EXATO do modelo"""
+        
+        try:
+            # Parse o XML modelo
+            if self.xml_template.startswith('<?xml'):
+                lines = self.xml_template.split('\n', 1)
+                xml_for_parsing = lines[1] if len(lines) > 1 else self.xml_template
+            else:
+                xml_for_parsing = self.xml_template
+            
+            root = ET.fromstring(xml_for_parsing)
+            duimp_element = root.find('.//duimp')
+            
+            if duimp_element is None:
+                raise ValueError("Elemento 'duimp' não encontrado no XML modelo")
+            
+            # Remove todas as adições existentes (vamos recriar)
+            existing_adicoes = duimp_element.findall('adicao')
+            for adicao in existing_adicoes:
+                duimp_element.remove(adicao)
+            
+            # Adiciona novas adições com dados do PDF
+            for i, item in enumerate(items):
+                adicao_num = i + 1
+                adicao_element = self._create_adicao_element(item, adicao_num, global_info)
+                duimp_element.append(adicao_element)
+            
+            # Atualiza informações gerais
+            self._update_global_info(duimp_element, global_info, len(items))
+            
+            # Converte para string XML
+            xml_str = ET.tostring(root, encoding='utf-8', method='xml')
+            
+            # Formata bonito
+            dom = minidom.parseString(xml_str)
+            pretty_xml = dom.toprettyxml(indent="  ")
+            
+            # Remove declaração XML do minidom e adiciona a correta
+            if pretty_xml.startswith('<?xml'):
+                lines = pretty_xml.split('\n', 1)
+                pretty_xml = lines[1] if len(lines) > 1 else pretty_xml
+            
+            # Adiciona declaração XML corretamente
+            final_xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + pretty_xml
+            
+            # Remove espaços no início
+            final_xml = final_xml.lstrip()
+            
+            return final_xml
+            
+        except Exception as e:
+            st.error(f"Erro ao criar XML: {str(e)}")
+            # Fallback: cria XML básico
+            return self._create_fallback_xml(items, global_info)
     
-    frete_brl = pdf_data.get("geral", {}).get("frete_brl", "1550.07")
-    ET.SubElement(duimp, "freteTotalReais").text = format_number(frete_brl, 15)
+    def _create_adicao_element(self, item: Dict, adicao_num: int, global_info: Dict) -> ET.Element:
+        """Cria elemento adicao com dados do item"""
+        
+        # Usa template do modelo ou cria um novo
+        if 'adicao_template' in self.xml_structure and self.xml_structure['adicao_template']:
+            # Reconstrói elemento do template
+            adicao_element = self._dict_to_element(self.xml_structure['adicao_template'])
+        else:
+            # Cria elemento básico
+            adicao_element = ET.Element('adicao')
+        
+        # Atualiza campos com dados do item
+        self._populate_adicao_fields(adicao_element, item, adicao_num, global_info)
+        
+        return adicao_element
     
-    # ICMS
-    icms_elem = ET.SubElement(duimp, "icms")
-    ET.SubElement(icms_elem, "agenciaIcms").text = "00000"
-    ET.SubElement(icms_elem, "bancoIcms").text = "000"
-    ET.SubElement(icms_elem, "codigoTipoRecolhimentoIcms").text = "3"
-    ET.SubElement(icms_elem, "cpfResponsavelRegistro").text = "27160353854"
-    ET.SubElement(icms_elem, "dataRegistro").text = "20251125"
-    ET.SubElement(icms_elem, "horaRegistro").text = "152044"
-    ET.SubElement(icms_elem, "nomeTipoRecolhimentoIcms").text = "Exoneração do ICMS"
-    ET.SubElement(icms_elem, "numeroSequencialIcms").text = "001"
-    ET.SubElement(icms_elem, "ufIcms").text = "PR"
-    ET.SubElement(icms_elem, "valorTotalIcms").text = "000000000000000"
+    def _dict_to_element(self, element_dict: Dict) -> ET.Element:
+        """Converte dicionário para elemento XML"""
+        element = ET.Element(element_dict['tag'])
+        
+        if element_dict['text']:
+            element.text = element_dict['text']
+        
+        for attr, value in element_dict['attrib'].items():
+            element.set(attr, value)
+        
+        for child_dict in element_dict['children']:
+            child_element = self._dict_to_element(child_dict)
+            element.append(child_element)
+        
+        return element
     
-    # Importador (dados do PDF)
-    ET.SubElement(duimp, "importadorCodigoTipo").text = "1"
-    ET.SubElement(duimp, "importadorCpfRepresentanteLegal").text = "27160353854"
-    ET.SubElement(duimp, "importadorEnderecoBairro").text = "JARDIM PRIMAVERA"
-    ET.SubElement(duimp, "importadorEnderecoCep").text = "83302000"
-    ET.SubElement(duimp, "importadorEnderecoComplemento").text = "CONJ: 6 E 7;"
-    ET.SubElement(duimp, "importadorEnderecoLogradouro").text = "JOAO LEOPOLDO JACOMEL"
-    ET.SubElement(duimp, "importadorEnderecoMunicipio").text = "PIRAQUARA"
-    ET.SubElement(duimp, "importadorEnderecoNumero").text = "4459"
-    ET.SubElement(duimp, "importadorEnderecoUf").text = "PR"
-    ET.SubElement(duimp, "importadorNome").text = "HAFELE BRASIL LTDA"
+    def _populate_adicao_fields(self, adicao: ET.Element, item: Dict, adicao_num: int, global_info: Dict):
+        """Preenche campos da adição com dados do item"""
+        
+        # Mapeamento de campos baseado no XML modelo
+        field_mappings = {
+            'numeroAdicao': {'value': str(adicao_num).zfill(3), 'type': 'string'},
+            'numeroDUIMP': {'value': global_info.get('numeroDUIMP', '8686868686'), 'type': 'string'},
+            'numeroSequencialItem': {'value': str(self.item_counter).zfill(2), 'type': 'string'},
+            'descricaoMercadoria': {'value': item.get('descricao_xml', 'PRODUTO IMPORTADO'), 'type': 'string_200'},
+            'dadosMercadoriaCodigoNcm': {'value': item.get('ncm_8digitos', '00000000'), 'type': 'ncm_8'},
+            'quantidade': {'value': item.get('quantidade_comercial', '0'), 'type': 'number_14'},
+            'valorUnitario': {'value': item.get('valor_unitario', '0'), 'type': 'number_20_6'},
+            'condicaoVendaValorMoeda': {'value': item.get('valor_total', '0'), 'type': 'number_15_2'},
+            'condicaoVendaValorReais': {'value': item.get('valor_total', '0'), 'type': 'number_15_2'},
+            'paisOrigemMercadoriaNome': {'value': item.get('pais_origem', 'ITALIA'), 'type': 'string'},
+            'paisAquisicaoMercadoriaNome': {'value': item.get('pais_origem', 'ITALIA'), 'type': 'string'},
+            'dadosMercadoriaPesoLiquido': {'value': item.get('peso_liquido', '0'), 'type': 'number_15'},
+            'dadosMercadoriaMedidaEstatisticaQuantidade': {'value': item.get('quantidade_estatistica', '0'), 'type': 'number_14'},
+            'valorTotalCondicaoVenda': {'value': item.get('valor_total', '0'), 'type': 'number_11'}
+        }
+        
+        # Atualiza todos os elementos na adição
+        for elem in adicao.iter():
+            tag_name = elem.tag
+            if '}' in tag_name:
+                tag_name = tag_name.split('}')[1]
+            
+            if tag_name in field_mappings:
+                mapping = field_mappings[tag_name]
+                formatted_value = self.format_for_xml(mapping['value'], mapping['type'])
+                elem.text = formatted_value
+        
+        self.item_counter += 1
     
-    responsavel = pdf_data.get("geral", {}).get("responsavel_legal", "PAULO HENRIQUE LEITE FERREIRA")
-    ET.SubElement(duimp, "importadorNomeRepresentanteLegal").text = responsavel
+    def _update_global_info(self, duimp_element: ET.Element, global_info: Dict, total_items: int):
+        """Atualiza informações gerais no XML"""
+        
+        # Campos a atualizar
+        update_fields = {
+            'numeroDUIMP': global_info.get('numeroDUIMP', '8686868686'),
+            'dataRegistro': global_info.get('dataRegistro', '20251124'),
+            'dataDesembaraco': global_info.get('dataDesembaraco', '20251124'),
+            'cargaDataChegada': global_info.get('cargaDataChegada', '20251120'),
+            'cargaPesoBruto': global_info.get('cargaPesoBruto', '000000053415000'),
+            'cargaPesoLiquido': global_info.get('cargaPesoLiquido', '000000048686100'),
+            'conhecimentoCargaEmbarqueData': global_info.get('conhecimentoCargaEmbarqueData', '20251025'),
+            'totalAdicoes': str(total_items).zfill(3)
+        }
+        
+        for elem in duimp_element:
+            tag_name = elem.tag
+            if '}' in tag_name:
+                tag_name = tag_name.split('}')[1]
+            
+            if tag_name in update_fields:
+                elem.text = update_fields[tag_name]
     
-    cnpj = pdf_data.get("geral", {}).get("importador_cnpj", "02473058000188")
-    cnpj_clean = cnpj.replace(".", "").replace("/", "").replace("-", "")
-    ET.SubElement(duimp, "importadorNumero").text = cnpj_clean
+    def _create_fallback_xml(self, items: List[Dict], global_info: Dict) -> str:
+        """Cria XML fallback se houver erro"""
+        
+        # Cria XML básico baseado no modelo
+        xml_template = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ListaDeclaracoes>
+    <duimp>
+        <!-- ADICOES SERÃO INSERIDAS AQUI -->
+        <totalAdicoes>{total_adicoes}</totalAdicoes>
+        <numeroDUIMP>{numeroDUIMP}</numeroDUIMP>
+        <dataRegistro>{dataRegistro}</dataRegistro>
+    </duimp>
+</ListaDeclaracoes>"""
+        
+        # Preenche template
+        xml_content = xml_template.format(
+            total_adicoes=str(len(items)).zfill(3),
+            numeroDUIMP=global_info.get('numeroDUIMP', '8686868686'),
+            dataRegistro=global_info.get('dataRegistro', '20251124')
+        )
+        
+        # Parse para adicionar adições
+        root = ET.fromstring(xml_content.split('?>', 1)[1] if '?>' in xml_content else xml_content)
+        duimp = root.find('.//duimp')
+        
+        # Encontra onde inserir as adições
+        insert_point = None
+        for elem in duimp:
+            if elem.tag == 'totalAdicoes':
+                insert_point = elem
+                break
+        
+        # Adiciona adições
+        for i, item in enumerate(items):
+            adicao = self._create_simple_adicao(item, i + 1, global_info)
+            if insert_point is not None:
+                duimp.insert(list(duimp).index(insert_point), adicao)
+            else:
+                duimp.append(adicao)
+        
+        # Converte para string formatada
+        xml_str = ET.tostring(root, encoding='utf-8', method='xml')
+        dom = minidom.parseString(xml_str)
+        pretty_xml = dom.toprettyxml(indent="  ")
+        
+        # Remove declaração duplicada
+        if pretty_xml.startswith('<?xml'):
+            lines = pretty_xml.split('\n', 1)
+            pretty_xml = lines[1] if len(lines) > 1 else pretty_xml
+        
+        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + pretty_xml
     
-    ET.SubElement(duimp, "importadorNumeroTelefone").text = "41  30348150"
-    
-    # Informação Complementar (com dados do PDF)
-    info_text = f"""INFORMACOES COMPLEMENTARES
---------------------------
-CONVERSÃO DO PDF PARA XML - MESMO LAYOUT
-Processo do PDF: {pdf_data.get('geral', {}).get('numero_processo', '28523')}
-Importador: {pdf_data.get('geral', {}).get('importador_nome', 'HAFELE BRASIL')}
-CNPJ: {pdf_data.get('geral', {}).get('importador_cnpj', '02.473.058/0001-88')}
-DUIMP: {pdf_data.get('geral', {}).get('numero_duimp', '25BR00001916620')}
-Data do PDF: {pdf_data.get('geral', {}).get('data_cadastro', '13/10/2025')}
-País: {pdf_data.get('carga', {}).get('pais_procedencia', 'CHINA, REPUBLICA POPULAR (CN)')}
-Via Transporte: {pdf_data.get('carga', {}).get('via_transporte', '01 - MARITIMA')}
-Data Embarque: {pdf_data.get('carga', {}).get('data_embarque', '12/10/2025')}
-Peso Bruto: {pdf_data.get('carga', {}).get('peso_bruto', '15.790,00000')} kg
-Moeda: {pdf_data.get('geral', {}).get('moeda_negociada', '220 - DOLAR DOS EUA')}
-Cotação: {pdf_data.get('geral', {}).get('cotacao', '5,3843000')}
-VMLE: USD {pdf_data.get('geral', {}).get('vmle_usd', '3.595,16')} / BRL {pdf_data.get('geral', {}).get('vmle_brl', '19.203,88')}
-Frete: USD {pdf_data.get('geral', {}).get('frete_usd', '3.000,00')} / BRL {pdf_data.get('geral', {}).get('frete_brl', '16.123,20')}
-Seguro: USD {pdf_data.get('geral', {}).get('seguro_moeda', '72,24')} / BRL {pdf_data.get('geral', {}).get('seguro_brl', '388,25')}
-Tributos: II: {pdf_data.get('tributos', {}).get('ii_recolher', '3.072,62')} | PIS: {pdf_data.get('tributos', {}).get('pis_recolher', '403,28')} | COFINS: {pdf_data.get('tributos', {}).get('cofins_recolher', '1.853,17')}
-Total de itens no PDF: {len(pdf_data.get('itens', []))}
-Total de adições no XML: {num_adicoes}
-Data da conversão: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
------------------------------------------------------------------------
-XML GERADO NO MESMO LAYOUT DO EXEMPLO M-DUIMP-8686868686.xml
-"""
-    
-    ET.SubElement(duimp, "informacaoComplementar").text = info_text
-    
-    # Local Descarga/Embarque
-    ET.SubElement(duimp, "localDescargaTotalDolares").text = "000000002061433"
-    ET.SubElement(duimp, "localDescargaTotalReais").text = "000000011111593"
-    ET.SubElement(duimp, "localEmbarqueTotalDolares").text = "000000002030535"
-    ET.SubElement(duimp, "localEmbarqueTotalReais").text = "000000010945130"
-    
-    # Modalidade
-    ET.SubElement(duimp, "modalidadeDespachoCodigo").text = "1"
-    ET.SubElement(duimp, "modalidadeDespachoNome").text = "Normal"
-    
-    # Número DUIMP
-    ET.SubElement(duimp, "numeroDUIMP").text = numero_duimp
-    
-    # Operação FUNDAP
-    ET.SubElement(duimp, "operacaoFundap").text = "N"
-    
-    # Pagamentos (com valores do PDF)
-    pagamentos = [
-        ("0086", pdf_data.get("tributos", {}).get("ii_recolher", "17720.57")),
-        ("1038", "10216.43"),  # IPI
-        ("5602", pdf_data.get("tributos", {}).get("pis_recolher", "2333.45")),
-        ("5629", pdf_data.get("tributos", {}).get("cofins_recolher", "10722.81")),
-        ("7811", pdf_data.get("tributos", {}).get("taxa_utilizacao", "285.34")),
-    ]
-    
-    for codigo, valor_str in pagamentos:
-        pagamento = ET.SubElement(duimp, "pagamento")
-        ET.SubElement(pagamento, "agenciaPagamento").text = "3715 "
-        ET.SubElement(pagamento, "bancoPagamento").text = "341"
-        ET.SubElement(pagamento, "codigoReceita").text = codigo
-        ET.SubElement(pagamento, "codigoTipoPagamento").text = "1"
-        ET.SubElement(pagamento, "contaPagamento").text = "             316273"
-        ET.SubElement(pagamento, "dataPagamento").text = "20251124"
-        ET.SubElement(pagamento, "nomeTipoPagamento").text = "Débito em Conta"
-        ET.SubElement(pagamento, "numeroRetificacao").text = "00"
-        ET.SubElement(pagamento, "valorJurosEncargos").text = "000000000"
-        ET.SubElement(pagamento, "valorMulta").text = "000000000"
-        ET.SubElement(pagamento, "valorReceita").text = format_number(valor_str, 15)
-    
-    # Seguro
-    ET.SubElement(duimp, "seguroMoedaNegociadaCodigo").text = "220"
-    ET.SubElement(duimp, "seguroMoedaNegociadaNome").text = "DOLAR DOS EUA"
-    ET.SubElement(duimp, "seguroTotalDolares").text = format_number(pdf_data.get("geral", {}).get("seguro_moeda", "21.46"), 15)
-    ET.SubElement(duimp, "seguroTotalMoedaNegociada").text = format_number(pdf_data.get("geral", {}).get("seguro_moeda", "21.46"), 15)
-    ET.SubElement(duimp, "seguroTotalReais").text = format_number(pdf_data.get("geral", {}).get("seguro_brl", "115.67"), 15)
-    
-    # Sequencial
-    ET.SubElement(duimp, "sequencialRetificacao").text = "00"
-    
-    # Situação Entrega
-    ET.SubElement(duimp, "situacaoEntregaCarga").text = "ENTREGA CONDICIONADA A APRESENTACAO E RETENCAO DOS SEGUINTES DOCUMENTOS: DOCUMENTO DE EXONERACAO DO ICMS"
-    
-    # Tipo Declaração
-    ET.SubElement(duimp, "tipoDeclaracaoCodigo").text = "01"
-    ET.SubElement(duimp, "tipoDeclaracaoNome).text").text = "CONSUMO"
-    
-    # Total Adições
-    ET.SubElement(duimp, "totalAdicoes").text = f"{num_adicoes:03d}"
-    
-    # URF Despacho
-    ET.SubElement(duimp, "urfDespachoCodigo").text = "0917800"
-    ET.SubElement(duimp, "urfDespachoNome).text").text = "PORTO DE PARANAGUA"
-    
-    # Valor Total Multa
-    ET.SubElement(duimp, "valorTotalMultaARecolherAjustado").text = "000000000000000"
-    
-    # Via Transporte
-    ET.SubElement(duimp, "viaTransporteCodigo").text = "01"
-    ET.SubElement(duimp, "viaTransporteMultimodal").text = "N"
-    ET.SubElement(duimp, "viaTransporteNome).text").text = "MARÍTIMA"
-    ET.SubElement(duimp, "viaTransporteNomeTransportador").text = "MAERSK A/S"
-    ET.SubElement(duimp, "viaTransporteNomeVeiculo").text = "MAERSK MEMPHIS"
-    ET.SubElement(duimp, "viaTransportePaisTransportadorCodigo").text = "741"
-    ET.SubElement(duimp, "viaTransportePaisTransportadorNome).text").text = "CINGAPURA"
-    
-    # Converter para XML formatado
-    xml_string = ET.tostring(lista_declaracoes, encoding='utf-8', xml_declaration=True)
-    
-    # Formatar
-    parsed = minidom.parseString(xml_string)
-    pretty_xml = parsed.toprettyxml(indent="  ", encoding='utf-8')
-    
-    return pretty_xml.decode('utf-8')
-
-def format_number(value, length):
-    """Formata número com zeros à esquerda"""
-    try:
-        # Remover pontos e vírgulas
-        clean_value = str(value).replace(".", "").replace(",", "")
-        # Converter para inteiro
-        num_value = int(float(clean_value))
-        # Formatar com zeros à esquerda
-        return f"{num_value:0{length}d}"
-    except:
-        return "0" * length
-
-# ============================================
-# INTERFACE PRINCIPAL
-# ============================================
+    def _create_simple_adicao(self, item: Dict, adicao_num: int, global_info: Dict) -> ET.Element:
+        """Cria adição simples (fallback)"""
+        adicao = ET.Element('adicao')
+        
+        # Campos básicos
+        ET.SubElement(adicao, 'numeroAdicao').text = str(adicao_num).zfill(3)
+        ET.SubElement(adicao, 'numeroDUIMP').text = global_info.get('numeroDUIMP', '8686868686')
+        ET.SubElement(adicao, 'dadosMercadoriaCodigoNcm').text = item.get('ncm_8digitos', '00000000')
+        
+        # Mercadoria
+        mercadoria = ET.SubElement(adicao, 'mercadoria')
+        ET.SubElement(mercadoria, 'descricaoMercadoria').text = item.get('descricao_xml', 'PRODUTO IMPORTADO')[:200]
+        ET.SubElement(mercadoria, 'numeroSequencialItem').text = str(self.item_counter).zfill(2)
+        ET.SubElement(mercadoria, 'quantidade').text = self.format_for_xml(item.get('quantidade_comercial', '0'), 'number_14')
+        ET.SubElement(mercadoria, 'unidadeMedida').text = 'PECA                '
+        ET.SubElement(mercadoria, 'valorUnitario').text = self.format_for_xml(item.get('valor_unitario', '0'), 'number_20_6')
+        
+        self.item_counter += 1
+        
+        return adicao
 
 def main():
-    st.subheader("📤 Upload do PDF")
-    
-    uploaded_file = st.file_uploader(
-        "Selecione o arquivo PDF DUIMP",
-        type=['pdf'],
-        help="Os dados serão extraídos e usados no XML com o MESMO LAYOUT do exemplo"
+    st.set_page_config(
+        page_title="Conversor DUIMP EXATO - PDF → XML",
+        page_icon="📄",
+        layout="wide"
     )
     
-    if uploaded_file is not None:
-        # Informações do arquivo
-        file_size_mb = uploaded_file.size / (1024 * 1024)
+    st.title("📄 Conversor DUIMP EXATO - PDF para XML")
+    st.markdown("**Layout IDÊNTICO ao modelo, dados do seu PDF**")
+    
+    # Estado da sessão
+    if 'processing' not in st.session_state:
+        st.session_state.processing = False
+    if 'converter' not in st.session_state:
+        st.session_state.converter = DUIMPExactConverter()
+    
+    # Layout em colunas
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.subheader("📋 Configuração")
         
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("📄 Arquivo", uploaded_file.name)
-        with col2:
-            st.metric("📊 Tamanho", f"{file_size_mb:.2f} MB")
-        with col3:
-            st.metric("🎯 Layout", "Mesmo do XML exemplo")
+        # Upload do XML modelo
+        st.write("**1. Carregue o XML modelo:**")
+        xml_model = st.file_uploader(
+            "Arquivo M-DUIMP-8686868686.xml",
+            type=["xml"],
+            key="xml_model",
+            help="XML com o layout exato desejado"
+        )
         
-        # Extrair dados do PDF
-        with st.spinner("Extraindo dados do PDF..."):
-            pdf_data = extract_complete_pdf_data(uploaded_file)
-        
-        if pdf_data:
-            st.success(f"✅ Extraídos {len(pdf_data.get('itens', []))} itens do PDF")
+        if xml_model:
+            xml_content = xml_model.getvalue().decode('utf-8')
             
-            # Mostrar resumo
-            with st.expander("📋 Resumo dos Dados Extraídos"):
-                # Informações gerais
-                st.subheader("Informações Gerais")
-                if pdf_data.get("geral"):
-                    for key, value in pdf_data["geral"].items():
-                        if value:
-                            st.write(f"**{key.replace('_', ' ').title()}:** {value}")
+            # Analisa o modelo
+            if st.button("🔍 Analisar Modelo XML", type="primary"):
+                with st.spinner("Analisando estrutura do XML..."):
+                    success = st.session_state.converter.analyze_model(xml_content)
+                    if success:
+                        st.success("✅ Modelo analisado com sucesso!")
+                        st.session_state.model_loaded = True
+                    else:
+                        st.error("❌ Erro ao analisar modelo")
+        
+        st.divider()
+        
+        # Upload do PDF
+        st.write("**2. Carregue o PDF para converter:**")
+        pdf_file = st.file_uploader(
+            "Seu arquivo PDF",
+            type=["pdf"],
+            key="pdf_file",
+            help="PDF com os dados para extrair"
+        )
+    
+    with col2:
+        st.subheader("🔄 Conversão")
+        
+        if xml_model and pdf_file and st.session_state.get('model_loaded', False):
+            # Botão de conversão
+            if st.button("🔄 Converter PDF para XML", type="primary", use_container_width=True):
+                st.session_state.processing = True
                 
-                # Itens
-                if pdf_data.get("itens"):
-                    st.subheader(f"Itens ({len(pdf_data['itens'])})")
-                    items_df = pd.DataFrame(pdf_data["itens"])
-                    st.dataframe(items_df[['numero', 'ncm', 'descricao', 'quantidade', 'valor_total']], use_container_width=True)
+                # Salva arquivos temporários
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
+                    tmp_pdf.write(pdf_file.getbuffer())
+                    pdf_path = tmp_pdf.name
                 
-                # Tributos
-                if pdf_data.get("tributos"):
-                    st.subheader("Tributos")
-                    for key, value in pdf_data["tributos"].items():
-                        if value and value != "0,00":
-                            st.write(f"**{key.replace('_', ' ').title()}:** {value}")
-        
-        # Configurações de geração
-        st.subheader("⚙️ Configuração do XML")
-        
-        col_conf1, col_conf2 = st.columns(2)
-        with col_conf1:
-            num_adicoes = st.number_input("Número de adições no XML", 
-                                         min_value=1, max_value=20, value=5)
-        with col_conf2:
-            usar_dados_reais = st.checkbox("Usar dados reais do PDF", value=True)
-        
-        # Gerar XML
-        if st.button("🔄 Gerar XML com Mesmo Layout", type="primary", use_container_width=True):
-            with st.spinner(f"Gerando XML com {num_adicoes} adições no mesmo layout..."):
                 try:
-                    # Gerar XML
-                    xml_content = create_xml_same_layout(pdf_data, num_adicoes)
+                    # Extrai dados do PDF
+                    with st.spinner("Extraindo dados do PDF..."):
+                        items, global_info = st.session_state.converter.extract_all_items_from_pdf(pdf_path)
                     
-                    # Mostrar preview
-                    st.subheader("🔍 Preview do XML Gerado")
+                    # Gera XML
+                    with st.spinner("Gerando XML com layout do modelo..."):
+                        xml_output = st.session_state.converter.create_xml_from_items(items, global_info)
                     
-                    with st.expander("Visualizar XML (primeiros 2500 caracteres)"):
-                        st.code(xml_content[:2500] + "..." if len(xml_content) > 2500 else xml_content, language='xml')
+                    st.session_state.processing = False
                     
-                    # Botão de download
+                    # Mostra resultados
+                    st.success(f"✅ Conversão concluída! {len(items)} itens processados.")
+                    
+                    # Estatísticas
+                    col_stat1, col_stat2, col_stat3 = st.columns(3)
+                    with col_stat1:
+                        st.metric("Itens Extraídos", len(items))
+                    with col_stat2:
+                        st.metric("Número DUIMP", global_info.get('numeroDUIMP', 'N/A'))
+                    with col_stat3:
+                        file_size = len(xml_output.encode('utf-8')) / 1024
+                        st.metric("Tamanho XML", f"{file_size:.1f} KB")
+                    
+                    # Tabela de itens extraídos
+                    with st.expander("📋 Visualizar Itens Extraídos", expanded=True):
+                        if items:
+                            # Cria DataFrame simplificado
+                            table_data = []
+                            for i, item in enumerate(items[:10]):  # Mostra 10 itens
+                                table_data.append({
+                                    "Item": i + 1,
+                                    "NCM": item.get('ncm_8digitos', 'N/A'),
+                                    "Descrição": item.get('descricao_xml', 'N/A')[:50] + ('...' if len(item.get('descricao_xml', '')) > 50 else ''),
+                                    "Quantidade": item.get('quantidade_comercial', 'N/A'),
+                                    "Valor Total": item.get('valor_total', 'N/A')
+                                })
+                            
+                            st.dataframe(table_data, use_container_width=True)
+                            
+                            if len(items) > 10:
+                                st.info(f"Mostrando 10 de {len(items)} itens. Todos incluídos no XML.")
+                        else:
+                            st.warning("Nenhum item extraído")
+                    
+                    # Download do XML
+                    st.divider()
                     st.subheader("📥 Download do XML")
                     
+                    # Valida XML
+                    try:
+                        if not xml_output.startswith('<?xml'):
+                            xml_output = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml_output
+                        
+                        # Tenta parsear para validar
+                        ET.fromstring(xml_output.split('?>', 1)[1] if '?>' in xml_output else xml_output)
+                        st.success("✓ XML válido e bem formado")
+                    
+                    except Exception as e:
+                        st.error(f"⚠️ Problema no XML: {str(e)}")
+                    
                     # Nome do arquivo
-                    numero_duimp = pdf_data.get("geral", {}).get("numero_duimp", "0000000000")[-10:]
-                    file_name = f"M-DUIMP-{numero_duimp}.xml"
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    duimp_num = global_info.get('numeroDUIMP', 'UNKNOWN').replace('/', '_')
+                    xml_filename = f"M-DUIMP-{duimp_num}_{timestamp}.xml"
                     
-                    # Botão de download principal
-                    col_dl1, col_dl2, col_dl3 = st.columns([2, 1, 1])
+                    # Botão de download
+                    st.download_button(
+                        label="⬇️ Baixar Arquivo XML",
+                        data=xml_output,
+                        file_name=xml_filename,
+                        mime="application/xml",
+                        type="primary",
+                        use_container_width=True
+                    )
                     
-                    with col_dl1:
-                        st.download_button(
-                            label=f"💾 Baixar XML ({num_adicoes} adições)",
-                            data=xml_content.encode('utf-8'),
-                            file_name=file_name,
-                            mime="application/xml",
-                            type="primary",
-                            use_container_width=True
-                        )
+                    # Visualização
+                    with st.expander("🔍 Visualizar XML Gerado"):
+                        preview = xml_output[:2500]
+                        st.code(preview, language="xml")
+                        
+                        if len(xml_output) > 2500:
+                            st.info(f"Mostrando primeiros 2500 caracteres de {len(xml_output)}")
                     
-                    with col_dl2:
-                        # Dados em JSON
-                        json_data = json.dumps(pdf_data, indent=2, ensure_ascii=False)
-                        st.download_button(
-                            label="📋 Dados Extraídos",
-                            data=json_data.encode('utf-8'),
-                            file_name="dados_pdf.json",
-                            mime="application/json"
-                        )
-                    
-                    with col_dl3:
-                        # Itens em CSV
-                        if pdf_data.get("itens"):
-                            items_df = pd.DataFrame(pdf_data["itens"])
-                            csv_data = items_df.to_csv(index=False, encoding='utf-8-sig')
-                            st.download_button(
-                                label="📊 Itens CSV",
-                                data=csv_data.encode('utf-8-sig'),
-                                file_name="itens_pdf.csv",
-                                mime="text/csv"
-                            )
-                    
-                    # Comparação com layout
-                    st.info("""
-                    **✅ XML gerado no MESMO LAYOUT do exemplo:**
-                    - Mesma estrutura de tags e atributos
-                    - Mesmo ordenamento dos elementos
-                    - Mesma formatação numérica
-                    - Mesmo tipo de dados
-                    - Diferentes valores (extraídos do PDF)
-                    """)
-                    
-                    st.success(f"🎯 XML gerado com {num_adicoes} adições no mesmo layout do exemplo!")
-                    st.balloons()
-                    
+                    # Informações técnicas
+                    with st.expander("⚙️ Informações Técnicas"):
+                        st.write(f"**Estrutura do XML:**")
+                        st.write(f"- Tags únicas no modelo: {len(st.session_state.converter.xml_structure.get('element_order', []))}")
+                        st.write(f"- Template de adição extraído: {'Sim' if 'adicao_template' in st.session_state.converter.xml_structure else 'Não'}")
+                        st.write(f"- Campos mapeados: {len(items[0]) if items else 0} por item")
+                        
+                        st.write(f"\n**Processamento:**")
+                        st.write(f"- Itens por página: Média de {len(items)/max(1, len(set(i['page'] for i in items))):.1f}")
+                        st.write(f"- Campos extraídos: {', '.join(list(items[0].keys())[:5]) if items else 'Nenhum'}...")
+                
                 except Exception as e:
-                    st.error(f"❌ Erro ao gerar XML: {str(e)}")
-                    st.exception(e)
-    
-    else:
-        # Instruções
-        st.info("👆 Faça upload de um arquivo PDF DUIMP")
+                    st.error(f"❌ Erro na conversão: {str(e)}")
+                    st.session_state.processing = False
+                
+                finally:
+                    # Limpa arquivo temporário
+                    if os.path.exists(pdf_path):
+                        os.unlink(pdf_path)
         
-        with st.expander("📐 Sobre o Mesmo Layout"):
-            st.markdown("""
-            ### **Este conversor gera XML no MESMO LAYOUT do exemplo:**
+        elif not xml_model:
+            st.info("📋 **Carregue o XML modelo primeiro**")
+            st.write("""
+            O XML modelo (`M-DUIMP-8686868686.xml`) define o layout exato que será usado.
             
-            **Layout do XML exemplo:**
-            ```xml
-            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-            <ListaDeclaracoes>
-                <duimp>
-                    <adicao>
-                        <acrescimo>
-                            <codigoAcrescimo>17</codigoAcrescimo>
-                            <denominacao>OUTROS ACRESCIMOS...</denominacao>
-                            <!-- ... -->
-                        </acrescimo>
-                        <cideValorAliquotaEspecifica>00000000000</cideValorAliquotaEspecifica>
-                        <!-- ... mesma ordem de tags ... -->
-                        <numeroAdicao>001</numeroAdicao>
-                        <numeroDUIMP>8686868686</numeroDUIMP>
-                        <!-- ... -->
-                    </adicao>
-                    <!-- múltiplas adições -->
-                    <totalAdicoes>005</totalAdicoes>
-                    <!-- elementos gerais na mesma ordem -->
-                </duimp>
-            </ListaDeclaracoes>
-            ```
+            **O que o sistema faz com o modelo:**
+            1. Analisa a estrutura completa do XML
+            2. Extrai o template das adições (itens)
+            3. Entende a ordem dos elementos
+            4. Aprende o formato dos campos
             
-            **O que significa "mesmo layout":**
-            1. **Mesma ordem** das tags
-            2. **Mesma estrutura** hierárquica
-            3. **Mesmo formato** dos valores (zeros à esquerda, tamanhos fixos)
-            4. **Mesmo tipo** de dados em cada campo
-            5. **Mesmo número** de elementos quando aplicável
-            
-            **Diferença:**
-            - **Valores** são extraídos do seu PDF
-            - **Quantidades** refletem seus dados
-            - **Descrições** são as reais do seu documento
-            - **Números** (processo, DUIMP, etc.) são os seus
-            
-            **Resultado:** Um XML com SEUS DADOS, mas na MESMA ESTRUTURA do exemplo!
+            **Depois, com seu PDF:**
+            1. Extrai TODOS os itens do seu PDF
+            2. Formata conforme o modelo
+            3. Gera XML IDÊNTICO ao modelo
             """)
+        
+        elif not pdf_file:
+            st.info("📄 **Agora carregue seu PDF para converter**")
+            st.write("""
+            **Seu PDF deve conter:**
+            - Itens com NCM, descrição, quantidade, valores
+            - Informações de importação
+            - Dados de transporte e impostos
+            
+            **O sistema extrairá:**
+            - TODOS os itens de TODAS as páginas
+            - NCM formatado para 8 dígitos
+            - Descrições completas
+            - Valores formatados corretamente
+            - Países de origem
+            
+            **Resultado:** XML com layout IDÊNTICO ao modelo!
+            """)
+        
+        elif not st.session_state.get('model_loaded', False):
+            st.info("🔍 **Clique em 'Analisar Modelo XML' para continuar**")
+    
+    # Rodapé com informações
+    st.divider()
+    
+    col_info1, col_info2, col_info3 = st.columns(3)
+    
+    with col_info1:
+        st.write("**✅ Garantias:**")
+        st.write("- Layout IDÊNTICO ao modelo")
+        st.write("- Todos os itens extraídos")
+        st.write("- Formatação correta")
+    
+    with col_info2:
+        st.write("**🔍 Extração:**")
+        st.write("- NCM 8 dígitos")
+        st.write("- Descrições completas")
+        st.write("- Valores formatados")
+        st.write("- Países de origem")
+    
+    with col_info3:
+        st.write("**🚀 Processamento:**")
+        st.write("- PDFs grandes (500+ páginas)")
+        st.write("- Barra de progresso")
+        st.write("- Validação automática")
+        st.write("- XML bem formado")
 
 if __name__ == "__main__":
     main()
