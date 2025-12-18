@@ -35,7 +35,7 @@ with st.sidebar:
     """)
     
     st.header("⚙️ Configurações")
-    num_adicoes = st.slider("Número de adições no XML", 1, 50, 38)
+    num_adicoes = st.slider("Número de adições no XML", 1, 50, 5)
     
     st.header("📊 Status")
     status_placeholder = st.empty()
@@ -83,18 +83,21 @@ def format_number(value, length):
             parts = clean_value.split('.')
             clean_value = parts[0] + '.' + ''.join(parts[1:])
         
-        # Converter para float e depois para inteiro (remover decimais)
+        # Converter para float
         try:
             num_value = float(clean_value)
-            # Multiplicar por 100 para manter 2 casas decimais
-            num_value = int(num_value * 100)
         except:
-            # Se falhar, tentar converter direto para inteiro
-            num_value = int(float(clean_value.split('.')[0])) * 100
+            # Se falhar, tentar converter apenas números
+            numbers_only = re.sub(r'[^\d]', '', clean_value)
+            num_value = float(numbers_only) if numbers_only else 0
+        
+        # Multiplicar por 100 para manter 2 casas decimais e converter para inteiro
+        num_value = int(num_value * 100)
         
         # Formatar com zeros à esquerda
         return f"{num_value:0{length}d}"
-    except:
+    except Exception as e:
+        # Em caso de erro, retornar zeros
         return "0" * length
 
 def format_text(text, length):
@@ -551,6 +554,11 @@ def extract_complete_pdf_data(pdf_file):
         
         dados["total_itens_encontrados"] = total_itens_encontrados
         
+        # Garantir que temos pelo menos 1 item
+        if not dados["itens"]:
+            st.warning("⚠️ Nenhum item encontrado no PDF. Usando dados padrão.")
+            dados["itens"] = get_default_pdf_data()["itens"]
+        
         return dados
     
     except Exception as e:
@@ -574,12 +582,36 @@ def create_xml_same_layout(pdf_data, num_adicoes=5):
     
     # ===== CRIAR ADIÇÕES =====
     # Usar itens reais do PDF ou repetir se necessário
-    total_itens_pdf = len(pdf_data["itens"])
+    total_itens_pdf = len(pdf_data.get("itens", []))
+    
+    # CORREÇÃO DO ERRO: Garantir que total_itens_pdf não seja zero
+    if total_itens_pdf == 0:
+        st.warning("⚠️ Nenhum item disponível no PDF. Usando item padrão.")
+        # Adicionar um item padrão
+        pdf_data["itens"] = [{
+            "numero": "1",
+            "ncm": "3926.30.00",
+            "codigo_produto": "122",
+            "versao": "1",
+            "condicao_venda": "FCA",
+            "fatura_invoice": "110338935",
+            "descricao": "ITEM PADRÃO - DADOS NÃO ENCONTRADOS",
+            "codigo_interno": "00000000",
+            "quantidade": "1.000,00000",
+            "unidade_comercial": "UNIDADE",
+            "peso_liquido_kg": "1.000,00000",
+            "valor_unitario": "1,0000000",
+            "valor_total": "1.000,00",
+            "base_calculo_ii": "1.000,0000000",
+            "aliquota_ii": "18,0000000",
+            "valor_ii": "180,0000000"
+        }]
+        total_itens_pdf = 1
     
     for adicao_num in range(1, num_adicoes + 1):
         adicao = ET.SubElement(duimp, "adicao")
         
-        # Usar item correspondente do PDF ou o último se não houver suficiente
+        # CORREÇÃO: Garantir que não há divisão por zero
         item_idx = (adicao_num - 1) % total_itens_pdf
         item = pdf_data["itens"][item_idx]
         
@@ -597,8 +629,9 @@ def create_xml_same_layout(pdf_data, num_adicoes=5):
         # Converter para BRL usando cotação
         try:
             cotacao_str = pdf_data.get("geral", {}).get("cotacao", "6.3636").replace(",", ".")
-            cotacao = float(cotacao_str)
-            valor_float = float(valor_total.replace(".", "").replace(",", "."))
+            cotacao = float(cotacao_str) if cotacao_str else 6.3636
+            valor_float_str = valor_total.replace(".", "").replace(",", ".")
+            valor_float = float(valor_float_str) if valor_float_str else 1409.60
             valor_brl = valor_float * cotacao
         except:
             valor_brl = 8969.81
@@ -646,8 +679,9 @@ def create_xml_same_layout(pdf_data, num_adicoes=5):
         
         try:
             cotacao_str = pdf_data.get("geral", {}).get("cotacao", "6.3636").replace(",", ".")
-            cotacao = float(cotacao_str)
-            valor_float = float(valor_moeda.replace(".", "").replace(",", "."))
+            cotacao = float(cotacao_str) if cotacao_str else 6.3636
+            valor_float_str = valor_moeda.replace(".", "").replace(",", ".")
+            valor_float = float(valor_float_str) if valor_float_str else 1409.60
             valor_brl = valor_float * cotacao
         except:
             valor_brl = 8969.81
@@ -882,11 +916,11 @@ def create_xml_same_layout(pdf_data, num_adicoes=5):
     
     # Calcular peso líquido total
     peso_total = 0
-    for item in pdf_data["itens"]:
+    for item in pdf_data.get("itens", []):
         try:
             peso_str = item.get("peso_liquido_kg", "0")
             peso_clean = peso_str.replace(".", "").replace(",", ".")
-            peso = float(peso_clean)
+            peso = float(peso_clean) if peso_clean else 0
             peso_total += peso
         except:
             pass
@@ -1196,16 +1230,23 @@ def main():
         # Configurações
         st.subheader("⚙️ Configuração do XML")
         
-        num_adicoes = st.number_input("Número de adições no XML", 
-                                     min_value=1, max_value=100, 
-                                     value=min(38, total_itens) if total_itens > 0 else 5)
+        # Verificar se há itens disponíveis
+        if total_itens == 0:
+            st.warning("⚠️ Nenhum item encontrado no PDF. O XML será gerado com dados padrão.")
+            default_adicoes = 5
+        else:
+            default_adicoes = min(num_adicoes, total_itens)
+        
+        num_adicoes_input = st.number_input("Número de adições no XML", 
+                                          min_value=1, max_value=100, 
+                                          value=default_adicoes)
         
         # Gerar XML
         if st.button("🔄 Gerar XML", type="primary", use_container_width=True):
-            with st.spinner(f"Gerando XML com {num_adicoes} adições..."):
+            with st.spinner(f"Gerando XML com {num_adicoes_input} adições..."):
                 try:
                     # Gerar XML
-                    xml_content = create_xml_same_layout(pdf_data, num_adicoes)
+                    xml_content = create_xml_same_layout(pdf_data, num_adicoes_input)
                     
                     # Mostrar preview
                     st.subheader("🔍 Preview do XML Gerado")
@@ -1229,7 +1270,7 @@ def main():
                     
                     with col_dl1:
                         st.download_button(
-                            label=f"💾 Baixar XML ({num_adicoes} adições)",
+                            label=f"💾 Baixar XML ({num_adicoes_input} adições)",
                             data=xml_content.encode('utf-8'),
                             file_name=file_name,
                             mime="application/xml",
@@ -1247,7 +1288,7 @@ def main():
                             mime="application/json"
                         )
                     
-                    st.success(f"✅ XML gerado com sucesso! Contém {num_adicoes} adições.")
+                    st.success(f"✅ XML gerado com sucesso! Contém {num_adicoes_input} adições.")
                     st.balloons()
                     
                     # Estatísticas
@@ -1255,13 +1296,14 @@ def main():
                     with col_stats1:
                         st.metric("Itens no PDF", total_itens)
                     with col_stats2:
-                        st.metric("Adições no XML", num_adicoes)
+                        st.metric("Adições no XML", num_adicoes_input)
                     with col_stats3:
                         st.metric("Tamanho do XML", f"{len(xml_content) / 1024:.1f} KB")
                     
                 except Exception as e:
                     st.error(f"❌ Erro ao gerar XML: {str(e)}")
-                    st.exception(e)
+                    import traceback
+                    st.error(traceback.format_exc())
     
     else:
         # Instruções
