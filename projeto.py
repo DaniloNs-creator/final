@@ -1,254 +1,210 @@
-import streamlit as st
 import pdfplumber
 import re
-import io
+import xml.etree.ElementTree as ET
+from xml.dom import minidom
 from datetime import datetime
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Conversor DUIMP PDF para XML", layout="wide")
-
-st.title("📂 Conversor de Extrato DUIMP (PDF) para XML")
-st.markdown("""
-Este aplicativo extrai dados do **Extrato de Conferência DUIMP** (PDF) e gera o arquivo XML 
-no layout padrão para importação no sistema (M-DUIMP).
-""")
-
-# --- FUNÇÕES AUXILIARES DE FORMATAÇÃO ---
-
-def limpar_texto(texto):
-    """Remove caracteres indesejados e espaços extras."""
-    if not texto:
-        return ""
-    return re.sub(r'\s+', ' ', str(texto)).strip()
-
-def formatar_numero_xml(valor_str, tamanho=15, decimais=2):
-    """
-    Converte string numérica (ex: "1.066,01") para formato XML (ex: "000000000106601").
-    Remove pontos, converte vírgula para ponto para cálculo, multiplica por 10^decimais.
-    """
-    if not valor_str:
-        return "0" * tamanho
-    
-    # Remove caracteres que não sejam dígitos ou vírgula/ponto
-    limpo = re.sub(r'[^\d,\.]', '', str(valor_str))
-    
-    # Lógica para converter formato brasileiro (1.000,00) para float
-    if ',' in limpo:
-        limpo = limpo.replace('.', '').replace(',', '.')
-    
-    try:
-        valor_float = float(limpo)
-        # Multiplica para remover casas decimais (ex: 100.50 -> 10050)
-        valor_inteiro = int(round(valor_float * (10**decimais)))
-        return str(valor_inteiro).zfill(tamanho)
-    except ValueError:
-        return "0" * tamanho
-
-def formatar_data_xml(data_str):
-    """Converte dd/mm/aaaa para aaaammdd."""
-    try:
-        dt = datetime.strptime(data_str.strip(), "%d/%m/%Y")
-        return dt.strftime("%Y%m%d")
-    except:
-        return datetime.now().strftime("%Y%m%d") # Fallback hoje
-
-def extrair_campo_regex(padrao, texto, grupo=1):
-    """Tenta encontrar um padrão regex no texto completo."""
-    match = re.search(padrao, texto, re.IGNORECASE)
-    if match:
-        return match.group(grupo)
-    return ""
-
-# --- LÓGICA DE EXTRAÇÃO E CONVERSÃO ---
-
-def processar_pdf(pdf_file):
-    texto_completo = ""
-    
-    # 1. Extração do Texto Bruto
-    with pdfplumber.open(pdf_file) as pdf:
-        for page in pdf.pages:
-            texto_completo += page.extract_text() + "\n"
-
-    # Dicionário para armazenar dados extraídos
-    dados = {
-        "numero_duimp": "",
-        "importador_nome": "",
-        "importador_cnpj": "",
-        "data_registro": "",
-        "peso_liquido_total": "0",
-        "peso_bruto_total": "0",
-        "adicoes": []
-    }
-
-    # 2. Extração de Cabeçalho (Dados Gerais)
-    # Baseado no layout: "Numero 25BR..." e tabelas identificadas
-    
-    # Número da DUIMP
-    dados["numero_duimp"] = extrair_campo_regex(r"Numero\s*\n\s*(\d{2}[A-Z]{2}\d+)", texto_completo)
-    if not dados["numero_duimp"]: # Tentar outro padrão caso a quebra de linha falhe
-        dados["numero_duimp"] = extrair_campo_regex(r"(\d{2}BR\d{7,})", texto_completo)
-
-    # Importador
-    dados["importador_nome"] = extrair_campo_regex(r"IMPORTADOR\s*\n\s*(.*?)\n", texto_completo)
-    dados["importador_cnpj"] = extrair_campo_regex(r"CNPJ\s*\n\s*(\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2})", texto_completo)
-    
-    # Data
-    dados["data_registro"] = extrair_campo_regex(r"Data de Cadastro\s*\n\s*(\d{2}/\d{2}/\d{4})", texto_completo)
-
-    # Pesos (Procura na tabela "DADOS DA CARGA")
-    dados["peso_bruto_total"] = extrair_campo_regex(r"Peso Bruto\s*\n\s*([\d\.]+,\d+)", texto_completo)
-    dados["peso_liquido_total"] = extrair_campo_regex(r"Peso Liquido\s*\n\s*([\d\.]+,\d+)", texto_completo)
-
-    # 3. Extração de Adições (Itens)
-    # A lógica aqui procura por blocos de Adição. No PDF de exemplo, temos "ITENS DA DUIMP".
-    # Vamos usar regex para encontrar padrões repetitivos de NCM e criar as adições.
-    
-    # Encontrar todas as ocorrências de itens
-    # Padrão observado: Item [X] ... NCM [Codigo] ... Valor
-    
-    # Dividir o texto onde começam os detalhes dos itens (aproximação)
-    items_matches = re.finditer(r"Item\s*\n\s*(\d+).*?NCM\s*\n\s*([\d\.]+).*?Cond\. Venda\s*\n\s*([A-Z]{3})", texto_completo, re.DOTALL)
-    
-    # Como o pdfplumber extrai tabelas linha a linha, às vezes o dado está deslocado.
-    # Vamos fazer uma varredura mais robusta simulando a leitura das "ADIÇÕES".
-    
-    # Fallback: Se não achar pelo iterador complexo, buscar apenas NCMs e assumir itens sequenciais
-    ncms = re.findall(r"NCM\s*\n\s*(\d{4}\.\d{2}\.\d{2})", texto_completo)
-    if not ncms:
-        # Tentar formato sem pontos
-        ncms = re.findall(r"NCM\s*\n\s*(\d{8})", texto_completo)
-
-    # Buscar valores unitários e quantidades (Isso é difícil sem um parser posicional estrito, 
-    # vamos usar placeholders baseados no exemplo XML se não encontrarmos)
-    
-    count = 1
-    for ncm in ncms:
-        # Tenta achar a quantidade associada a este NCM ou item próximo
-        # Regex simplificado para demonstração
-        adicao = {
-            "numero": str(count).zfill(3),
-            "ncm": ncm.replace('.', ''),
-            "condicao_venda": "FOB", # Padrão observado
-            "valor_mercadoria": "100,00", # Placeholder se não conseguir extrair exato
-            "quantidade": "1",
-            "peso_liquido": "1",
-            "descricao": "PRODUTO IMPORTADO REF DUIMP"
+class DuimpConverter:
+    def __init__(self, pdf_path):
+        self.pdf_path = pdf_path
+        self.data = {
+            "capa": {},
+            "adicoes": []
         }
+        # Buffer para guardar a adição sendo processada atualmente
+        self.current_adicao = None
+
+    def format_number_xml(self, value, length, precision=2):
+        """
+        Converte string '1.234,56' para formato XML '0000000123456'.
+        Remove pontos de milhar e vírgula decimal.
+        """
+        if not value:
+            return "0" * length
         
-        # Tenta extrair descrição específica se possível
-        desc_match = re.search(r"DENOMINACAO DO PRODUTO\s*\n\s*(.*?)\n", texto_completo)
-        if desc_match:
-            adicao["descricao"] = desc_match.group(1)[:100] # Limitar caracteres
-
-        dados["adicoes"].append(adicao)
-        count += 1
-
-    # Se nenhuma adição foi detectada (falha no regex), cria uma dummy baseada no cabeçalho para não quebrar o XML
-    if not dados["adicoes"]:
-         dados["adicoes"].append({
-            "numero": "001",
-            "ncm": "00000000",
-            "condicao_venda": "FOB",
-            "valor_mercadoria": "0,00",
-            "quantidade": "0",
-            "peso_liquido": "0",
-            "descricao": "ITEM NAO IDENTIFICADO AUTOMATICAMENTE"
-        })
-
-    return dados
-
-def gerar_xml(dados):
-    # Template XML baseado no arquivo M-DUIMP fornecido.
-    # Nota: O XML original é muito extenso. Abaixo está a estrutura essencial preenchida dinamicamente.
-    
-    xml_header = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<ListaDeclaracoes>\n    <duimp>\n'
-    xml_footer = '    </duimp>\n</ListaDeclaracoes>'
-    
-    xml_adicoes = ""
-    
-    for adicao in dados["adicoes"]:
-        # Formatações
-        peso_fmt = formatar_numero_xml(dados["peso_liquido_total"], tamanho=15, decimais=5) # Peso no XML parece ter mais casas
-        valor_fmt = formatar_numero_xml(adicao["valor_mercadoria"], tamanho=11)
+        # Limpa caracteres não numéricos exceto vírgula e ponto
+        clean_val = re.sub(r'[^\d,.]', '', str(value))
         
-        xml_adicoes += f"""        <adicao>
-            <numeroAdicao>{adicao['numero']}</numeroAdicao>
-            <numeroDUIMP>{re.sub('[^0-9]', '', dados['numero_duimp'])}</numeroDUIMP>
-            <condicaoVendaIncoterm>{adicao['condicao_venda']}</condicaoVendaIncoterm>
-            <dadosMercadoriaCodigoNcm>{adicao['ncm']}</dadosMercadoriaCodigoNcm>
-            <dadosMercadoriaPesoLiquido>{peso_fmt}</dadosMercadoriaPesoLiquido>
-            <mercadoria>
-                <descricaoMercadoria>{adicao['descricao']}</descricaoMercadoria>
-                <numeroSequencialItem>01</numeroSequencialItem>
-                <quantidade>{formatar_numero_xml(adicao['quantidade'], 14, 5)}</quantidade>
-                <unidadeMedida>UNIDADE</unidadeMedida>
-                <valorUnitario>{valor_fmt}</valorUnitario>
-            </mercadoria>
-            <tributos>
-                <iiRegimeTributacaoCodigo>1</iiRegimeTributacaoCodigo>
-                <pisCofinsRegimeTributacaoCodigo>1</pisCofinsRegimeTributacaoCodigo>
-            </tributos>
-        </adicao>\n"""
-
-    # Dados Gerais do final do XML (Importador, Frete, etc)
-    # Convertendo CNPJ para apenas números
-    cnpj_limpo = re.sub(r'\D', '', dados['importador_cnpj'])
-    
-    xml_geral = f"""        <importadorNome>{dados['importador_nome']}</importadorNome>
-        <importadorNumero>{cnpj_limpo}</importadorNumero>
-        <cargaPesoBruto>{formatar_numero_xml(dados['peso_bruto_total'], 15, 5)}</cargaPesoBruto>
-        <cargaPesoLiquido>{formatar_numero_xml(dados['peso_liquido_total'], 15, 5)}</cargaPesoLiquido>
-        <dataRegistro>{formatar_data_xml(dados['data_registro'])}</dataRegistro>
-        <numeroDUIMP>{re.sub('[^0-9]', '', dados['numero_duimp'])}</numeroDUIMP>
-        <viaTransporteNome>MARÍTIMA</viaTransporteNome>
-        <situacaoEntregaCarga>LIBERADA</situacaoEntregaCarga>
-        <tipoDeclaracaoNome>CONSUMO</tipoDeclaracaoNome>
-"""
-
-    return xml_header + xml_adicoes + xml_geral + xml_footer
-
-# --- INTERFACE DO USUÁRIO ---
-
-uploaded_file = st.file_uploader("Faça upload do PDF (Extrato DUIMP)", type="pdf")
-
-if uploaded_file is not None:
-    with st.spinner('Processando PDF...'):
+        if ',' in clean_val:
+            # Padrão brasileiro 1.000,00 -> 1000.00
+            clean_val = clean_val.replace('.', '').replace(',', '.')
+        
         try:
-            # 1. Processar dados
-            dados_extraidos = processar_pdf(uploaded_file)
-            
-            # 2. Mostrar prévia dos dados encontrados
-            st.subheader("Dados Identificados")
-            col1, col2 = st.columns(2)
-            with col1:
-                st.info(f"**DUIMP:** {dados_extraidos['numero_duimp']}")
-                st.write(f"**Importador:** {dados_extraidos['importador_nome']}")
-            with col2:
-                st.write(f"**Data:** {dados_extraidos['data_registro']}")
-                st.write(f"**Peso Líquido Total:** {dados_extraidos['peso_liquido_total']}")
-            
-            st.write(f"**Itens (Adições) detectados:** {len(dados_extraidos['adicoes'])}")
-            if len(dados_extraidos['adicoes']) > 0:
-                st.dataframe(dados_extraidos['adicoes'])
-            
-            # 3. Gerar XML
-            xml_content = gerar_xml(dados_extraidos)
-            
-            # 4. Botão de Download
-            arquivo_nome = f"M-DUIMP-{re.sub('[^0-9]', '', dados_extraidos['numero_duimp'])}.xml"
-            
-            st.success("Conversão concluída com sucesso!")
-            st.download_button(
-                label="📥 Baixar XML Convertido",
-                data=xml_content,
-                file_name=arquivo_nome,
-                mime="application/xml"
-            )
+            # Converte para float para garantir precisão
+            float_val = float(clean_val)
+            # Multiplica pela precisão (ex: 100 para 2 casas decimais)
+            int_val = int(round(float_val * (10 ** precision)))
+            return str(int_val).zfill(length)
+        except ValueError:
+            return "0" * length
 
-            # Debug: Mostrar XML na tela
-            with st.expander("Ver conteúdo XML gerado"):
-                st.code(xml_content, language='xml')
+    def format_text(self, text):
+        """Limpa espaços extras e quebras de linha."""
+        if not text: return ""
+        return " ".join(text.split()).strip()
 
-        except Exception as e:
-            st.error(f"Ocorreu um erro ao processar o arquivo: {str(e)}")
-            st.warning("Verifique se o PDF é um 'Extrato de Conferência DUIMP' legível (texto selecionável).")
+    def extract_from_pdf(self):
+        print(f"Iniciando extração de: {self.pdf_path}")
+        
+        with pdfplumber.open(self.pdf_path) as pdf:
+            full_text = ""
+            # Estratégia para 500 páginas: Iterar e extrair texto corrido
+            # mas mantendo o contexto de blocos
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    full_text += text + "\n"
+
+        # --- 1. Extração da CAPA (Regex baseados no seu PDF) ---
+        
+        # Ex: "Numero","25BR00001916620"
+        duimp_match = re.search(r'Numero\s*"?([\w\d]+)"?', full_text)
+        self.data["capa"]["numeroDUIMP"] = duimp_match.group(1) if duimp_match else "0000000000"
+
+        # Ex: Importador
+        imp_match = re.search(r'IMPORTADOR\s*"\s*,\s*"\s*(.*?)\s*"', full_text, re.IGNORECASE)
+        self.data["capa"]["importadorNome"] = imp_match.group(1) if imp_match else "DESCONHECIDO"
+
+        # Ex: Peso Bruto (captura global da carga)
+        peso_bruto_match = re.search(r'Peso Bruto\s*"?([\d.,]+)"?', full_text)
+        self.data["capa"]["cargaPesoBruto"] = peso_bruto_match.group(1) if peso_bruto_match else "0"
+        
+        # Ex: Peso Liquido
+        peso_liq_match = re.search(r'Peso Liquido\s*"?([\d.,]+)"?', full_text)
+        self.data["capa"]["cargaPesoLiquido"] = peso_liq_match.group(1) if peso_liq_match else "0"
+
+        # --- 2. Extração das ADIÇÕES (Loop complexo) ---
+        
+        # Vamos dividir o texto em blocos de "Item" ou "Nº Adição"
+        # O padrão no PDF parece ser tabelas ou blocos iniciados por identificadores de item
+        
+        # Regex para encontrar blocos de itens. Ajustado para o padrão do PDF enviado
+        # Procura por "Item [numero]" seguido de NCM
+        item_pattern = re.compile(r'Item\s*"?(\d+)"?.*?NCM\s*"?([\d.]+)"?', re.DOTALL)
+        
+        # Encontrar todas as ocorrências de itens básicos primeiro para saber quantos são
+        # Nota: Em PDFs complexos, o ideal é iterar linha a linha, mas regex funciona se o padrão for constante
+        
+        # Vamos iterar sobre linhas para capturar detalhes específicos de cada item
+        lines = full_text.split('\n')
+        current_item = {}
+        capturing_item = False
+        
+        for i, line in enumerate(lines):
+            # Identifica início de um item na tabela de itens
+            # Ex: "1","X","8302.10.00","21"
+            # Ajuste o regex conforme a linha exata que inicia um item no seu PDF real
+            item_start = re.search(r'^\s*"?(\d+)"?\s*,\s*"?X"?\s*,\s*"?([\d.]+)"?', line)
+            
+            if item_start:
+                # Se já tínhamos um item sendo capturado, salva ele
+                if current_item:
+                    self.data["adicoes"].append(current_item)
+                
+                # Inicia novo item
+                current_item = {
+                    "numeroAdicao": item_start.group(1).zfill(3),
+                    "ncm": item_start.group(2).replace('.', ''),
+                    "descricao": "DESCRIÇÃO PADRÃO - AJUSTAR NO REGEX", # Placeholder
+                    "quantidade": "0",
+                    "valor": "0",
+                    "pesoLiq": "0"
+                }
+                capturing_item = True
+                continue
+
+            if capturing_item:
+                # Tenta capturar dados complementares nas linhas seguintes
+                
+                # Ex: Captura Descrição (Geralmente linhas após "DESCRIÇÃO DO PRODUTO")
+                if "DESCRIÇÃO DO PRODUTO" in line:
+                    # Pega as próximas 2 linhas como descrição
+                    try:
+                        desc = lines[i+1] + " " + lines[i+2]
+                        current_item["descricao"] = self.format_text(desc)[:200] # Limita tamanho
+                    except: pass
+                
+                # Ex: Captura Quantidade e Unidade (Procura padrões numéricos grandes seguidos de texto)
+                # "14.784,00000"
+                qtd_match = re.search(r'Qtde Unid\. Estatística\s+([\d.,]+)', line)
+                if qtd_match:
+                    current_item["quantidade"] = qtd_match.group(1)
+
+                # Ex: Valor Condição Venda
+                val_match = re.search(r'VIr Cond Venda \(Moeda\s+([\d.,]+)', line)
+                if not val_match:
+                     val_match = re.search(r'Valor Tot\. Cond Venda\s+([\d.,]+)', line)
+
+                if val_match:
+                    current_item["valor"] = val_match.group(1)
+
+        # Adiciona o último item encontrado
+        if current_item:
+            self.data["adicoes"].append(current_item)
+
+        print(f"Total de adições encontradas: {len(self.data['adicoes'])}")
+
+    def generate_xml(self, output_path):
+        print("Gerando XML...")
+        
+        root = ET.Element("ListaDeclaracoes")
+        duimp = ET.SubElement(root, "duimp")
+
+        # --- Loop das Adições ---
+        for item in self.data["adicoes"]:
+            adicao = ET.SubElement(duimp, "adicao")
+            
+            # Campos Fixos/Calculados
+            ET.SubElement(adicao, "numeroAdicao").text = item["numeroAdicao"]
+            ET.SubElement(adicao, "numeroDUIMP").text = self.data["capa"].get("numeroDUIMP")
+            
+            # Dados da Mercadoria
+            mercadoria = ET.SubElement(adicao, "mercadoria")
+            ET.SubElement(mercadoria, "descricaoMercadoria").text = item.get("descricao", "N/D")
+            # NCM
+            ET.SubElement(adicao, "dadosMercadoriaCodigoNcm").text = item.get("ncm", "00000000")
+            
+            # Formatações Numéricas Rigorosas (Baseado no XML 8686868686)
+            # Quantidade (5 casas decimais no XML de exemplo: 00000500000000) -> len 14, prec 5
+            qtd_fmt = self.format_number_xml(item.get("quantidade"), 14, precision=5)
+            ET.SubElement(mercadoria, "quantidade").text = qtd_fmt
+            
+            # Valor (2 casas decimais no XML: 000000001302962) -> len 15, prec 2
+            val_fmt = self.format_number_xml(item.get("valor"), 15, precision=2)
+            ET.SubElement(adicao, "condicaoVendaValorReais").text = val_fmt # Assumindo Reais para exemplo
+            
+            # Estrutura base de tributos (exemplo simplificado, pois varia por NCM)
+            ET.SubElement(adicao, "iiRegimeTributacaoCode").text = "1"
+            ET.SubElement(adicao, "pisCofinsRegimeTributacaoCodigo").text = "1"
+
+        # --- Dados Gerais da DUIMP (Fim do XML) ---
+        ET.SubElement(duimp, "importadorNome").text = self.data["capa"].get("importadorNome")
+        
+        # Formata Pesos Totais
+        peso_b_fmt = self.format_number_xml(self.data["capa"].get("cargaPesoBruto"), 15, precision=5)
+        ET.SubElement(duimp, "cargaPesoBruto").text = peso_b_fmt
+        
+        # Prettify e Salvar
+        xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="    ")
+        
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(xml_str)
+        
+        print(f"XML salvo com sucesso em: {output_path}")
+
+# --- Execução ---
+if __name__ == "__main__":
+    # Substitua pelo caminho real do seu PDF
+    arquivo_pdf = "extrato_de_conferencia_duimp_teste.pdf" 
+    arquivo_xml_saida = "DUIMP_Final_Importacao.xml"
+    
+    converter = DuimpConverter(arquivo_pdf)
+    
+    # 1. Extrair
+    try:
+        converter.extract_from_pdf()
+        # 2. Gerar XML
+        converter.generate_xml(arquivo_xml_saida)
+    except Exception as e:
+        print(f"Erro durante o processamento: {e}")
+        # Em produção, adicione logs detalhados aqui
