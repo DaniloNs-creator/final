@@ -7,25 +7,20 @@ from xml.dom import minidom
 # --- FUNÇÕES DE LIMPEZA E FORMATAÇÃO ---
 
 def clean_text(text):
-    """Remove quebras de linha e espaços duplos, deixando o texto em uma linha só."""
+    """Remove quebras de linha e espaços duplos."""
     if not text: return ""
-    # Substitui quebras de linha por espaço
     text = text.replace('\n', ' ')
-    # Remove espaços duplicados
     return re.sub(r'\s+', ' ', text).strip()
 
 def format_xml_number(value, length=15):
     """
-    Formata valores numéricos para o padrão XML (sem vírgula, zeros à esquerda).
+    Formata valores para o padrão XML (sem vírgula, zeros à esquerda).
     Ex: '1.234,56' -> '000000000123456'
     """
     if not value:
         return "0" * length
-    # Mantém apenas dígitos e vírgula
     clean = re.sub(r'[^\d,]', '', str(value))
-    # Remove a vírgula
     clean = clean.replace(',', '')
-    # Preenche com zeros
     if len(clean) > length:
         return clean[-length:]
     return clean.zfill(length)
@@ -40,11 +35,27 @@ def safe_extract(pattern, text, group=1):
         pass
     return ""
 
+def clean_partnumber(text):
+    """
+    Remove explicitamente textos indesejados que possam ter vindo na captura,
+    deixando apenas o código numérico/hífen.
+    """
+    if not text: return ""
+    # Remove palavras chave que o usuário não quer
+    bad_words = ["CÓDIGO", "CODIGO", "INTERNO", "PARTNUMBER", "(", ")", "PRODUTO"]
+    for word in bad_words:
+        text = re.sub(word, "", text, flags=re.IGNORECASE)
+    
+    # Remove espaços duplos e traços soltos no início
+    text = re.sub(r'\s+', ' ', text).strip()
+    if text.startswith("-"): text = text[1:].strip()
+    
+    return text
+
 # --- LÓGICA DE EXTRAÇÃO (PARSER) ---
 
 def parse_pdf(pdf_file):
     full_text = ""
-    # Abre o PDF e extrai todo o texto
     with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
             full_text += page.extract_text() or "" + "\n"
@@ -61,43 +72,40 @@ def parse_pdf(pdf_file):
     data["header"]["duimp"] = safe_extract(r"Numero\s*[:\n]*\s*([\dBR]+)", full_text)
 
     # 2. Separação dos Itens
-    # Divide o texto gigante onde encontra "ITENS DA DUIMP" seguido de um número
     raw_itens = re.split(r"ITENS DA DUIMP\s*[-–]?\s*(\d+)", full_text)
 
     if len(raw_itens) > 1:
-        # Pula o índice 0 (texto antes do primeiro item) e itera de 2 em 2
         for i in range(1, len(raw_itens), 2):
             num_item = raw_itens[i]
-            content = raw_itens[i+1] # Texto contendo os dados do item
+            content = raw_itens[i+1]
 
-            # --- AQUI ESTÁ A MÁGICA DA DESCRIÇÃO ---
+            # --- CORREÇÃO DA DESCRIÇÃO ---
             
-            # 1. Captura a Descrição Pura (Texto entre DENOMINACAO e CODIGO INTERNO)
-            desc_pura = safe_extract(r"DENOMINACAO DO PRODUTO\s+(.*?)\s+CÓDIGO INTERNO", content)
+            # 1. Captura a Descrição do Produto
+            desc_pura = safe_extract(r"DENOMINACAO DO PRODUTO\s+(.*?)\s+(?:CÓDIGO|CODIGO)", content)
             desc_pura = clean_text(desc_pura)
 
-            # 2. Captura o Código/PartNumber
-            # Pega tudo entre "PARTNUMBER)" e o próximo campo (geralmente PAIS, FABRICANTE ou CONDICAO)
-            # Isso garante que pegue "25053315 - 30 - 811.62.363" inteiro
-            codigo_partnumber = safe_extract(r"PARTNUMBER\)\s+(.*?)\s+(?:PAIS|FABRICANTE|CONDICAO|VALOR|NCM)", content)
-            codigo_partnumber = clean_text(codigo_partnumber)
+            # 2. Captura o Código (PartNumber) de forma ampla
+            # Captura tudo após "PARTNUMBER)" até o próximo rótulo
+            raw_code = safe_extract(r"(?:PARTNUMBER\)|CÓDIGO INTERNO)\s+(.*?)\s+(?:PAIS|FABRICANTE|CONDICAO|VALOR|NCM|UNIDADE)", content)
+            
+            # 3. LIMPEZA EXTRA: Remove texto "Código interno" se tiver sido capturado
+            codigo_limpo = clean_partnumber(raw_code)
 
-            # 3. Concatena: "CODIGO - DESCRIÇÃO"
-            if codigo_partnumber:
-                descricao_final = f"{codigo_partnumber} - {desc_pura}"
+            # 4. Concatenação: "24980198 - DESCRIÇÃO"
+            if codigo_limpo:
+                descricao_final = f"{codigo_limpo} - {desc_pura}"
             else:
-                descricao_final = desc_pura # Fallback se não achar código
+                descricao_final = desc_pura
 
-            # --- DEMAIS CAMPOS ---
             item = {
                 "numero_adicao": num_item.zfill(3),
-                "descricao": descricao_final, # Usa a descrição composta
+                "descricao": descricao_final,
                 "ncm": safe_extract(r"NCM\s*[:\n]*\s*([\d\.]+)", content).replace(".", "") or "00000000",
                 "quantidade": safe_extract(r"Qtde Unid\. Comercial\s*[:\n]*\s*([\d\.,]+)", content) or "0",
                 "valor_unitario": safe_extract(r"Valor Unit Cond Venda\s*[:\n]*\s*([\d\.,]+)", content) or "0",
                 "valor_total": safe_extract(r"Valor Tot\. Cond Venda\s*[:\n]*\s*([\d\.,]+)", content) or "0",
                 "peso_liquido": safe_extract(r"Peso Líquido \(KG\)\s*[:\n]*\s*([\d\.,]+)", content) or "0",
-                # Impostos
                 "pis": safe_extract(r"PIS.*?Valor Devido.*?([\d\.,]+)", content) or "0",
                 "cofins": safe_extract(r"COFINS.*?Valor Devido.*?([\d\.,]+)", content) or "0",
             }
@@ -112,53 +120,44 @@ def create_xml(data):
     root = ET.Element("ListaDeclaracoes")
     duimp = ET.SubElement(root, "duimp")
 
-    # --- ADIÇÕES ---
     for item in data["itens"]:
         adicao = ET.SubElement(duimp, "adicao")
 
-        # Campos fixos zerados
         ET.SubElement(adicao, "cideValorAliquotaEspecifica").text = "0"*11
         ET.SubElement(adicao, "cideValorDevido").text = "0"*15
         ET.SubElement(adicao, "cideValorRecolher").text = "0"*15
         ET.SubElement(adicao, "codigoRelacaoCompradorVendedor").text = "3"
         ET.SubElement(adicao, "codigoVinculoCompradorVendedor").text = "1"
         
-        # COFINS
         ET.SubElement(adicao, "cofinsAliquotaAdValorem").text = "00965"
         ET.SubElement(adicao, "cofinsAliquotaValorRecolher").text = format_xml_number(item["cofins"], 15)
         
-        # Venda
         ET.SubElement(adicao, "condicaoVendaIncoterm").text = "FCA"
         ET.SubElement(adicao, "condicaoVendaMoedaCodigo").text = "978"
         ET.SubElement(adicao, "condicaoVendaValorMoeda").text = format_xml_number(item["valor_total"], 15)
         
-        # Mercadoria Global
         ET.SubElement(adicao, "dadosMercadoriaAplicacao").text = "REVENDA"
         ET.SubElement(adicao, "dadosMercadoriaCodigoNcm").text = item["ncm"]
         ET.SubElement(adicao, "dadosMercadoriaCondicao").text = "NOVA"
         ET.SubElement(adicao, "dadosMercadoriaPesoLiquido").text = format_xml_number(item["peso_liquido"], 15)
         
-        # --- TAG <mercadoria> COM A DESCRIÇÃO CORRETA ---
+        # --- TAG <mercadoria> COM FORMATO LIMPO ---
         mercadoria = ET.SubElement(adicao, "mercadoria")
-        # Aqui entra "25053315 - 30 - 811.62.363 - CABIDEIRO..."
         ET.SubElement(mercadoria, "descricaoMercadoria").text = item["descricao"]
         ET.SubElement(mercadoria, "numeroSequencialItem").text = item["numero_adicao"][-2:]
         ET.SubElement(mercadoria, "quantidade").text = format_xml_number(item["quantidade"], 14)
         ET.SubElement(mercadoria, "unidadeMedida").text = "UNIDADE"
         ET.SubElement(mercadoria, "valorUnitario").text = format_xml_number(item["valor_unitario"], 20)
         
-        # Identificação
         ET.SubElement(adicao, "numeroAdicao").text = item["numero_adicao"]
-        duimp_limpa = data["header"]["duimp"].replace("25BR", "")[:10]
-        ET.SubElement(adicao, "numeroDUIMP").text = duimp_limpa if duimp_limpa else "0000000000"
+        duimp_clean = data["header"]["duimp"].replace("25BR", "")[:10]
+        ET.SubElement(adicao, "numeroDUIMP").text = duimp_clean if duimp_clean else "0000000000"
         
-        # PIS / Vinculos
         ET.SubElement(adicao, "pisPasepAliquotaAdValorem").text = "00210"
         ET.SubElement(adicao, "pisPasepAliquotaValorRecolher").text = format_xml_number(item["pis"], 15)
         ET.SubElement(adicao, "relacaoCompradorVendedor").text = "Fabricante é desconhecido"
         ET.SubElement(adicao, "vinculoCompradorVendedor").text = "Não há vinculação entre comprador e vendedor."
 
-    # --- DADOS GLOBAIS ---
     ET.SubElement(duimp, "armazenamentoRecintoAduaneiroNome").text = "TCP - TERMINAL DE CONTEINERES DE PARANAGUA S/A"
     ET.SubElement(duimp, "importadorNome").text = data["header"]["importador"]
     ET.SubElement(duimp, "importadorNumero").text = data["header"]["cnpj"]
@@ -171,46 +170,43 @@ def create_xml(data):
 
     return root
 
-# --- APP STREAMLIT ---
+# --- INTERFACE ---
 
 def main():
-    st.set_page_config(page_title="Conversor XML DUIMP - PartNumber", layout="wide")
-    st.title("Conversor DUIMP -> XML (Layout PartNumber)")
-    st.markdown("Gera XML concatenando: **[CÓDIGO INTERNO] - [DESCRIÇÃO]**.")
+    st.set_page_config(page_title="Gerador XML DUIMP (Limpo)", layout="wide")
+    st.title("Gerador de XML DUIMP (Código + Descrição Limpa)")
+    st.markdown("Extrai: **24980198 - DESCRIÇÃO** (Remove 'Código interno')")
 
-    uploaded_file = st.file_uploader("Arraste o PDF aqui", type="pdf")
+    uploaded_file = st.file_uploader("Carregar PDF", type="pdf")
 
     if uploaded_file:
-        if st.button("Processar Arquivo"):
-            with st.spinner("Lendo PDF..."):
+        if st.button("Gerar XML"):
+            with st.spinner("Processando..."):
                 try:
                     data = parse_pdf(uploaded_file)
                     
                     if not data["itens"]:
-                        st.error("Erro: Nenhum item encontrado. Verifique se o PDF é selecionável.")
+                        st.error("Nenhum item encontrado.")
                     else:
-                        # Gera XML
                         xml_root = create_xml(data)
                         xml_str = ET.tostring(xml_root, 'utf-8')
                         parsed = minidom.parseString(xml_str)
                         pretty_xml = parsed.toprettyxml(indent="    ")
 
-                        st.success("Conversão concluída!")
+                        st.success("XML Gerado!")
                         
-                        # Mostra exemplo do Item 1 para validação imediata
-                        st.markdown("### Validação Visual (Primeiro Item)")
-                        st.code(data["itens"][0]["descricao"], language="text")
+                        # Mostra exemplo do Item 1 para validação
+                        if len(data["itens"]) > 0:
+                            st.markdown(f"**Exemplo Item 1:** `{data['itens'][0]['descricao']}`")
                         
-                        # Se houver item 74 (seu exemplo), mostra ele também
+                        # Mostra exemplo do Item 74 (se houver)
                         if len(data["itens"]) >= 74:
-                            st.markdown("### Validação Visual (Item 74)")
-                            # Indice 73 pois começa em 0
-                            st.code(data["itens"][73]["descricao"], language="text")
+                            st.markdown(f"**Exemplo Item 74:** `{data['itens'][73]['descricao']}`")
 
                         st.download_button(
-                            label="📥 Baixar XML Final",
+                            label="📥 Baixar XML",
                             data=pretty_xml,
-                            file_name=f"M-DUIMP-{data['header']['processo']}.xml",
+                            file_name=f"DUIMP_FINAL_{data['header']['processo']}.xml",
                             mime="text/xml"
                         )
                 except Exception as e:
