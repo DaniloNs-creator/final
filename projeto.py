@@ -135,9 +135,9 @@ class PDFProcessor:
         self.data['duimp']['dados_gerais']['dataChegada'] = self.safe_extract(text, chegada_patterns, '14/01/2026')
         
         # Valores
-        vmle_patterns = [r'VALOR NO LOCAL DE EMBARQUE \(VMLE\)[:]?\s*([\d\.,]+)]
-        vmld_patterns = [r'VALOR ADUANEIRO/LOCAL DE DESTINO \(VMLD\)[:]?\s*([\d\.,]+)]
-        frete_patterns = [r'VALOR DO FRETE[:]?\s*([\d\.,]+)]
+        vmle_patterns = [r'VALOR NO LOCAL DE EMBARQUE \(VMLE\)[:]?\s*([\d\.,]+)']
+        vmld_patterns = [r'VALOR ADUANEIRO/LOCAL DE DESTINO \(VMLD\)[:]?\s*([\d\.,]+)']
+        frete_patterns = [r'VALOR DO FRETE[:]?\s*([\d\.,]+)']
         
         self.data['duimp']['dados_gerais']['vmle'] = self.safe_extract(text, vmle_patterns, '34.136,00')
         self.data['duimp']['dados_gerais']['vmld'] = self.safe_extract(text, vmld_patterns, '36.216,82')
