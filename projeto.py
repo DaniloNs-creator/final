@@ -144,8 +144,8 @@ class PDFProcessor:
         self.data['duimp']['dados_gerais']['frete'] = self.safe_extract(text, frete_patterns, '2.000,00')
         
         # Peso
-        peso_bruto_patterns = [r'PESO BRUTO KG[:]?\s*([\d\.,]+)]
-        peso_liquido_patterns = [r'PESO LIQUIDO KG[:]?\s*([\d\.,]+)]
+        peso_bruto_patterns = [r'PESO BRUTO KG[:]?\s*([\d\.,]+)']
+        peso_liquido_patterns = [r'PESO LIQUIDO KG[:]?\s*([\d\.,]+)']
         
         self.data['duimp']['dados_gerais']['pesoBruto'] = self.safe_extract(text, peso_bruto_patterns, '10.070,0000')
         self.data['duimp']['dados_gerais']['pesoLiquido'] = self.safe_extract(text, peso_liquido_patterns, '9.679,0000')
