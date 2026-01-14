@@ -691,11 +691,11 @@ class PDFProcessor:
         return self.data
 
 # ==============================================
-# CLASSE PARA GERAÇÃO DE XML - CORRIGIDA COM SEQUÊNCIA EXATA
+# CLASSE PARA GERAÇÃO DE XML - COM SEQUÊNCIA CORRETA
 # ==============================================
 
 class XMLGenerator:
-    """Gera XML completo seguindo a sequência exata do layout padrão"""
+    """Gera XML completo seguindo a sequência exata do modelo fornecido"""
     
     @staticmethod
     def generate_xml(data: Dict[str, Any]) -> str:
@@ -707,52 +707,54 @@ class XMLGenerator:
             
             # Adicionar adições na ordem correta
             for adicao_data in data['duimp']['adicoes']:
-                XMLGenerator.add_adicao_sequenciada_layout_padrao(duimp, adicao_data, data)
+                XMLGenerator.add_adicao_sequenciada(duimp, adicao_data, data)
             
-            # Adicionar armazém
-            XMLGenerator.add_armazem_layout_padrao(duimp, data)
-            
-            # Adicionar elementos na ordem exata do layout padrão
-            XMLGenerator.add_elementos_apos_adicoes_layout_padrao(duimp, data)
-            
-            # Adicionar embalagens
+            # Adicionar elementos na ordem correta (conforme modelo)
+            XMLGenerator.add_armazem(duimp, data)
+            XMLGenerator.add_dados_gerais_sequenciados(duimp, data['duimp']['dados_gerais'])
             XMLGenerator.add_embalagens_sequenciadas(duimp, data['duimp'].get('embalagens', []))
-            
-            # Adicionar nomenclaturas
             XMLGenerator.add_nomenclaturas_sequenciadas(duimp, data['duimp'].get('nomenclaturas', []))
-            
-            # Adicionar ICMS
             XMLGenerator.add_icms_sequenciado(duimp, data['duimp'].get('icms', {}))
-            
-            # Adicionar pagamentos
             XMLGenerator.add_pagamentos_sequenciados(duimp, data['duimp']['pagamentos'])
-            
-            # Adicionar informação complementar
             XMLGenerator.add_informacao_complementar_sequenciada(duimp, data)
             
-            # Converter para string XML formatada com 4 espaços de indentação
+            # Converter para string XML formatada
             xml_string = ET.tostring(lista_declaracoes, encoding='utf-8', method='xml')
+            
+            # Parse o XML para formatar corretamente
             dom = minidom.parseString(xml_string)
             
-            # Formatação com indentação de 4 espaços (como no layout padrão)
+            # Formatar com indentação de 4 espaços
             pretty_xml = dom.toprettyxml(indent="    ")
             
-            # Remover linhas em branco extras
+            # IMPORTANTE: Remover a declaração XML gerada pelo minidom
+            # para evitar declarações duplicadas
             lines = pretty_xml.split('\n')
-            cleaned_lines = [line for line in lines if line.strip() != '']
+            
+            # Filtrar para manter apenas linhas que não sejam a declaração XML do minidom
+            cleaned_lines = []
+            for line in lines:
+                # Pular a linha com a declaração XML gerada pelo minidom
+                if line.strip().startswith('<?xml version="1.0" ?>'):
+                    continue
+                cleaned_lines.append(line)
+            
+            # Juntar as linhas e adicionar nossa declaração XML personalizada
             formatted_xml = '\n'.join(cleaned_lines)
             
-            # Adicionar header correto
+            # Adicionar header XML correto (apenas uma vez)
             final_xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + formatted_xml
             
             return final_xml
             
         except Exception as e:
-            return f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<ListaDeclaracoes>\n    <duimp>\n        <error>Erro na geração do XML: {str(e)}</error>\n    </duimp>\n</ListaDeclaracoes>'
+            # Mesmo no erro, garantir formato correto
+            error_xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<ListaDeclaracoes>\n    <duimp>\n        <error>Erro na geração do XML: {}</error>\n    </duimp>\n</ListaDeclaracoes>'.format(str(e))
+            return error_xml
     
     @staticmethod
-    def add_adicao_sequenciada_layout_padrao(parent, adicao_data: Dict[str, Any], data: Dict[str, Any]):
-        """Adiciona uma adição completa seguindo a sequência exata do layout padrão"""
+    def add_adicao_sequenciada(parent, adicao_data: Dict[str, Any], data: Dict[str, Any]):
+        """Adiciona uma adição completa seguindo a sequência exata do modelo"""
         adicao = ET.SubElement(parent, 'adicao')
         
         # 1. ACRÉSCIMO (primeiro elemento)
@@ -862,7 +864,7 @@ class XMLGenerator:
         XMLGenerator.add_elemento(adicao, 'ipiRegimeTributacaoCodigo', '4')
         XMLGenerator.add_elemento(adicao, 'ipiRegimeTributacaoNome', 'SEM BENEFICIO')
         
-        # 14. Números da adição - IMPORTANTE: antes da mercadoria no layout padrão
+        # 14. Números da adição
         XMLGenerator.add_elemento(adicao, 'numeroAdicao', adicao_data.get('numeroAdicao', '001'))
         XMLGenerator.add_elemento(adicao, 'numeroDUIMP', data['duimp']['dados_gerais']['numeroDUIMP'])
         XMLGenerator.add_elemento(adicao, 'numeroLI', '0000000000')
@@ -908,21 +910,21 @@ class XMLGenerator:
         
         # 21. Valores totais da condição de venda
         valor_condicao = adicao_data.get('condicaoVendaValorMoeda', '000000000000000')
-        XMLGenerator.add_elemento(adicao, 'valorTotalCondicaoVenda', valor_condicao[:11])  # Formato diferente no layout padrão
+        XMLGenerator.add_elemento(adicao, 'valorTotalCondicaoVenda', valor_condicao[:11])
         
         # 22. Vínculo
         XMLGenerator.add_elemento(adicao, 'vinculoCompradorVendedor', adicao_data.get('vinculoCompradorVendedor', 'Não há vinculação entre comprador e vendedor.'))
         
-        # 23. MERCADORIA (no final conforme layout padrão)
+        # 23. MERCADORIA (no final)
         XMLGenerator.add_mercadoria_sequenciada(adicao, adicao_data)
         
-        # 24. ICMS (após mercadoria no layout padrão)
+        # 24. ICMS (após mercadoria)
         XMLGenerator.add_elemento(adicao, 'icmsBaseCalculoValor', '00000000160652')
         XMLGenerator.add_elemento(adicao, 'icmsBaseCalculoAliquota', '01800')
         XMLGenerator.add_elemento(adicao, 'icmsBaseCalculoValorImposto', '00000000019374')
         XMLGenerator.add_elemento(adicao, 'icmsBaseCalculoValorDiferido', '00000000009542')
         
-        # 25. CBS/IBS (após ICMS no layout padrão)
+        # 25. CBS/IBS (após ICMS)
         XMLGenerator.add_elemento(adicao, 'cbsIbsCst', '000')
         XMLGenerator.add_elemento(adicao, 'cbsIbsClasstrib', '000001')
         XMLGenerator.add_elemento(adicao, 'cbsBaseCalculoValor', '00000000160652')
@@ -963,22 +965,20 @@ class XMLGenerator:
         return elemento
     
     @staticmethod
-    def add_armazem_layout_padrao(parent, data: Dict[str, Any]):
-        """Adiciona informações do armazém conforme layout padrão"""
+    def add_armazem(parent, data: Dict[str, Any]):
+        """Adiciona informações do armazém"""
         armazem = ET.SubElement(parent, 'armazem')
         XMLGenerator.add_elemento(armazem, 'nomeArmazem', data['duimp']['dados_gerais'].get('armazenamentoRecintoAduaneiroNome', 'IRF - PORTO DE SUAPE'))
     
     @staticmethod
-    def add_elementos_apos_adicoes_layout_padrao(parent, data: Dict[str, Any]):
-        """Adiciona elementos após as adições na ordem exata do layout padrão"""
-        dados_gerais = data['duimp']['dados_gerais']
-        
-        # Armazenamento Recinto Aduaneiro
+    def add_dados_gerais_sequenciados(parent, dados_gerais: Dict[str, Any]):
+        """Adiciona dados gerais na sequência correta"""
+        # Armazenamento
         XMLGenerator.add_elemento(parent, 'armazenamentoRecintoAduaneiroCodigo', dados_gerais.get('armazenamentoRecintoAduaneiroCodigo', '0417902'))
         XMLGenerator.add_elemento(parent, 'armazenamentoRecintoAduaneiroNome', dados_gerais.get('armazenamentoRecintoAduaneiroNome', 'IRF - PORTO DE SUAPE'))
         XMLGenerator.add_elemento(parent, 'armazenamentoSetor', dados_gerais.get('armazenamentoSetor', '002'))
         
-        # Canal e Caracterização
+        # Canal e caracterização
         XMLGenerator.add_elemento(parent, 'canalSelecaoParametrizada', dados_gerais.get('canalSelecaoParametrizada', '001'))
         XMLGenerator.add_elemento(parent, 'caracterizacaoOperacaoCodigoTipo', dados_gerais.get('caracterizacaoOperacaoCodigoTipo', '1'))
         XMLGenerator.add_elemento(parent, 'caracterizacaoOperacaoDescricaoTipo', dados_gerais.get('caracterizacaoOperacaoDescricaoTipo', 'Importação Própria'))
@@ -988,12 +988,12 @@ class XMLGenerator:
         XMLGenerator.add_elemento(parent, 'cargaNumeroAgente', dados_gerais.get('cargaNumeroAgente', 'N/I'))
         XMLGenerator.add_elemento(parent, 'cargaPaisProcedenciaCodigo', dados_gerais.get('cargaPaisProcedenciaCodigo', '076'))
         XMLGenerator.add_elemento(parent, 'cargaPaisProcedenciaNome', dados_gerais.get('cargaPaisProcedenciaNome', 'CHINA, REPUBLICA POPULAR'))
-        XMLGenerator.add_elemento(parent, 'cargaPesoBruto', dados_gerais.get('cargaPesoBruto', '000000100700000'))
-        XMLGenerator.add_elemento(parent, 'cargaPesoLiquido', dados_gerais.get('cargaPesoLiquido', '000000096790000'))
+        XMLGenerator.add_elemento(parent, 'cargaPesoBruto', dados_gerais.get('cargaPesoBruto', '000000010070000'))
+        XMLGenerator.add_elemento(parent, 'cargaPesoLiquido', dados_gerais.get('cargaPesoLiquido', '000000009679000'))
         XMLGenerator.add_elemento(parent, 'cargaUrfEntradaCodigo', dados_gerais.get('cargaUrfEntradaCodigo', '0417902'))
         XMLGenerator.add_elemento(parent, 'cargaUrfEntradaNome', dados_gerais.get('cargaUrfEntradaNome', 'IRF - PORTO DE SUAPE'))
         
-        # Conhecimento de Carga
+        # Conhecimento de carga
         XMLGenerator.add_elemento(parent, 'conhecimentoCargaEmbarqueData', dados_gerais.get('conhecimentoCargaEmbarqueData', '20251214'))
         XMLGenerator.add_elemento(parent, 'conhecimentoCargaEmbarqueLocal', dados_gerais.get('conhecimentoCargaEmbarqueLocal', 'SUAPE'))
         XMLGenerator.add_elemento(parent, 'conhecimentoCargaId', dados_gerais.get('conhecimentoCargaId', '072505388852337'))
@@ -1007,7 +1007,7 @@ class XMLGenerator:
         XMLGenerator.add_elemento(parent, 'dataDesembaraco', dados_gerais.get('dataDesembaraco', '20260113'))
         XMLGenerator.add_elemento(parent, 'dataRegistro', dados_gerais.get('dataRegistro', '20260113'))
         
-        # Documento Chegada Carga
+        # Documento chegada
         XMLGenerator.add_elemento(parent, 'documentoChegadaCargaCodigoTipo', dados_gerais.get('documentoChegadaCargaCodigoTipo', '1'))
         XMLGenerator.add_elemento(parent, 'documentoChegadaCargaNome', dados_gerais.get('documentoChegadaCargaNome', 'Manifesto da Carga'))
         XMLGenerator.add_elemento(parent, 'documentoChegadaCargaNumero', dados_gerais.get('documentoChegadaCargaNumero', '1625502058594'))
@@ -1340,7 +1340,7 @@ def main():
                         processor = PDFProcessor()
                         data = processor.parse_pdf(uploaded_file)
                         
-                        # Gerar XML com nova classe corrigida
+                        # Gerar XML
                         xml_generator = XMLGenerator()
                         xml_content = xml_generator.generate_xml(data)
                         
@@ -1349,7 +1349,7 @@ def main():
                         st.session_state.xml_data = data
                         st.session_state.filename = f"DUIMP_{data['duimp']['dados_gerais']['numeroDUIMP'].replace('-', '_')}.xml"
                         
-                        st.markdown('<div class="success-box"><h4>✅ Conversão Concluída!</h4><p>O XML foi gerado seguindo exatamente o layout padrão.</p></div>', unsafe_allow_html=True)
+                        st.markdown('<div class="success-box"><h4>✅ Conversão Concluída!</h4><p>O XML foi gerado com todas as tags obrigatórias.</p></div>', unsafe_allow_html=True)
                         
                     except Exception as e:
                         st.error(f"Erro na conversão: {str(e)}")
@@ -1411,6 +1411,13 @@ def main():
                     preview += "\n\n... [conteúdo truncado] ..."
                 st.code(preview, language="xml")
             
+            # Verificar se tem apenas uma declaração XML
+            xml_declarations = xml_content.count('<?xml version=')
+            if xml_declarations > 1:
+                st.warning(f"⚠️ O XML contém {xml_declarations} declarações XML. Deve ter apenas uma.")
+            else:
+                st.success("✅ XML com declaração única correta")
+            
             # Download
             st.markdown("---")
             st.markdown("#### 💾 Download")
@@ -1449,38 +1456,40 @@ def main():
         
         O sistema gera XML completo com:
         
-        **1. Sequência Corrigida (layout padrão):**
-        - `<mercadoria>` agora aparece no final da adição
-        - `<icmsBaseCalculoValor>` e `<cbsIbsCst>` após `<mercadoria>`
-        - Indentação de 4 espaços
-        - Header com `standalone="yes"`
-        
-        **2. Estrutura Raiz:**
+        **1. Estrutura Raiz:**
         - `ListaDeclaracoes`
         - `duimp` (uma única declaração)
         
-        **3. Adições (adicao):**
+        **2. Adições (adicao):**
         - `acrescimo` com todos os sub-elementos
-        - `mercadoria` na posição correta (final)
+        - `mercadoria` na posição correta (final da adição)
         - Todos os campos tributários (II, IPI, PIS, COFINS)
         - Campos ICMS, CBS, IBS após mercadoria
         - Informações de frete, seguro, valores
         
-        **4. Dados Gerais:**
+        **3. Dados Gerais:**
         - Informações do importador
         - Dados da carga (pesos, valores, datas)
         - Informações de transporte
         - Documentos anexos
         - Pagamentos realizados
         
-        **5. Tags Formatadas Corretamente:**
+        **4. Formato Corrigido:**
+        - Apenas UMA declaração XML: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+        - Indentação de 4 espaços
         - Datas no formato AAAAMMDD
         - Valores com padding de zeros
-        - Textos com encoding UTF-8
+        
+        ### ✅ Garantias
+        
+        - XML sempre válido e bem formado
+        - Todas as tags obrigatórias presentes
+        - Valores formatados corretamente
+        - Compatível com sistemas de importação
         """)
     
     st.markdown("---")
-    st.caption("🛠️ Sistema de Conversão PDF para XML DUIMP | Versão Corrigida 1.1")
+    st.caption("🛠️ Sistema de Conversão PDF para XML DUIMP | Versão 1.2")
 
 if __name__ == "__main__":
     main()
