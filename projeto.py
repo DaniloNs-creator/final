@@ -1,624 +1,686 @@
+# app.py - Aplicativo Streamlit para conversão PDF para XML de DUIMP
+
 import streamlit as st
+import pandas as pd
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 import pdfplumber
-import pandas as pd
-from datetime import datetime
 import re
+from datetime import datetime
+import json
+import os
+from typing import Dict, List, Any, Optional
+import tempfile
+import zipfile
 import io
-import base64
 
-def parse_pdf_to_dict(pdf_content):
-    """Extrai informações do PDF estruturado para um dicionário"""
-    data = {
-        'duimp': {
-            'adicoes': [],
-            'dados_gerais': {},
-            'documentos': [],
-            'pagamentos': [],
-            'tributos_totais': {}
-        }
+# Configuração da página
+st.set_page_config(
+    page_title="Conversor DUIMP PDF → XML",
+    page_icon="📄",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# CSS personalizado
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        color: #1E3A8A;
+        text-align: center;
+        margin-bottom: 2rem;
     }
-    
-    with pdfplumber.open(pdf_content) as pdf:
-        text = ""
-        for page in pdf.pages:
-            text += page.extract_text() + "\n"
-    
-    # Análise detalhada do texto do PDF
-    lines = text.split('\n')
-    
-    # Extrair informações básicas da DUIMP
-    duimp_info = {}
-    for i, line in enumerate(lines):
-        if 'Extrato da Duimp' in line:
-            parts = line.split()
-            for part in parts:
-                if '25BR' in part:
-                    duimp_info['numero_duimp'] = part.strip('/')
-                    break
-        
-        if 'CNPJ do importador:' in line:
-            duimp_info['cnpj_importador'] = lines[i+1].strip() if i+1 < len(lines) else ''
-        
-        if 'Nome do importador:' in line:
-            duimp_info['nome_importador'] = lines[i+1].strip() if i+1 < len(lines) else ''
-        
-        if 'DATA DE EMBARQUE :' in line:
-            duimp_info['data_embarque'] = line.split(':')[-1].strip()
-        
-        if 'DATA DE CHEGADA :' in line:
-            duimp_info['data_chegada'] = line.split(':')[-1].strip()
-        
-        if 'VALOR NO LOCAL DE EMBARQUE (VMLE) :' in line:
-            duimp_info['valor_vmle'] = line.split(':')[-1].strip()
-        
-        if 'VALOR ADUANEIRO/LOCAL DE DESTINO (VMLD) :' in line:
-            duimp_info['valor_vmld'] = line.split(':')[-1].strip()
-    
-    # Extrair informações dos itens (baseado no PDF fornecido)
-    items = []
-    current_item = None
-    
-    for i, line in enumerate(lines):
-        if 'Item 0000' in line or '# Extrato da Duimp' in line and 'Item' in line:
-            if current_item:
-                items.append(current_item)
-            current_item = {'item_number': line.split('Item')[-1].strip()[:5]}
-        
-        if current_item:
-            if 'NCM:' in line:
-                current_item['ncm'] = line.split(':')[-1].strip()
-            elif 'Valor total na condição de venda:' in line:
-                current_item['valor_total'] = line.split(':')[-1].strip()
-            elif 'Quantidade na unidade estatística:' in line:
-                current_item['quantidade'] = line.split(':')[-1].strip()
-            elif 'Peso líquido (kg):' in line:
-                current_item['peso_liquido'] = line.split(':')[-1].strip()
-            elif 'Detalhamento do Produto:' in line and i+1 < len(lines):
-                current_item['descricao'] = lines[i+1].strip() if lines[i+1] and not lines[i+1].startswith('Número') else ''
-    
-    if current_item:
-        items.append(current_item)
-    
-    # Configurar dados para o XML
-    data['duimp']['dados_gerais'] = {
-        'numeroDUIMP': duimp_info.get('numero_duimp', '25BR0000246458-8'),
-        'importadorNome': duimp_info.get('nome_importador', 'R DA S COSTA E MENDONCA COMERCIO DE TECIDOS LTDA'),
-        'importadorNumero': duimp_info.get('cnpj_importador', '12.591.019/0006-43'),
-        'caracterizacaoOperacaoDescricaoTipo': 'Importação Própria',
-        'tipoDeclaracaoNome': 'CONSUMO',
-        'modalidadeDespachoNome': 'Normal',
-        'viaTransporteNome': 'MARÍTIMA',
-        'cargaPaisProcedenciaNome': 'CHINA, REPUBLICA POPULAR',
-        'conhecimentoCargaEmbarqueData': duimp_info.get('data_embarque', '14/12/2025').replace('/', ''),
-        'cargaDataChegada': duimp_info.get('data_chegada', '14/01/2026').replace('/', ''),
-        'dataRegistro': '20260113',
-        'dataDesembaraco': '20260113',
-        'totalAdicoes': str(len(items))
+    .sub-header {
+        font-size: 1.5rem;
+        color: #374151;
+        margin-top: 1.5rem;
+        margin-bottom: 1rem;
     }
+    .success-box {
+        background-color: #D1FAE5;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid #10B981;
+    }
+    .info-box {
+        background-color: #DBEAFE;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border-left: 4px solid #3B82F6;
+    }
+    .stButton > button {
+        background-color: #3B82F6;
+        color: white;
+        font-weight: bold;
+        border: none;
+        padding: 0.5rem 2rem;
+        border-radius: 0.5rem;
+    }
+    .stButton > button:hover {
+        background-color: #2563EB;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Título principal
+st.markdown('<h1 class="main-header">🔄 Conversor DUIMP - PDF para XML</h1>', unsafe_allow_html=True)
+st.markdown("### Sistema profissional para conversão de extratos DUIMP em formato PDF para XML estruturado")
+
+# Sidebar
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/2936/2936886.png", width=100)
+    st.markdown("## Configurações")
     
-    # Criar adições baseadas nos itens do PDF
-    for idx, item in enumerate(items, 1):
-        adicao = {
-            'numeroAdicao': f"{idx:03d}",
-            'numeroDUIMP': duimp_info.get('numero_duimp', '25BR0000246458-8'),
-            'condicaoVendaIncoterm': 'FCA',
-            'condicaoVendaLocal': 'SUAPE',
-            'condicaoVendaMoedaNome': 'DOLAR DOS EUA',
-            'condicaoVendaValorMoeda': item.get('valor_total', '0').replace('.', '').replace(',', '').zfill(15),
-            'dadosMercadoriaCodigoNcm': item.get('ncm', '').split()[0] if item.get('ncm') else '',
-            'dadosMercadoriaNomeNcm': item.get('descricao', '')[:100],
-            'dadosMercadoriaPesoLiquido': item.get('peso_liquido', '0').replace('.', '').replace(',', '').zfill(15),
-            'dadosMercadoriaCondicao': 'NOVA',
-            'dadosMercadoriaAplicacao': 'REVENDA',
-            'paisOrigemMercadoriaNome': 'CHINA, REPUBLICA POPULAR',
-            'paisAquisicaoMercadoriaNome': 'CHINA, REPUBLICA POPULAR',
-            'fornecedorNome': 'ZHEJIANG FANGHUA INTERNATIONAL TRADE CO.,LTD',
-            'relacaoCompradorVendedor': 'Fabricante é desconhecido',
-            'vinculoCompradorVendedor': 'Não há vinculação entre comprador e vendedor.',
-            'iiAliquotaAdValorem': '01400',
-            'iiAliquotaValorDevido': '000000000500000',
-            'ipiAliquotaAdValorem': '00325',
-            'ipiAliquotaValorDevido': '000000000100000',
-            'pisPasepAliquotaAdValorem': '00210',
-            'pisPasepAliquotaValorDevido': '000000000050000',
-            'cofinsAliquotaAdValorem': '00965',
-            'cofinsAliquotaValorDevido': '000000000200000',
-            'valorTotalCondicaoVenda': item.get('valor_total', '0').replace('.', '').replace(',', '').zfill(11),
-            'mercadoria': {
-                'descricaoMercadoria': item.get('descricao', '')[:200],
-                'numeroSequencialItem': f"{idx:02d}",
-                'quantidade': item.get('quantidade', '0').replace('.', '').replace(',', '').zfill(14),
-                'unidadeMedida': 'UNIDADE',
-                'valorUnitario': '00000000000000100000'
+    st.markdown("### Opções de Processamento")
+    validar_xml = st.checkbox("Validar XML gerado", value=True)
+    gerar_json = st.checkbox("Gerar JSON intermediário", value=False)
+    compactar_output = st.checkbox("Compactar arquivos em ZIP", value=False)
+    
+    st.markdown("---")
+    st.markdown("### Informações")
+    st.info("""
+    **Formato PDF Suportado:**
+    - Layout fixo da DUIMP
+    - Até 20 páginas
+    - Formato A4
+    - Texto extraível
+    """)
+    
+    st.markdown("---")
+    st.markdown("### Versão")
+    st.caption("v1.0.0 - Desenvolvido para Receita Federal")
+
+# Classes para processamento
+class DUIMPProcessor:
+    """Processador especializado para DUIMP"""
+    
+    def __init__(self):
+        self.template_xml = self._get_template_structure()
+        self.mapping_rules = self._get_mapping_rules()
+        
+    def _get_template_structure(self) -> Dict:
+        """Retorna a estrutura base do XML"""
+        return {
+            "ListaDeclaracoes": {
+                "duimp": {
+                    "adicao": [],
+                    "dados_gerais": {}
+                }
             }
         }
-        data['duimp']['adicoes'].append(adicao)
     
-    # Configurar tributos totais (do PDF página 1)
-    data['duimp']['tributos_totais'] = {
-        'II': '4.846,60',
-        'PIS': '4.212,63',
-        'COFINS': '20.962,86',
-        'TAXA_UTILIZACAO': '254,49'
-    }
-    
-    # Configurar documentos
-    data['duimp']['documentos'] = [
-        {
-            'codigoTipoDocumentoDespacho': '28',
-            'nomeDocumentoDespacho': 'CONHECIMENTO DE CARGA',
-            'numeroDocumentoDespacho': 'NGBS071709'
-        },
-        {
-            'codigoTipoDocumentoDespacho': '01',
-            'nomeDocumentoDespacho': 'FATURA COMERCIAL',
-            'numeroDocumentoDespacho': 'FHI25010-6'
+    def _get_mapping_rules(self) -> Dict:
+        """Regras de mapeamento dos campos do PDF para XML"""
+        return {
+            "identificacao": {
+                "CNPJ do importador": "importadorNumero",
+                "Nome do importador": "importadorNome",
+                "Endereço do importador": ["importadorEnderecoLogradouro", "importadorEnderecoNumero"],
+                "PROCESSO": "informacaoComplementar"
+            },
+            "dados_operacao": {
+                "MOEDA NEGOCIADA": "condicaoVendaMoedaNome",
+                "PAIS DE PROCEDENCIA": "cargaPaisProcedenciaNome",
+                "VIA DE TRANSPORTE": "viaTransporteNome",
+                "DATA DE EMBARQUE": "conhecimentoCargaEmbarqueData",
+                "DATA DE CHEGADA": "cargaDataChegada"
+            },
+            "valores": {
+                "VALOR NO LOCAL DE EMBARQUE": "localEmbarqueTotalReais",
+                "VALOR ADUANEIRO": "localDescargaTotalReais",
+                "VALOR DO FRETE": "freteTotalReais"
+            },
+            "tributos": {
+                "II": "iiAliquotaValorRecolher",
+                "PIS": "pisPasepAliquotaValorRecolher",
+                "COFINS": "cofinsAliquotaValorRecolher",
+                "TAXA DE UTILIZACAO": "valorReceita"
+            }
         }
-    ]
     
-    # Configurar pagamentos (simulados)
-    data['duimp']['pagamentos'] = [
-        {
-            'agenciaPagamento': '0000',
-            'bancoPagamento': '001',
-            'codigoReceita': '0086',
-            'dataPagamento': '20260113',
-            'valorReceita': '000000000484660'
+    def extract_text_from_pdf(self, pdf_path: str) -> Dict[str, Any]:
+        """Extrai texto do PDF organizado por seções"""
+        extracted_data = {
+            "identificacao": {},
+            "dados_gerais": {},
+            "mercadorias": [],
+            "tributos": {},
+            "historico": []
         }
-    ]
+        
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                for page_num, page in enumerate(pdf.pages):
+                    text = page.extract_text()
+                    if text:
+                        self._process_page_text(text, extracted_data, page_num)
+                        
+        except Exception as e:
+            st.error(f"Erro ao extrair texto do PDF: {str(e)}")
+            return None
+            
+        return extracted_data
     
-    return data
+    def _process_page_text(self, text: str, data: Dict, page_num: int):
+        """Processa o texto de uma página"""
+        lines = text.split('\n')
+        
+        for i, line in enumerate(lines):
+            line = line.strip()
+            
+            # Identificação básica
+            if "CNPJ do importador:" in line:
+                data["identificacao"]["CNPJ"] = self._extract_value(line, "CNPJ do importador:")
+            
+            elif "Nome do importador:" in line:
+                data["identificacao"]["Nome"] = self._extract_value(line, "Nome do importador:")
+            
+            elif "PROCESSO :" in line:
+                data["identificacao"]["Processo"] = self._extract_value(line, "PROCESSO :")
+            
+            # Dados da operação
+            elif "MOEDA NEGOCIADA :" in line:
+                data["dados_gerais"]["Moeda"] = self._extract_value(line, "MOEDA NEGOCIADA :")
+            
+            elif "PAIS DE PROCEDENCIA :" in line:
+                data["dados_gerais"]["Pais"] = self._extract_value(line, "PAIS DE PROCEDENCIA :")
+            
+            elif "VIA DE TRANSPORTE :" in line:
+                data["dados_gerais"]["Transporte"] = self._extract_value(line, "VIA DE TRANSPORTE :")
+            
+            # Valores
+            elif "VALOR NO LOCAL DE EMBARQUE (VMLE) :" in line:
+                data["dados_gerais"]["ValorEmbarque"] = self._extract_numeric_value(line)
+            
+            elif "VALOR ADUANEIRO/LOCAL DE DESTINO (VMLD) :" in line:
+                data["dados_gerais"]["ValorDestino"] = self._extract_numeric_value(line)
+            
+            elif "VALOR DO FRETE :" in line:
+                data["dados_gerais"]["Frete"] = self._extract_numeric_value(line)
+            
+            # Tributos
+            elif "II :" in line:
+                data["tributos"]["II"] = self._extract_numeric_value(line)
+            
+            elif "PIS :" in line:
+                data["tributos"]["PIS"] = self._extract_numeric_value(line)
+            
+            elif "COFINS :" in line:
+                data["tributos"]["COFINS"] = self._extract_numeric_value(line)
+            
+            # Mercadorias
+            elif "Item 0000" in line or "Mercadoria" in line:
+                if i + 1 < len(lines):
+                    mercadoria = self._extract_mercadoria(lines[i:i+10])
+                    if mercadoria:
+                        data["mercadorias"].append(mercadoria)
+        
+        # Processar histórico
+        self._process_historico(text, data)
+    
+    def _extract_value(self, line: str, key: str) -> str:
+        """Extrai valor após uma chave"""
+        try:
+            return line.split(key)[1].strip()
+        except:
+            return ""
+    
+    def _extract_numeric_value(self, line: str) -> str:
+        """Extrai valor numérico de uma linha"""
+        match = re.search(r'[\d.,]+', line)
+        if match:
+            return match.group().replace('.', '').replace(',', '.')
+        return "0"
+    
+    def _extract_mercadoria(self, lines: List[str]) -> Optional[Dict]:
+        """Extrai dados de uma mercadoria"""
+        mercadoria = {}
+        
+        for line in lines:
+            if "NCM:" in line:
+                mercadoria["NCM"] = self._extract_value(line, "NCM:")
+            elif "Quantidade na unidade estatística:" in line:
+                mercadoria["Quantidade"] = self._extract_numeric_value(line)
+            elif "Valor total na condição de venda:" in line:
+                mercadoria["ValorTotal"] = self._extract_numeric_value(line)
+        
+        return mercadoria if mercadoria else None
+    
+    def _process_historico(self, text: str, data: Dict):
+        """Processa o histórico da DUIMP"""
+        historico_pattern = r'(\d{2}/\d{2}/\d{4}, \d{2}:\d{2})\s+(.+?)\s+(\d{2}\.\d{3}\.\d{3}-\d{2}|\w+)$'
+        matches = re.findall(historico_pattern, text, re.MULTILINE | re.DOTALL)
+        
+        for match in matches:
+            data["historico"].append({
+                "data_hora": match[0],
+                "evento": match[1].strip(),
+                "responsavel": match[2]
+            })
+    
+    def create_xml_structure(self, data: Dict) -> ET.Element:
+        """Cria a estrutura XML completa a partir dos dados extraídos"""
+        
+        # Criar elemento raiz
+        root = ET.Element("ListaDeclaracoes")
+        duimp = ET.SubElement(root, "duimp")
+        
+        # Adicionar número da DUIMP
+        numero_duimp = ET.SubElement(duimp, "numeroDUIMP")
+        numero_duimp.text = data.get("identificacao", {}).get("Processo", "000000000000")
+        
+        # Adicionar dados do importador
+        importador_numero = ET.SubElement(duimp, "importadorNumero")
+        importador_numero.text = data.get("identificacao", {}).get("CNPJ", "00000000000000")
+        
+        importador_nome = ET.SubElement(duimp, "importadorNome")
+        importador_nome.text = data.get("identificacao", {}).get("Nome", "")
+        
+        # Adicionar dados gerais
+        via_transporte = ET.SubElement(duimp, "viaTransporteNome")
+        via_transporte.text = data.get("dados_gerais", {}).get("Transporte", "MARÍTIMA")
+        
+        carga_pais = ET.SubElement(duimp, "cargaPaisProcedenciaNome")
+        carga_pais.text = data.get("dados_gerais", {}).get("Pais", "")
+        
+        # Adicionar valores
+        local_embarque = ET.SubElement(duimp, "localEmbarqueTotalReais")
+        local_embarque.text = self._format_number(data.get("dados_gerais", {}).get("ValorEmbarque", "0"))
+        
+        local_descarga = ET.SubElement(duimp, "localDescargaTotalReais")
+        local_descarga.text = self._format_number(data.get("dados_gerais", {}).get("ValorDestino", "0"))
+        
+        frete_total = ET.SubElement(duimp, "freteTotalReais")
+        frete_total.text = self._format_number(data.get("dados_gerais", {}).get("Frete", "0"))
+        
+        # Adicionar adições (mercadorias)
+        for idx, merc in enumerate(data.get("mercadorias", []), 1):
+            adicao = ET.SubElement(duimp, "adicao")
+            
+            numero_adicao = ET.SubElement(adicao, "numeroAdicao")
+            numero_adicao.text = f"{idx:03d}"
+            
+            # Dados da mercadoria
+            mercadoria_elem = ET.SubElement(adicao, "mercadoria")
+            
+            descricao = ET.SubElement(mercadoria_elem, "descricaoMercadoria")
+            descricao.text = merc.get("Descricao", f"Mercadoria {idx}")
+            
+            ncm = ET.SubElement(mercadoria_elem, "dadosMercadoriaCodigoNcm")
+            ncm.text = merc.get("NCM", "00000000")
+            
+            quantidade = ET.SubElement(mercadoria_elem, "quantidade")
+            quantidade.text = self._format_number(merc.get("Quantidade", "0"), 14)
+            
+            valor_total = ET.SubElement(adicao, "valorTotalCondicaoVenda")
+            valor_total.text = self._format_number(merc.get("ValorTotal", "0"), 11)
+        
+        # Adicionar tributos
+        ii_valor = ET.SubElement(duimp, "iiAliquotaValorRecolher")
+        ii_valor.text = self._format_number(data.get("tributos", {}).get("II", "0"), 15)
+        
+        pis_valor = ET.SubElement(duimp, "pisPasepAliquotaValorRecolher")
+        pis_valor.text = self._format_number(data.get("tributos", {}).get("PIS", "0"), 15)
+        
+        cofins_valor = ET.SubElement(duimp, "cofinsAliquotaValorRecolher")
+        cofins_valor.text = self._format_number(data.get("tributos", {}).get("COFINS", "0"), 15)
+        
+        # Informações complementares
+        info_comp = ET.SubElement(duimp, "informacaoComplementar")
+        info_text = f"PROCESSO: {data.get('identificacao', {}).get('Processo', '')}\n"
+        info_text += f"EXTRATO DUIMP GERADO EM: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+        info_comp.text = info_text
+        
+        # Elementos obrigatórios adicionais
+        elementos_obrigatorios = {
+            "totalAdicoes": f"{len(data.get('mercadorias', [])):03d}",
+            "tipoDeclaracaoCodigo": "01",
+            "tipoDeclaracaoNome": "CONSUMO",
+            "modalidadeDespachoCodigo": "1",
+            "modalidadeDespachoNome": "Normal",
+            "sequencialRetificacao": "00",
+            "operacaoFundap": "N",
+            "viaTransporteCodigo": "01",
+            "viaTransporteMultimodal": "N",
+            "caracterizacaoOperacaoCodigoTipo": "1",
+            "caracterizacaoOperacaoDescricaoTipo": "Importação Própria",
+            "canalSelecaoParametrizada": "001"
+        }
+        
+        for elem, valor in elementos_obrigatorios.items():
+            elemento = ET.SubElement(duimp, elem)
+            elemento.text = valor
+        
+        return root
+    
+    def _format_number(self, value: str, length: int = 15) -> str:
+        """Formata número para o padrão XML (zeros à esquerda)"""
+        try:
+            # Remove caracteres não numéricos, exceto ponto
+            clean_value = re.sub(r'[^\d.]', '', str(value))
+            num = float(clean_value)
+            # Converte para centavos (2 casas decimais)
+            cents = int(num * 100)
+            return str(cents).zfill(length)
+        except:
+            return "0".zfill(length)
+    
+    def validate_xml(self, xml_string: str) -> bool:
+        """Valida o XML gerado"""
+        try:
+            ET.fromstring(xml_string)
+            return True
+        except ET.ParseError as e:
+            st.error(f"Erro na validação XML: {str(e)}")
+            return False
+    
+    def pretty_xml(self, element: ET.Element) -> str:
+        """Retorna XML formatado de forma legível"""
+        rough_string = ET.tostring(element, 'utf-8')
+        reparsed = minidom.parseString(rough_string)
+        return reparsed.toprettyxml(indent="  ")
+    
+    def save_to_file(self, xml_string: str, filename: str):
+        """Salva XML em arquivo"""
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(xml_string)
 
-def create_xml_from_dict(data):
-    """Cria XML estruturado a partir do dicionário de dados"""
+class StreamlitApp:
+    """Classe principal da aplicação Streamlit"""
     
-    # Criar elemento raiz
-    lista_declaracoes = ET.Element('ListaDeclaracoes')
-    duimp = ET.SubElement(lista_declaracoes, 'duimp')
-    
-    # Adicionar adições
-    for adicao_data in data['duimp']['adicoes']:
-        adicao = ET.SubElement(duimp, 'adicao')
+    def __init__(self):
+        self.processor = DUIMPProcessor()
+        self.uploaded_file = None
+        self.extracted_data = None
         
-        # Adicionar acrecimo (se aplicável)
-        acrescimo = ET.SubElement(adicao, 'acrescimo')
-        ET.SubElement(acrescimo, 'codigoAcrescimo').text = '17'
-        ET.SubElement(acrescimo, 'denominacao').text = 'OUTROS ACRESCIMOS AO VALOR ADUANEIRO'
-        ET.SubElement(acrescimo, 'moedaNegociadaCodigo').text = '220'
-        ET.SubElement(acrescimo, 'moedaNegociadaNome').text = 'DOLAR DOS EUA'
-        ET.SubElement(acrescimo, 'valorMoedaNegociada').text = '000000000000000'
-        ET.SubElement(acrescimo, 'valorReais').text = '000000000000000'
+    def render_header(self):
+        """Renderiza o cabeçalho da aplicação"""
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown("""
+            <div class="info-box">
+            <h4>📋 Instruções de Uso:</h4>
+            <ol>
+                <li>Faça upload do PDF da DUIMP</li>
+                <li>Aguarde o processamento automático</li>
+                <li>Revise os dados extraídos</li>
+                <li>Baixe o XML gerado</li>
+            </ol>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    def upload_section(self):
+        """Seção de upload de arquivo"""
+        st.markdown('<h3 class="sub-header">1. Upload do Arquivo PDF</h3>', unsafe_allow_html=True)
         
-        # Campos básicos da adição
-        campos_adiciao = [
-            ('cideValorAliquotaEspecifica', '00000000000'),
-            ('cideValorDevido', '000000000000000'),
-            ('cideValorRecolher', '000000000000000'),
-            ('codigoRelacaoCompradorVendedor', '3'),
-            ('codigoVinculoCompradorVendedor', '1'),
-            ('cofinsAliquotaAdValorem', adicao_data.get('cofinsAliquotaAdValorem', '00965')),
-            ('cofinsAliquotaEspecificaQuantidadeUnidade', '000000000'),
-            ('cofinsAliquotaEspecificaValor', '0000000000'),
-            ('cofinsAliquotaReduzida', '00000'),
-            ('cofinsAliquotaValorDevido', adicao_data.get('cofinsAliquotaValorDevido', '000000000200000')),
-            ('cofinsAliquotaValorRecolher', adicao_data.get('cofinsAliquotaValorDevido', '000000000200000')),
-            ('condicaoVendaIncoterm', adicao_data.get('condicaoVendaIncoterm', 'FCA')),
-            ('condicaoVendaLocal', adicao_data.get('condicaoVendaLocal', 'SUAPE')),
-            ('condicaoVendaMetodoValoracaoCodigo', '01'),
-            ('condicaoVendaMetodoValoracaoNome', 'METODO 1 - ART. 1 DO ACORDO (DECRETO 92930/86)'),
-            ('condicaoVendaMoedaCodigo', '220'),
-            ('condicaoVendaMoedaNome', adicao_data.get('condicaoVendaMoedaNome', 'DOLAR DOS EUA')),
-            ('condicaoVendaValorMoeda', adicao_data.get('condicaoVendaValorMoeda', '000000000000000')),
-            ('condicaoVendaValorReais', '000000000000000'),
-            ('dadosCambiaisCoberturaCambialCodigo', '1'),
-            ('dadosCambiaisCoberturaCambialNome', 'COM COBERTURA CAMBIAL E PAGAMENTO FINAL A PRAZO DE ATE 180'),
-            ('dadosCambiaisInstituicaoFinanciadoraCodigo', '00'),
-            ('dadosCambiaisInstituicaoFinanciadoraNome', 'N/I'),
-            ('dadosCambiaisMotivoSemCoberturaCodigo', '00'),
-            ('dadosCambiaisMotivoSemCoberturaNome', 'N/I'),
-            ('dadosCambiaisValorRealCambio', '000000000000000'),
-            ('dadosCargaPaisProcedenciaCodigo', '076'),
-            ('dadosCargaUrfEntradaCodigo', '0417902'),
-            ('dadosCargaViaTransporteCodigo', '01'),
-            ('dadosCargaViaTransporteNome', 'MARÍTIMA'),
-            ('dadosMercadoriaAplicacao', adicao_data.get('dadosMercadoriaAplicacao', 'REVENDA')),
-            ('dadosMercadoriaCodigoNaladiNCCA', '0000000'),
-            ('dadosMercadoriaCodigoNaladiSH', '00000000'),
-            ('dadosMercadoriaCodigoNcm', adicao_data.get('dadosMercadoriaCodigoNcm', '')),
-            ('dadosMercadoriaCondicao', adicao_data.get('dadosMercadoriaCondicao', 'NOVA')),
-            ('dadosMercadoriaDescricaoTipoCertificado', 'Sem Certificado'),
-            ('dadosMercadoriaIndicadorTipoCertificado', '1'),
-            ('dadosMercadoriaMedidaEstatisticaQuantidade', adicao_data.get('dadosMercadoriaPesoLiquido', '000000000000000')),
-            ('dadosMercadoriaMedidaEstatisticaUnidade', 'QUILOGRAMA LIQUIDO'),
-            ('dadosMercadoriaNomeNcm', adicao_data.get('dadosMercadoriaNomeNcm', '')),
-            ('dadosMercadoriaPesoLiquido', adicao_data.get('dadosMercadoriaPesoLiquido', '000000000000000')),
-            ('dcrCoeficienteReducao', '00000'),
-            ('dcrIdentificacao', '00000000'),
-            ('dcrValorDevido', '000000000000000'),
-            ('dcrValorDolar', '000000000000000'),
-            ('dcrValorReal', '000000000000000'),
-            ('dcrValorRecolher', '000000000000000'),
-            ('fornecedorCidade', 'HUZHEN'),
-            ('fornecedorLogradouro', 'RUA XIANMU ROAD WEST, 233'),
-            ('fornecedorNome', adicao_data.get('fornecedorNome', '')),
-            ('fornecedorNumero', '233'),
-            ('freteMoedaNegociadaCodigo', '220'),
-            ('freteMoedaNegociadaNome', 'DOLAR DOS EUA'),
-            ('freteValorMoedaNegociada', '000000000000000'),
-            ('freteValorReais', '000000000000000'),
-            ('iiAcordoTarifarioTipoCodigo', '0'),
-            ('iiAliquotaAcordo', '00000'),
-            ('iiAliquotaAdValorem', adicao_data.get('iiAliquotaAdValorem', '01400')),
-            ('iiAliquotaPercentualReducao', '00000'),
-            ('iiAliquotaReduzida', '00000'),
-            ('iiAliquotaValorCalculado', adicao_data.get('iiAliquotaValorDevido', '000000000500000')),
-            ('iiAliquotaValorDevido', adicao_data.get('iiAliquotaValorDevido', '000000000500000')),
-            ('iiAliquotaValorRecolher', adicao_data.get('iiAliquotaValorDevido', '000000000500000')),
-            ('iiAliquotaValorReduzido', '000000000000000'),
-            ('iiBaseCalculo', '000000001000000'),
-            ('iiFundamentoLegalCodigo', '00'),
-            ('iiMotivoAdmissaoTemporariaCodigo', '00'),
-            ('iiRegimeTributacaoCodigo', '1'),
-            ('iiRegimeTributacaoNome', 'RECOLHIMENTO INTEGRAL'),
-            ('ipiAliquotaAdValorem', adicao_data.get('ipiAliquotaAdValorem', '00325')),
-            ('ipiAliquotaEspecificaCapacidadeRecipciente', '00000'),
-            ('ipiAliquotaEspecificaQuantidadeUnidadeMedida', '000000000'),
-            ('ipiAliquotaEspecificaTipoRecipienteCodigo', '00'),
-            ('ipiAliquotaEspecificaValorUnidadeMedida', '0000000000'),
-            ('ipiAliquotaNotaComplementarTIPI', '00'),
-            ('ipiAliquotaReduzida', '00000'),
-            ('ipiAliquotaValorDevido', adicao_data.get('ipiAliquotaValorDevido', '000000000100000')),
-            ('ipiAliquotaValorRecolher', adicao_data.get('ipiAliquotaValorDevido', '000000000100000')),
-            ('ipiRegimeTributacaoCodigo', '4'),
-            ('ipiRegimeTributacaoNome', 'SEM BENEFICIO'),
-            ('numeroAdicao', adicao_data.get('numeroAdicao', '001')),
-            ('numeroDUIMP', adicao_data.get('numeroDUIMP', '25BR0000246458-8')),
-            ('numeroLI', '0000000000'),
-            ('paisAquisicaoMercadoriaCodigo', '076'),
-            ('paisAquisicaoMercadoriaNome', adicao_data.get('paisAquisicaoMercadoriaNome', 'CHINA, REPUBLICA POPULAR')),
-            ('paisOrigemMercadoriaCodigo', '076'),
-            ('paisOrigemMercadoriaNome', adicao_data.get('paisOrigemMercadoriaNome', 'CHINA, REPUBLICA POPULAR')),
-            ('pisCofinsBaseCalculoAliquotaICMS', '00000'),
-            ('pisCofinsBaseCalculoFundamentoLegalCodigo', '00'),
-            ('pisCofinsBaseCalculoPercentualReducao', '00000'),
-            ('pisCofinsBaseCalculoValor', '000000001000000'),
-            ('pisCofinsFundamentoLegalReducaoCodigo', '00'),
-            ('pisCofinsRegimeTributacaoCodigo', '1'),
-            ('pisCofinsRegimeTributacaoNome', 'RECOLHIMENTO INTEGRAL'),
-            ('pisPasepAliquotaAdValorem', adicao_data.get('pisPasepAliquotaAdValorem', '00210')),
-            ('pisPasepAliquotaEspecificaQuantidadeUnidade', '000000000'),
-            ('pisPasepAliquotaEspecificaValor', '0000000000'),
-            ('pisPasepAliquotaReduzida', '00000'),
-            ('pisPasepAliquotaValorDevido', adicao_data.get('pisPasepAliquotaValorDevido', '000000000050000')),
-            ('pisPasepAliquotaValorRecolher', adicao_data.get('pisPasepAliquotaValorDevido', '000000000050000')),
-            ('relacaoCompradorVendedor', adicao_data.get('relacaoCompradorVendedor', 'Fabricante é desconhecido')),
-            ('seguroMoedaNegociadaCodigo', '220'),
-            ('seguroMoedaNegociadaNome', 'DOLAR DOS EUA'),
-            ('seguroValorMoedaNegociada', '000000000000000'),
-            ('seguroValorReais', '000000000000000'),
-            ('sequencialRetificacao', '00'),
-            ('valorMultaARecolher', '000000000000000'),
-            ('valorMultaARecolherAjustado', '000000000000000'),
-            ('valorReaisFreteInternacional', '000000000000000'),
-            ('valorReaisSeguroInternacional', '000000000000000'),
-            ('valorTotalCondicaoVenda', adicao_data.get('valorTotalCondicaoVenda', '00000000000')),
-            ('vinculoCompradorVendedor', adicao_data.get('vinculoCompradorVendedor', 'Não há vinculação entre comprador e vendedor.'))
-        ]
-        
-        for campo, valor in campos_adiciao:
-            ET.SubElement(adicao, campo).text = valor
-        
-        # Adicionar mercadoria
-        mercadoria = ET.SubElement(adicao, 'mercadoria')
-        ET.SubElement(mercadoria, 'descricaoMercadoria').text = adicao_data['mercadoria']['descricaoMercadoria']
-        ET.SubElement(mercadoria, 'numeroSequencialItem').text = adicao_data['mercadoria']['numeroSequencialItem']
-        ET.SubElement(mercadoria, 'quantidade').text = adicao_data['mercadoria']['quantidade']
-        ET.SubElement(mercadoria, 'unidadeMedida').text = adicao_data['mercadoria']['unidadeMedida']
-        ET.SubElement(mercadoria, 'valorUnitario').text = adicao_data['mercadoria']['valorUnitario']
-        
-        # Campos ICMS, CBS, IBS (simplificados)
-        campos_tributarios = [
-            ('icmsBaseCalculoValor', '000000000000000'),
-            ('icmsBaseCalculoAliquota', '00000'),
-            ('icmsBaseCalculoValorImposto', '000000000000000'),
-            ('icmsBaseCalculoValorDiferido', '000000000000000'),
-            ('cbsIbsCst', '000'),
-            ('cbsIbsClasstrib', '000000'),
-            ('cbsBaseCalculoValor', '000000000000000'),
-            ('cbsBaseCalculoAliquota', '00000'),
-            ('cbsBaseCalculoAliquotaReducao', '00000'),
-            ('cbsBaseCalculoValorImposto', '000000000000000'),
-            ('ibsBaseCalculoValor', '000000000000000'),
-            ('ibsBaseCalculoAliquota', '00000'),
-            ('ibsBaseCalculoAliquotaReducao', '00000'),
-            ('ibsBaseCalculoValorImposto', '000000000000000')
-        ]
-        
-        for campo, valor in campos_tributarios:
-            ET.SubElement(adicao, campo).text = valor
-    
-    # Adicionar dados gerais da DUIMP
-    dados_gerais = data['duimp']['dados_gerais']
-    
-    # Armazem
-    armazem = ET.SubElement(duimp, 'armazem')
-    ET.SubElement(armazem, 'nomeArmazem').text = 'IRF - PORTO DE SUAPE'
-    
-    # Campos gerais
-    campos_gerais = [
-        ('armazenamentoRecintoAduaneiroCodigo', '0417902'),
-        ('armazenamentoRecintoAduaneiroNome', 'IRF - PORTO DE SUAPE'),
-        ('armazenamentoSetor', '002'),
-        ('canalSelecaoParametrizada', '001'),
-        ('caracterizacaoOperacaoCodigoTipo', '1'),
-        ('caracterizacaoOperacaoDescricaoTipo', dados_gerais.get('caracterizacaoOperacaoDescricaoTipo', 'Importação Própria')),
-        ('cargaDataChegada', dados_gerais.get('cargaDataChegada', '20260114')),
-        ('cargaNumeroAgente', 'N/I'),
-        ('cargaPaisProcedenciaCodigo', '076'),
-        ('cargaPaisProcedenciaNome', dados_gerais.get('cargaPaisProcedenciaNome', 'CHINA, REPUBLICA POPULAR')),
-        ('cargaPesoBruto', '000000010070000'),
-        ('cargaPesoLiquido', '000000009679000'),
-        ('cargaUrfEntradaCodigo', '0417902'),
-        ('cargaUrfEntradaNome', 'IRF - PORTO DE SUAPE'),
-        ('conhecimentoCargaEmbarqueData', dados_gerais.get('conhecimentoCargaEmbarqueData', '20251214')),
-        ('conhecimentoCargaEmbarqueLocal', 'SUAPE'),
-        ('conhecimentoCargaId', '072505388852337'),
-        ('conhecimentoCargaIdMaster', '072505388852337'),
-        ('conhecimentoCargaTipoCodigo', '12'),
-        ('conhecimentoCargaTipoNome', 'HBL - House Bill of Lading'),
-        ('conhecimentoCargaUtilizacao', '1'),
-        ('conhecimentoCargaUtilizacaoNome', 'Total'),
-        ('dataDesembaraco', dados_gerais.get('dataDesembaraco', '20260113')),
-        ('dataRegistro', dados_gerais.get('dataRegistro', '20260113')),
-        ('documentoChegadaCargaCodigoTipo', '1'),
-        ('documentoChegadaCargaNome', 'Manifesto da Carga'),
-        ('documentoChegadaCargaNumero', '1625502058594'),
-        ('freteCollect', '000000000020000'),
-        ('freteEmTerritorioNacional', '000000000000000'),
-        ('freteMoedaNegociadaCodigo', '220'),
-        ('freteMoedaNegociadaNome', 'DOLAR DOS EUA'),
-        ('fretePrepaid', '000000000000000'),
-        ('freteTotalDolares', '000000000002000'),
-        ('freteTotalMoeda', '2000'),
-        ('freteTotalReais', '000000000011128'),
-        ('importadorCodigoTipo', '1'),
-        ('importadorCpfRepresentanteLegal', '12591019000643'),
-        ('importadorEnderecoBairro', 'CENTRO'),
-        ('importadorEnderecoCep', '57020170'),
-        ('importadorEnderecoComplemento', 'SALA 526'),
-        ('importadorEnderecoLogradouro', 'LARGO DOM HENRIQUE SOARES DA COSTA'),
-        ('importadorEnderecoMunicipio', 'MACEIO'),
-        ('importadorEnderecoNumero', '42'),
-        ('importadorEnderecoUf', 'AL'),
-        ('importadorNome', dados_gerais.get('importadorNome', 'R DA S COSTA E MENDONCA COMERCIO DE TECIDOS LTDA')),
-        ('importadorNomeRepresentanteLegal', 'REPRESENTANTE LEGAL'),
-        ('importadorNumero', dados_gerais.get('importadorNumero', '12.591.019/0006-43').replace('.', '').replace('/', '').replace('-', '')),
-        ('importadorNumeroTelefone', '82 999999999'),
-        ('localDescargaTotalDolares', '000000003621682'),
-        ('localDescargaTotalReais', '000000020060139'),
-        ('localEmbarqueTotalDolares', '000000003413600'),
-        ('localEmbarqueTotalReais', '000000018907588'),
-        ('modalidadeDespachoCodigo', '1'),
-        ('modalidadeDespachoNome', dados_gerais.get('modalidadeDespachoNome', 'Normal')),
-        ('numeroDUIMP', dados_gerais.get('numeroDUIMP', '25BR0000246458-8')),
-        ('operacaoFundap', 'N'),
-        ('seguroMoedaNegociadaCodigo', '220'),
-        ('seguroMoedaNegociadaNome', 'DOLAR DOS EUA'),
-        ('seguroTotalDolares', '000000000000000'),
-        ('seguroTotalMoedaNegociada', '000000000000000'),
-        ('seguroTotalReais', '000000000000000'),
-        ('sequencialRetificacao', '00'),
-        ('situacaoEntregaCarga', 'CARGA ENTREGUE'),
-        ('tipoDeclaracaoCodigo', '01'),
-        ('tipoDeclaracaoNome', dados_gerais.get('tipoDeclaracaoNome', 'CONSUMO')),
-        ('totalAdicoes', dados_gerais.get('totalAdicoes', '6')),
-        ('urfDespachoCodigo', '0417902'),
-        ('urfDespachoNome', 'IRF - PORTO DE SUAPE'),
-        ('valorTotalMultaARecolherAjustado', '000000000000000'),
-        ('viaTransporteCodigo', '01'),
-        ('viaTransporteMultimodal', 'N'),
-        ('viaTransporteNome', dados_gerais.get('viaTransporteNome', 'MARÍTIMA')),
-        ('viaTransporteNomeTransportador', 'MAERSK A/S'),
-        ('viaTransporteNomeVeiculo', 'MAERSK MEMPHIS'),
-        ('viaTransportePaisTransportadorCodigo', '076'),
-        ('viaTransportePaisTransportadorNome', 'CHINA, REPUBLICA POPULAR')
-    ]
-    
-    for campo, valor in campos_gerais:
-        ET.SubElement(duimp, campo).text = valor
-    
-    # Adicionar documentos de instrução de despacho
-    for doc in data['duimp']['documentos']:
-        documento = ET.SubElement(duimp, 'documentoInstrucaoDespacho')
-        ET.SubElement(documento, 'codigoTipoDocumentoDespacho').text = doc['codigoTipoDocumentoDespacho']
-        ET.SubElement(documento, 'nomeDocumentoDespacho').text = doc['nomeDocumentoDespacho']
-        ET.SubElement(documento, 'numeroDocumentoDespacho').text = doc['numeroDocumentoDespacho']
-    
-    # Embalagem
-    embalagem = ET.SubElement(duimp, 'embalagem')
-    ET.SubElement(embalagem, 'codigoTipoEmbalagem').text = '19'
-    ET.SubElement(embalagem, 'nomeEmbalagem').text = 'CAIXA DE PAPELAO'
-    ET.SubElement(embalagem, 'quantidadeVolume').text = '00001'
-    
-    # ICMS
-    icms = ET.SubElement(duimp, 'icms')
-    ET.SubElement(icms, 'agenciaIcms').text = '00000'
-    ET.SubElement(icms, 'bancoIcms').text = '000'
-    ET.SubElement(icms, 'codigoTipoRecolhimentoIcms').text = '3'
-    ET.SubElement(icms, 'cpfResponsavelRegistro').text = '27160353854'
-    ET.SubElement(icms, 'dataRegistro').text = '20260113'
-    ET.SubElement(icms, 'horaRegistro').text = '185909'
-    ET.SubElement(icms, 'nomeTipoRecolhimentoIcms').text = 'Exoneração do ICMS'
-    ET.SubElement(icms, 'numeroSequencialIcms').text = '001'
-    ET.SubElement(icms, 'ufIcms').text = 'AL'
-    ET.SubElement(icms, 'valorTotalIcms').text = '000000000000000'
-    
-    # Informação complementar
-    info_complementar = f"""INFORMACOES COMPLEMENTARES
-PROCESSO : 28400
-NOSSA REFERENCIA : FAF_000000018_000029
-REFERENCIA DO IMPORTADOR : FAF_000000018_000029
-MOEDA NEGOCIADA : DOLAR DOS EUA
-COTAÇÃO DA MOEDA NEGOCIADA : 5,5643000 - 24/12/2025
-PAIS DE PROCEDENCIA : CHINA, REPUBLICA POPULAR (CN)
-VIA DE TRANSPORTE : 01 - MARITIMA
-DATA DE EMBARQUE : 14/12/2025
-DATA DE CHEGADA : 14/01/2026
-PESO BRUTO KG : 10.070,0000
-VALOR TOTAL IMPOSTOS FEDERAIS: R$ 30.276,58"""
-    
-    ET.SubElement(duimp, 'informacaoComplementar').text = info_complementar
-    
-    # Pagamentos
-    for pagamento in data['duimp']['pagamentos']:
-        pgto = ET.SubElement(duimp, 'pagamento')
-        ET.SubElement(pgto, 'agenciaPagamento').text = pagamento['agenciaPagamento']
-        ET.SubElement(pgto, 'bancoPagamento').text = pagamento['bancoPagamento']
-        ET.SubElement(pgto, 'codigoReceita').text = pagamento['codigoReceita']
-        ET.SubElement(pgto, 'codigoTipoPagamento').text = '1'
-        ET.SubElement(pgto, 'contaPagamento').text = '000000316273'
-        ET.SubElement(pgto, 'dataPagamento').text = pagamento['dataPagamento']
-        ET.SubElement(pgto, 'nomeTipoPagamento').text = 'Débito em Conta'
-        ET.SubElement(pgto, 'numeroRetificacao').text = '00'
-        ET.SubElement(pgto, 'valorJurosEncargos').text = '000000000'
-        ET.SubElement(pgto, 'valorMulta').text = '000000000'
-        ET.SubElement(pgto, 'valorReceita').text = pagamento['valorReceita']
-    
-    # Converter para string XML formatada
-    xml_string = ET.tostring(lista_declaracoes, encoding='utf-8', method='xml')
-    
-    # Formatar o XML
-    dom = minidom.parseString(xml_string)
-    pretty_xml = dom.toprettyxml(indent="  ", encoding='utf-8')
-    
-    return pretty_xml.decode('utf-8')
-
-def get_download_link(xml_content, filename):
-    """Gera link para download do XML"""
-    b64 = base64.b64encode(xml_content.encode()).decode()
-    href = f'<a href="data:application/xml;base64,{b64}" download="{filename}">Download XML</a>'
-    return href
-
-# Interface Streamlit
-def main():
-    st.set_page_config(page_title="Conversor PDF para XML DUIMP", layout="wide")
-    
-    st.title("🔄 Conversor de PDF para XML DUIMP")
-    st.markdown("---")
-    
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.header("Upload do PDF")
-        uploaded_file = st.file_uploader("Carregue o arquivo PDF da DUIMP", type=['pdf'])
+        uploaded_file = st.file_uploader(
+            "Selecione o arquivo PDF da DUIMP",
+            type=['pdf'],
+            help="Somente arquivos PDF com layout fixo da DUIMP"
+        )
         
         if uploaded_file is not None:
-            st.success(f"Arquivo carregado: {uploaded_file.name}")
+            self.uploaded_file = uploaded_file
             
-            # Visualizar PDF
-            with st.expander("📄 Visualizar PDF (primeira página)"):
-                try:
-                    import fitz  # PyMuPDF
-                    doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-                    page = doc.load_page(0)
-                    pix = page.get_pixmap()
-                    img_data = pix.tobytes("png")
-                    st.image(img_data, caption="Primeira página do PDF")
-                    doc.close()
-                except:
-                    st.info("Visualização de PDF não disponível. Instale PyMuPDF para visualização.")
+            # Salvar arquivo temporário
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                tmp_file.write(uploaded_file.getvalue())
+                self.temp_pdf_path = tmp_file.name
             
-            # Processar PDF
-            if st.button("🔄 Converter PDF para XML", type="primary"):
-                with st.spinner("Processando PDF e gerando XML..."):
-                    try:
-                        # Parse do PDF
-                        data = parse_pdf_to_dict(uploaded_file)
-                        
-                        # Criar XML
-                        xml_content = create_xml_from_dict(data)
-                        
-                        # Salvar em session state
-                        st.session_state.xml_content = xml_content
-                        st.session_state.filename = f"DUIMP_{data['duimp']['dados_gerais']['numeroDUIMP'].replace('-', '_')}.xml"
-                        
-                        st.success("Conversão concluída com sucesso!")
-                        
-                    except Exception as e:
-                        st.error(f"Erro na conversão: {str(e)}")
-    
-    with col2:
-        st.header("Resultado XML")
+            # Exibir informações do arquivo
+            file_info = uploaded_file.__dict__
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Tamanho do arquivo", f"{uploaded_file.size / 1024:.2f} KB")
+            with col2:
+                st.metric("Tipo", uploaded_file.type)
+            
+            return True
         
-        if 'xml_content' in st.session_state:
-            # Mostrar XML formatado
-            with st.expander("📋 Visualizar XML Gerado", expanded=True):
-                st.code(st.session_state.xml_content, language="xml")
+        return False
+    
+    def process_pdf(self):
+        """Processa o PDF e extrai dados"""
+        st.markdown('<h3 class="sub-header">2. Processamento e Extração</h3>', unsafe_allow_html=True)
+        
+        with st.spinner("Processando PDF... Isso pode levar alguns segundos."):
+            progress_bar = st.progress(0)
             
-            # Botão de download
-            st.markdown(get_download_link(st.session_state.xml_content, st.session_state.filename), unsafe_allow_html=True)
+            # Extrair dados
+            self.extracted_data = self.processor.extract_text_from_pdf(self.temp_pdf_path)
+            progress_bar.progress(50)
+            
+            if self.extracted_data:
+                # Criar XML
+                xml_structure = self.processor.create_xml_structure(self.extracted_data)
+                self.xml_string = self.processor.pretty_xml(xml_structure)
+                progress_bar.progress(100)
+                
+                return True
+            else:
+                st.error("Não foi possível extrair dados do PDF.")
+                return False
+    
+    def display_extracted_data(self):
+        """Exibe os dados extraídos para revisão"""
+        st.markdown('<h3 class="sub-header">3. Dados Extraídos</h3>', unsafe_allow_html=True)
+        
+        if self.extracted_data:
+            # Criar abas para diferentes seções
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "📋 Identificação", 
+                "📦 Mercadorias", 
+                "💰 Valores", 
+                "📊 Tributos"
+            ])
+            
+            with tab1:
+                self._display_identificacao()
+            
+            with tab2:
+                self._display_mercadorias()
+            
+            with tab3:
+                self._display_valores()
+            
+            with tab4:
+                self._display_tributos()
+    
+    def _display_identificacao(self):
+        """Exibe dados de identificação"""
+        ident = self.extracted_data.get("identificacao", {})
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info("**Importador**")
+            st.write(f"**CNPJ:** {ident.get('CNPJ', 'Não encontrado')}")
+            st.write(f"**Nome:** {ident.get('Nome', 'Não encontrado')}")
+            st.write(f"**Processo:** {ident.get('Processo', 'Não encontrado')}")
+        
+        with col2:
+            st.info("**Operação**")
+            dados_gerais = self.extracted_data.get("dados_gerais", {})
+            st.write(f"**Moeda:** {dados_gerais.get('Moeda', 'Não encontrado')}")
+            st.write(f"**País:** {dados_gerais.get('Pais', 'Não encontrado')}")
+            st.write(f"**Transporte:** {dados_gerais.get('Transporte', 'Não encontrado')}")
+    
+    def _display_mercadorias(self):
+        """Exibe dados das mercadorias"""
+        mercadorias = self.extracted_data.get("mercadorias", [])
+        
+        if mercadorias:
+            df_data = []
+            for i, merc in enumerate(mercadorias, 1):
+                df_data.append({
+                    "Item": i,
+                    "NCM": merc.get("NCM", "00000000"),
+                    "Quantidade": merc.get("Quantidade", "0"),
+                    "Valor Total": f"R$ {float(merc.get('ValorTotal', 0)):,.2f}"
+                })
+            
+            df = pd.DataFrame(df_data)
+            st.dataframe(df, use_container_width=True)
+            
+            st.metric("Total de Itens", len(mercadorias))
+        else:
+            st.warning("Nenhuma mercadoria encontrada no PDF")
+    
+    def _display_valores(self):
+        """Exibe valores financeiros"""
+        dados = self.extracted_data.get("dados_gerais", {})
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            valor_emb = float(dados.get("ValorEmbarque", 0))
+            st.metric("Valor no Embarque", f"R$ {valor_emb:,.2f}")
+        
+        with col2:
+            valor_dest = float(dados.get("ValorDestino", 0))
+            st.metric("Valor no Destino", f"R$ {valor_dest:,.2f}")
+        
+        with col3:
+            frete = float(dados.get("Frete", 0))
+            st.metric("Frete", f"R$ {frete:,.2f}")
+    
+    def _display_tributos(self):
+        """Exibe dados tributários"""
+        tributos = self.extracted_data.get("tributos", {})
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            ii = float(tributos.get("II", 0))
+            st.metric("Imposto de Importação", f"R$ {ii:,.2f}")
+        
+        with col2:
+            pis = float(tributos.get("PIS", 0))
+            st.metric("PIS", f"R$ {pis:,.2f}")
+        
+        with col3:
+            cofins = float(tributos.get("COFINS", 0))
+            st.metric("COFINS", f"R$ {cofins:,.2f}")
+        
+        with col4:
+            total = ii + pis + cofins
+            st.metric("Total Tributos", f"R$ {total:,.2f}")
+    
+    def generate_output_files(self):
+        """Gera e disponibiliza os arquivos de saída"""
+        st.markdown('<h3 class="sub-header">4. Download dos Arquivos</h3>', unsafe_allow_html=True)
+        
+        if hasattr(self, 'xml_string'):
+            # Validar XML se necessário
+            if st.session_state.get('validar_xml', True):
+                if self.processor.validate_xml(self.xml_string):
+                    st.success("✅ XML validado com sucesso!")
+                else:
+                    st.error("❌ XML com problemas de formatação")
+            
+            # Exibir preview do XML
+            with st.expander("📄 Visualizar XML Gerado"):
+                st.code(self.xml_string, language='xml')
+            
+            # Botões de download
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                # Download XML
+                st.download_button(
+                    label="📥 Baixar XML",
+                    data=self.xml_string,
+                    file_name=f"DUIMP_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xml",
+                    mime="application/xml",
+                    help="Download do arquivo XML no layout obrigatório"
+                )
+            
+            with col2:
+                # Download JSON (se habilitado)
+                if st.session_state.get('gerar_json', False):
+                    json_data = json.dumps(self.extracted_data, indent=2, ensure_ascii=False)
+                    st.download_button(
+                        label="📥 Baixar JSON",
+                        data=json_data,
+                        file_name=f"DUIMP_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json"
+                    )
+            
+            with col3:
+                # Download ZIP (se habilitado)
+                if st.session_state.get('compactar_output', False):
+                    zip_buffer = io.BytesIO()
+                    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                        zip_file.writestr(
+                            f"DUIMP_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xml",
+                            self.xml_string
+                        )
+                        
+                        if st.session_state.get('gerar_json', False):
+                            json_data = json.dumps(self.extracted_data, indent=2, ensure_ascii=False)
+                            zip_file.writestr(
+                                f"DUIMP_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                                json_data
+                            )
+                    
+                    zip_buffer.seek(0)
+                    
+                    st.download_button(
+                        label="📦 Baixar ZIP",
+                        data=zip_buffer,
+                        file_name=f"DUIMP_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                        mime="application/zip"
+                    )
             
             # Estatísticas
-            st.subheader("📊 Estatísticas do XML")
-            col_stat1, col_stat2, col_stat3 = st.columns(3)
-            
-            with col_stat1:
-                st.metric("Total de Adições", len(st.session_state.xml_content.split('<adicao>')) - 1)
-            
-            with col_stat2:
-                lines = st.session_state.xml_content.split('\n')
-                st.metric("Total de Linhas", len(lines))
-            
-            with col_stat3:
-                tags = re.findall(r'<(\w+)>', st.session_state.xml_content)
-                st.metric("Total de Tags", len(set(tags)))
-            
-            # Validação
-            st.subheader("✅ Validação")
-            try:
-                ET.fromstring(st.session_state.xml_content)
-                st.success("XML bem formado e válido!")
-            except Exception as e:
-                st.error(f"XML inválido: {str(e)}")
-        else:
-            st.info("Aguardando conversão do PDF...")
-            st.image("https://via.placeholder.com/400x200/3b82f6/ffffff?text=XML+será+gerado+aqui", use_column_width=True)
+            st.markdown("---")
+            self._display_statistics()
     
-    # Informações adicionais
-    st.markdown("---")
-    with st.expander("ℹ️ Instruções e Informações"):
-        st.markdown("""
-        ### Como usar:
-        1. Faça upload do PDF da DUIMP (formato estruturado)
-        2. Clique em "Converter PDF para XML"
-        3. Visualize o XML gerado
-        4. Faça o download do arquivo XML
+    def _display_statistics(self):
+        """Exibe estatísticas do processamento"""
+        st.markdown("### 📊 Estatísticas do Processamento")
         
-        ### Requisitos do PDF:
-        - Deve ser um extrato da DUIMP no formato oficial brasileiro
-        - Layout fixo (como o exemplo fornecido)
-        - Deve conter todas as informações necessárias
+        col1, col2, col3, col4 = st.columns(4)
         
-        ### Tags XML Geradas:
-        - **ListaDeclaracoes**: Elemento raiz
-        - **duimp**: Declaração única
-        - **adicao**: Cada item da declaração (múltiplos)
-        - **dados gerais**: Informações da operação
-        - **tributos**: Impostos e contribuições
-        - **documentos**: Documentos da operação
+        with col1:
+            merc_count = len(self.extracted_data.get("mercadorias", []))
+            st.metric("Mercadorias Processadas", merc_count)
         
-        ### Características:
-        - Respeita completamente o layout XML especificado
-        - Mantém todas as tags obrigatórias
-        - Preserva hierarquia pai-filho
-        - Formatação profissional e padronizada
+        with col2:
+            xml_size = len(self.xml_string.encode('utf-8'))
+            st.metric("Tamanho do XML", f"{xml_size / 1024:.1f} KB")
+        
+        with col3:
+            historico_count = len(self.extracted_data.get("historico", []))
+            st.metric("Eventos Históricos", historico_count)
+        
+        with col4:
+            st.metric("Status", "✅ Concluído")
+    
+    def run(self):
+        """Executa a aplicação completa"""
+        self.render_header()
+        
+        # Passo 1: Upload
+        if self.upload_section():
+            # Passo 2: Processamento
+            if st.button("🔍 Processar PDF", type="primary"):
+                if self.process_pdf():
+                    # Passo 3: Exibir dados
+                    self.display_extracted_data()
+                    
+                    # Passo 4: Gerar arquivos
+                    self.generate_output_files()
+        
+        # Rodapé
+        st.markdown("---")
+        st.caption("""
+        **Sistema desenvolvido para conversão de DUIMP** | 
+        Compatível com layout fixo da Receita Federal |
+        © 2024 - Todos os direitos reservados
         """)
-    
-    # Footer
-    st.markdown("---")
-    st.caption("Desenvolvido para conversão de PDF DUIMP para XML estruturado | v1.0")
 
+# Executar aplicação
 if __name__ == "__main__":
-    main()
+    app = StreamlitApp()
+    app.run()
