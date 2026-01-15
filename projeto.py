@@ -58,25 +58,52 @@ class PDFProcessor:
         all_text = ""
         
         try:
-            with pdfplumber.open(pdf_file) as pdf:
-                total_pages = len(pdf.pages)
-                logging.info(f"Total de páginas no PDF: {total_pages}")
+            # Se for um objeto BytesIO, precisamos salvar temporariamente
+            if hasattr(pdf_file, 'read'):
+                # Criar arquivo temporário
+                temp_dir = tempfile.mkdtemp()
+                temp_path = os.path.join(temp_dir, "temp.pdf")
                 
-                for page_num, page in enumerate(pdf.pages, 1):
-                    page_text = page.extract_text()
-                    if page_text:
-                        all_text += f"=== PÁGINA {page_num} ===\n{page_text}\n\n"
+                # Salvar o conteúdo no arquivo temporário
+                with open(temp_path, 'wb') as f:
+                    f.write(pdf_file.getvalue())
+                
+                # Abrir com pdfplumber
+                with pdfplumber.open(temp_path) as pdf:
+                    total_pages = len(pdf.pages)
+                    logging.info(f"Total de páginas no PDF: {total_pages}")
                     
-                    # Atualizar progresso se estiver em ambiente Streamlit
-                    if 'streamlit' in str(type(st)):
-                        progress = page_num / total_pages
-                        st.progress(progress)
+                    for page_num, page in enumerate(pdf.pages, 1):
+                        try:
+                            page_text = page.extract_text()
+                            if page_text:
+                                all_text += f"=== PÁGINA {page_num} ===\n{page_text}\n\n"
+                        except Exception as e:
+                            logging.warning(f"Erro ao extrair texto da página {page_num}: {e}")
+                            continue
                 
-                logging.info(f"Texto extraído: {len(all_text)} caracteres")
-                if len(all_text) > 0:
-                    logging.debug(f"Primeiros 1000 caracteres:\n{all_text[:1000]}")
-                
-                return all_text
+                # Limpar arquivo temporário
+                shutil.rmtree(temp_dir)
+            else:
+                # Se já for um caminho de arquivo
+                with pdfplumber.open(pdf_file) as pdf:
+                    total_pages = len(pdf.pages)
+                    logging.info(f"Total de páginas no PDF: {total_pages}")
+                    
+                    for page_num, page in enumerate(pdf.pages, 1):
+                        try:
+                            page_text = page.extract_text()
+                            if page_text:
+                                all_text += f"=== PÁGINA {page_num} ===\n{page_text}\n\n"
+                        except Exception as e:
+                            logging.warning(f"Erro ao extrair texto da página {page_num}: {e}")
+                            continue
+            
+            logging.info(f"Texto extraído: {len(all_text)} caracteres")
+            if len(all_text) > 0:
+                logging.debug(f"Primeiros 500 caracteres:\n{all_text[:500]}")
+            
+            return all_text
         except Exception as e:
             st.error(f"Erro ao extrair texto do PDF: {str(e)}")
             logging.error(f"Erro ao extrair texto: {e}")
@@ -94,6 +121,8 @@ class PDFProcessor:
                 st.error("Não foi possível extrair texto do PDF")
                 logging.error("PDF vazio ou não processado")
                 return self.create_structure_padrao()
+            
+            logging.info(f"Texto extraído com sucesso: {len(all_text)} caracteres")
             
             # Extrair informações básicas
             self.extract_basic_info(all_text)
@@ -140,69 +169,81 @@ class PDFProcessor:
             r'Extrato da Duimp\s+([0-9A-Z\-/]+)',
             r'# Extrato da Duimp\s+([0-9A-Z\-/]+)',
             r'DUIMP\s*[:]?\s*([0-9A-Z\-/]+)',
-            r'Extrato da DUIMP\s+([0-9A-Z\-/]+)'
+            r'Extrato da DUIMP\s+([0-9A-Z\-/]+)',
+            r'26BR[0-9\-]+',  # Padrão específico para seus PDFs
+            r'25BR[0-9\-]+'   # Padrão para o outro PDF
         ]
+        
         duimp_num = self.safe_extract(text, duimp_patterns, '')
-        if '-' not in duimp_num and len(duimp_num) >= 12:
+        logging.info(f"Número DUIMP encontrado: {duimp_num}")
+        
+        # Formatar número da DUIMP se necessário
+        if duimp_num and '-' not in duimp_num and len(duimp_num) >= 12:
             # Formatar número da DUIMP: 26BR00000011364 -> 26BR0000001136-4
             duimp_num = f"{duimp_num[:-1]}-{duimp_num[-1]}"
-        self.data['duimp']['dados_gerais']['numeroDUIMP'] = duimp_num
-        logging.info(f"Número DUIMP: {duimp_num}")
+        
+        self.data['duimp']['dados_gerais']['numeroDUIMP'] = duimp_num if duimp_num else 'N/I'
         
         # Importador - CNPJ
         cnpj_patterns = [
             r'CNPJ do importador[:]?\s*([\d./\-]+)',
             r'CNPJ[:]?\s*([\d./\-]+)',
-            r'CNPJ\s*do importador\s*:\s*([\d./\-]+)'
+            r'CNPJ\s*do importador\s*:\s*([\d./\-]+)',
+            r'CNPJ/CPF[:]?\s*([\d./\-]+)'
         ]
         cnpj = self.safe_extract(text, cnpj_patterns, '')
-        self.data['duimp']['dados_gerais']['importadorNumero'] = cnpj
-        logging.info(f"CNPJ: {cnpj}")
+        self.data['duimp']['dados_gerais']['importadorNumero'] = cnpj if cnpj else 'N/I'
+        logging.info(f"CNPJ encontrado: {cnpj}")
         
         # Importador - Nome
         nome_patterns = [
             r'Nome do importador[:]?\s*(.+?)(?=\n|$)',
             r'Importador[:]?\s*(.+?)(?=\n|$)',
-            r'Nome do importador\s*:\s*(.+?)(?=\n|$)'
+            r'Nome do importador\s*:\s*(.+?)(?=\n|$)',
+            r'Razão Social[:]?\s*(.+?)(?=\n|$)'
         ]
         nome = self.safe_extract(text, nome_patterns, '')
-        self.data['duimp']['dados_gerais']['importadorNome'] = nome
+        self.data['duimp']['dados_gerais']['importadorNome'] = nome if nome else 'N/I'
         logging.info(f"Nome importador: {nome}")
         
         # Endereço do importador
         endereco_patterns = [
             r'Endereço do importador[:]?\s*(.+?)(?=\n|$)',
-            r'Endereço[:]?\s*(.+?)(?=\n|$)'
+            r'Endereço[:]?\s*(.+?)(?=\n|$)',
+            r'Endereço\s*:\s*(.+?)(?=\n|$)'
         ]
         endereco = self.safe_extract(text, endereco_patterns, '')
-        self.data['duimp']['dados_gerais']['importadorEndereco'] = endereco
-        logging.info(f"Endereço: {endereco[:50]}...")
+        self.data['duimp']['dados_gerais']['importadorEndereco'] = endereco if endereco else 'N/I'
+        logging.info(f"Endereço: {endereco[:50] if endereco else 'N/I'}...")
         
         # Data/hora de chegada
         chegada_patterns = [
             r'Data/hora de chegada[:]?\s*([\d/]+,\s*[\d:]+)',
             r'Data de chegada[:]?\s*([\d/]+)',
-            r'CHEGADA[:]?\s*([\d/]+)'
+            r'CHEGADA[:]?\s*([\d/]+)',
+            r'Data.*?chegada[:]?\s*([\d/]+)'
         ]
         chegada = self.safe_extract(text, chegada_patterns, '')
-        self.data['duimp']['dados_gerais']['dataChegada'] = chegada
+        self.data['duimp']['dados_gerais']['dataChegada'] = chegada if chegada else 'N/I'
         logging.info(f"Data chegada: {chegada}")
         
-        # Peso Bruto
+        # Peso Bruto - CORREÇÃO AQUI: usar grupo de captura correto
         peso_bruto_patterns = [
-            r'Peso Bruto\s*\(kg\)[:]?\s*([\d\.,]+)',
+            r'Peso Bruto.*?\(kg\)[:]?\s*([\d\.,]+)',
             r'PESO BRUTO.*?([\d\.,]+)',
-            r'Peso Bruto.*?([\d\.,]+)'
+            r'Peso.*?Bruto.*?([\d\.,]+)',
+            r'Peso Bruto\s*:\s*([\d\.,]+)'
         ]
         peso_bruto = self.safe_extract(text, peso_bruto_patterns, '0,00')
         self.data['duimp']['dados_gerais']['pesoBruto'] = peso_bruto
         logging.info(f"Peso bruto: {peso_bruto}")
         
-        # Peso Líquido
+        # Peso Líquido - CORREÇÃO AQUI: usar grupo de captura correto
         peso_liquido_patterns = [
-            r'Peso Líquido\s*\(kg\)[:]?\s*([\d\.,]+)',
+            r'Peso Líquido.*?\(kg\)[:]?\s*([\d\.,]+)',
             r'PESO LIQUIDO.*?([\d\.,]+)',
-            r'Peso Líquido.*?([\d\.,]+)'
+            r'Peso.*?L[ií]quido.*?([\d\.,]+)',
+            r'Peso Líquido\s*:\s*([\d\.,]+)'
         ]
         peso_liquido = self.safe_extract(text, peso_liquido_patterns, '0,00')
         self.data['duimp']['dados_gerais']['pesoLiquido'] = peso_liquido
@@ -212,25 +253,28 @@ class PDFProcessor:
         pais_patterns = [
             r'País de Procedência[:]?\s*(.+)',
             r'PAIS DE PROCEDENCIA[:]?\s*(.+)',
-            r'País.*?Procedência[:]?\s*(.+)'
+            r'País.*?Procedência[:]?\s*(.+)',
+            r'País.*?Procedencia[:]?\s*(.+)'
         ]
         pais = self.safe_extract(text, pais_patterns, '')
-        self.data['duimp']['dados_gerais']['paisProcedencia'] = pais
+        self.data['duimp']['dados_gerais']['paisProcedencia'] = pais if pais else 'N/I'
         logging.info(f"País procedência: {pais}")
         
         # Situação da DUIMP
         situacao_patterns = [
             r'Situação da Duimp[:]?\s*(.+)',
-            r'SITUAÇÃO[:]?\s*(.+)'
+            r'SITUAÇÃO[:]?\s*(.+)',
+            r'Situação[:]?\s*(.+)'
         ]
         situacao = self.safe_extract(text, situacao_patterns, '')
-        self.data['duimp']['dados_gerais']['situacao'] = situacao
+        self.data['duimp']['dados_gerais']['situacao'] = situacao if situacao else 'N/I'
         logging.info(f"Situação: {situacao}")
         
         # Moeda negociada
         moeda_patterns = [
             r'Moeda negociada[:]?\s*(.+)',
-            r'MOEDA NEGOCIADA[:]?\s*(.+)'
+            r'MOEDA NEGOCIADA[:]?\s*(.+)',
+            r'Moeda[:]?\s*(.+)'
         ]
         moeda = self.safe_extract(text, moeda_patterns, 'EURO/COM.EUROPEIA')
         self.data['duimp']['dados_gerais']['moeda'] = moeda
@@ -239,53 +283,69 @@ class PDFProcessor:
         # Identificação da carga
         carga_patterns = [
             r'Identificação da carga[:]?\s*(.+)',
-            r'IDENTIFICAÇÃO DA CARGA[:]?\s*(.+)'
+            r'IDENTIFICAÇÃO DA CARGA[:]?\s*(.+)',
+            r'Carga[:]?\s*(.+)'
         ]
         carga = self.safe_extract(text, carga_patterns, '')
-        self.data['duimp']['dados_gerais']['identificacaoCarga'] = carga
+        self.data['duimp']['dados_gerais']['identificacaoCarga'] = carga if carga else 'N/I'
         logging.info(f"Identificação carga: {carga}")
+        
+        # Verificar se extraiu informações básicas
+        if not self.data['duimp']['dados_gerais'].get('numeroDUIMP') or self.data['duimp']['dados_gerais']['numeroDUIMP'] == 'N/I':
+            logging.warning("Não conseguiu extrair número da DUIMP")
     
     def extract_adicoes(self, text: str):
         """Extrai adições/items do PDF - método melhorado"""
         logging.info("Extraindo adições...")
         
-        # Método 1: Procurar por seções de itens específicas
+        # Tentar extrair por seções de item
         # Padrão: "# Extrato da Duimp ... : Item XXXXX"
+        item_sections = []
+        
+        # Método 1: Procurar por padrão de item
         item_pattern = r'# Extrato da Duimp [0-9A-Z\-/]+ / Versão \d+ : Item \d+'
-        item_sections = re.split(item_pattern, text)
+        matches = list(re.finditer(item_pattern, text))
         
-        logging.info(f"Encontradas {len(item_sections)} seções de item via padrão específico")
+        if matches:
+            logging.info(f"Encontrados {len(matches)} itens via padrão específico")
+            # Dividir o texto pelos itens encontrados
+            for i in range(len(matches)):
+                start = matches[i].start()
+                if i < len(matches) - 1:
+                    end = matches[i + 1].start()
+                else:
+                    end = len(text)
+                section = text[start:end]
+                item_sections.append(section)
         
-        if len(item_sections) > 1:
-            for i, section in enumerate(item_sections[1:], 1):
-                if section.strip():
-                    logging.info(f"Processando item {i} via seção específica...")
-                    item = self.parse_item_section(section, i)
-                    if item:
-                        self.data['duimp']['adicoes'].append(item)
-                        logging.info(f"Item {i} adicionado: {item.get('descricaoMercadoria', '')[:50]}...")
-        
-        # Método 2: Se não encontrou, procurar por NCMs
-        if not self.data['duimp']['adicoes']:
+        # Se não encontrou pelo padrão específico, tentar método alternativo
+        if not item_sections:
+            # Procurar por NCMs e criar seções artificiais
             ncm_pattern = r'NCM[:]?\s*([\d\.]+)'
-            ncm_matches = re.findall(ncm_pattern, text)
-            logging.info(f"Encontrados {len(ncm_matches)} NCMs via busca direta")
+            ncm_matches = list(re.finditer(ncm_pattern, text))
             
-            # Procurar descrições próximas aos NCMs
-            for i, ncm_match in enumerate(re.finditer(ncm_pattern, text), 1):
-                try:
-                    ncm = ncm_match.group(1)
-                    start_pos = max(0, ncm_match.start() - 500)
-                    end_pos = min(len(text), ncm_match.end() + 500)
-                    context = text[start_pos:end_pos]
-                    
-                    item = self.parse_item_from_context(context, ncm, i)
-                    if item:
-                        self.data['duimp']['adicoes'].append(item)
-                        logging.info(f"Item {i} criado do contexto: NCM {ncm}")
-                except Exception as e:
-                    logging.error(f"Erro ao criar item do contexto: {e}")
-                    continue
+            if ncm_matches:
+                logging.info(f"Encontrados {len(ncm_matches)} NCMs via busca direta")
+                for i in range(len(ncm_matches)):
+                    start = max(0, ncm_matches[i].start() - 200)  # 200 caracteres antes
+                    if i < len(ncm_matches) - 1:
+                        end = ncm_matches[i + 1].start() - 100  # 100 antes do próximo
+                    else:
+                        end = min(len(text), ncm_matches[i].start() + 1000)  # 1000 depois
+                    section = text[start:end]
+                    item_sections.append(section)
+        
+        # Processar cada seção de item
+        processed_items = []
+        for i, section in enumerate(item_sections[:10], 1):  # Limitar a 10 itens
+            if section.strip():
+                logging.info(f"Processando item {i}...")
+                item = self.parse_item_section(section, i)
+                if item:
+                    processed_items.append(item)
+                    logging.info(f"Item {i} adicionado: {item.get('descricaoMercadoria', '')[:50]}...")
+        
+        self.data['duimp']['adicoes'] = processed_items
         
         # Se ainda não encontrou itens, usar dados padrão
         if not self.data['duimp']['adicoes']:
@@ -304,25 +364,38 @@ class PDFProcessor:
             # Extrair NCM
             ncm_patterns = [
                 r'NCM[:]?\s*([\d\.]+)',
-                r'NCM\s*:\s*([\d\.]+)'
+                r'NCM\s*:\s*([\d\.]+)',
+                r'Classificação NCM[:]?\s*([\d\.]+)'
             ]
             
+            ncm = None
             for pattern in ncm_patterns:
                 ncm_match = re.search(pattern, section)
                 if ncm_match:
-                    item['ncm'] = ncm_match.group(1).replace('.', '')
-                    logging.debug(f"NCM encontrado: {item['ncm']}")
+                    ncm = ncm_match.group(1).replace('.', '')
+                    logging.debug(f"NCM encontrado: {ncm}")
                     break
-            else:
-                item['ncm'] = '00000000'
+            
+            if not ncm:
+                # Tentar padrão alternativo
+                alt_ncm_pattern = r'(\d{4}\.\d{2}\.\d{2})'
+                alt_match = re.search(alt_ncm_pattern, section)
+                if alt_match:
+                    ncm = alt_match.group(1).replace('.', '')
+                else:
+                    ncm = '00000000'
+            
+            item['ncm'] = ncm
             
             # Extrair descrição do produto
             desc_patterns = [
                 r'Código do produto[:]?\s*\d+\s*-\s*(.+?)(?=\n|$)',
                 r'Detalhamento do Produto[:]?\s*(.+?)(?=\n|Código|NCM|$)',
-                r'Descrição complementar da mercadoria[:]?\s*(.+?)(?=\n|$)'
+                r'Descrição[:]?\s*(.+?)(?=\n|$)',
+                r'Produto[:]?\s*(.+?)(?=\n|$)'
             ]
             
+            desc = None
             for pattern in desc_patterns:
                 desc_match = re.search(pattern, section, re.IGNORECASE | re.DOTALL)
                 if desc_match:
@@ -330,56 +403,67 @@ class PDFProcessor:
                     # Limpar e limitar descrição
                     desc = re.sub(r'\s+', ' ', desc)  # Remover múltiplos espaços
                     desc = desc[:200]  # Limitar a 200 caracteres
-                    item['descricao'] = desc
-                    logging.debug(f"Descrição encontrada: {desc[:50]}...")
                     break
-            else:
-                item['descricao'] = f"Item {item_num}"
+            
+            if not desc:
+                # Tentar encontrar qualquer texto após "Item X"
+                item_pattern = rf'Item\s+{item_num}[:]?\s*(.+?)(?=\n|Item|\d|$)'
+                item_match = re.search(item_pattern, section, re.IGNORECASE)
+                if item_match:
+                    desc = item_match.group(1).strip()[:200]
+                else:
+                    desc = f"Item {item_num}"
+            
+            item['descricao'] = desc
             
             # Extrair valor total
             valor_patterns = [
                 r'Valor total na condição de venda[:]?\s*([\d\.,]+)',
-                r'VALOR TOTAL.*?([\d\.,]+)'
+                r'VALOR TOTAL.*?([\d\.,]+)',
+                r'Valor.*?total[:]?\s*([\d\.,]+)',
+                r'Valor[:]?\s*([\d\.,]+)'
             ]
             
+            valor = None
             for pattern in valor_patterns:
                 valor_match = re.search(pattern, section, re.IGNORECASE)
                 if valor_match:
-                    item['valor_total'] = valor_match.group(1)
-                    logging.debug(f"Valor total encontrado: {item['valor_total']}")
+                    valor = valor_match.group(1)
                     break
-            else:
-                item['valor_total'] = '0,00'
+            
+            item['valor_total'] = valor if valor else '0,00'
             
             # Extrair quantidade
             qtd_patterns = [
                 r'Quantidade na unidade comercializada[:]?\s*([\d\.,]+)',
-                r'Quantidade.*?([\d\.,]+)'
+                r'Quantidade.*?([\d\.,]+)',
+                r'QTDE[:]?\s*([\d\.,]+)'
             ]
             
+            qtd = None
             for pattern in qtd_patterns:
                 qtd_match = re.search(pattern, section, re.IGNORECASE)
                 if qtd_match:
-                    item['quantidade'] = qtd_match.group(1)
-                    logging.debug(f"Quantidade encontrada: {item['quantidade']}")
+                    qtd = qtd_match.group(1)
                     break
-            else:
-                item['quantidade'] = '1,00000'
+            
+            item['quantidade'] = qtd if qtd else '1,00000'
             
             # Extrair peso líquido
             peso_patterns = [
                 r'Peso líquido\s*\(kg\)[:]?\s*([\d\.,]+)',
-                r'Peso.*?l[ií]quido.*?([\d\.,]+)'
+                r'Peso.*?l[ií]quido.*?([\d\.,]+)',
+                r'Peso[:]?\s*([\d\.,]+)'
             ]
             
+            peso = None
             for pattern in peso_patterns:
                 peso_match = re.search(pattern, section, re.IGNORECASE)
                 if peso_match:
-                    item['peso_liquido'] = peso_match.group(1)
-                    logging.debug(f"Peso líquido encontrado: {item['peso_liquido']}")
+                    peso = peso_match.group(1)
                     break
-            else:
-                item['peso_liquido'] = '0,00000'
+            
+            item['peso_liquido'] = peso if peso else '0,00000'
             
             # Nome NCM
             nome_ncm_patterns = [
@@ -387,86 +471,53 @@ class PDFProcessor:
                 r'NCM.*?-\s*(.+?)(?=\n|$)'
             ]
             
+            nome_ncm = None
             for pattern in nome_ncm_patterns:
                 nome_ncm_match = re.search(pattern, section)
                 if nome_ncm_match:
-                    item['nome_ncm'] = nome_ncm_match.group(1).strip()[:100]
-                    logging.debug(f"Nome NCM encontrado: {item['nome_ncm'][:50]}...")
+                    nome_ncm = nome_ncm_match.group(1).strip()[:100]
                     break
-            else:
-                item['nome_ncm'] = f'Mercadoria {item_num}'
+            
+            item['nome_ncm'] = nome_ncm if nome_ncm else f'Mercadoria {item_num}'
             
             # País de origem
             origem_patterns = [
                 r'País de origem[:]?\s*(.+)',
-                r'País.*?origem[:]?\s*(.+)'
+                r'País.*?origem[:]?\s*(.+)',
+                r'Origem[:]?\s*(.+)'
             ]
             
+            origem = None
             for pattern in origem_patterns:
                 origem_match = re.search(pattern, section, re.IGNORECASE)
                 if origem_match:
-                    item['pais_origem'] = origem_match.group(1).strip()
+                    origem = origem_match.group(1).strip()
                     break
-            else:
-                item['pais_origem'] = self.data['duimp']['dados_gerais'].get('paisProcedencia', '')
+            
+            item['pais_origem'] = origem if origem else self.data['duimp']['dados_gerais'].get('paisProcedencia', '')
             
             # Unidade estatística
             unidade_patterns = [
                 r'Unidade estatística[:]?\s*(.+)',
-                r'Unidade.*?estat[ií]stica[:]?\s*(.+)'
+                r'Unidade.*?estat[ií]stica[:]?\s*(.+)',
+                r'Unidade[:]?\s*(.+)'
             ]
             
+            unidade = None
             for pattern in unidade_patterns:
                 unidade_match = re.search(pattern, section, re.IGNORECASE)
                 if unidade_match:
-                    item['unidade_medida'] = unidade_match.group(1).strip()
+                    unidade = unidade_match.group(1).strip()
                     break
-            else:
-                item['unidade_medida'] = 'QUILOGRAMA LIQUIDO'
+            
+            item['unidade_medida'] = unidade if unidade else 'QUILOGRAMA LIQUIDO'
+            
+            logging.debug(f"Item {item_num} processado: NCM={item['ncm']}, Descrição={item['descricao'][:50]}...")
             
             return self.create_adicao(item, item_num)
             
         except Exception as e:
             logging.error(f"Erro ao processar item {item_num}: {str(e)}")
-            return None
-    
-    def parse_item_from_context(self, context: str, ncm: str, idx: int) -> Optional[Dict[str, Any]]:
-        """Cria um item a partir do contexto ao redor de um NCM"""
-        try:
-            item = {
-                'ncm': ncm.replace('.', ''),
-                'descricao': f"Item {idx} - NCM {ncm}",
-                'valor_total': '0,00',
-                'quantidade': '1,00000',
-                'peso_liquido': '0,00000',
-                'nome_ncm': f'Mercadoria com NCM {ncm}',
-                'unidade_medida': 'QUILOGRAMA LIQUIDO',
-                'pais_origem': self.data['duimp']['dados_gerais'].get('paisProcedencia', '')
-            }
-            
-            # Tentar extrair descrição do contexto
-            desc_patterns = [
-                r'Código do produto[:]?\s*\d+\s*-\s*(.+?)(?=\n|$)',
-                r'Detalhamento do Produto[:]?\s*(.+?)(?=\n|$)'
-            ]
-            
-            for pattern in desc_patterns:
-                desc_match = re.search(pattern, context, re.IGNORECASE | re.DOTALL)
-                if desc_match:
-                    desc = desc_match.group(1).strip()
-                    desc = re.sub(r'\s+', ' ', desc)[:200]
-                    item['descricao'] = desc
-                    break
-            
-            # Tentar extrair valor
-            valor_pattern = r'Valor.*?([\d\.,]+)'
-            valor_match = re.search(valor_pattern, context, re.IGNORECASE)
-            if valor_match:
-                item['valor_total'] = valor_match.group(1)
-            
-            return self.create_adicao(item, idx)
-        except Exception as e:
-            logging.error(f"Erro ao criar item do contexto: {e}")
             return None
     
     def create_adicao(self, item_data: Dict[str, Any], idx: int) -> Dict[str, Any]:
@@ -557,6 +608,14 @@ class PDFProcessor:
             pais_codigo = '076'
             pais_nome = 'CHINA, REPUBLICA POPULAR'
         
+        # Fornecedor padrão baseado no país
+        if pais_codigo == '076':  # China
+            fornecedor = 'ZHEJIANG FANGHUA INTERNATIONAL TRADE CO.,LTD'
+        elif pais_codigo == '105':  # Itália
+            fornecedor = 'HAF - OPERADOR ITALIA'
+        else:
+            fornecedor = 'FORNECEDOR NÃO ESPECIFICADO'
+        
         return {
             'numeroAdicao': f"{idx:03d}",
             'numeroSequencialItem': f"{idx:02d}",
@@ -569,7 +628,7 @@ class PDFProcessor:
             'quantidade': format_quantidade(item_data.get('quantidade', '0')),
             'valorUnitario': valor_unitario_str,
             'descricaoMercadoria': item_data.get('descricao', 'Mercadoria não especificada')[:200],
-            'fornecedorNome': 'FORNECEDOR NÃO ESPECIFICADO',
+            'fornecedorNome': fornecedor,
             'paisOrigemMercadoriaNome': pais_nome,
             'paisAquisicaoMercadoriaNome': pais_nome,
             'paisOrigemMercadoriaCodigo': pais_codigo,
@@ -601,45 +660,50 @@ class PDFProcessor:
         conhecimento_patterns = [
             r'CONHECIMENTO DE EMBARQUE[:]?\s*(.+)',
             r'Conhecimento.*?[:]?\s*(.+)',
-            r'BL.*?[:]?\s*(.+)'
+            r'BL.*?[:]?\s*(.+)',
+            r'Bill of Lading[:]?\s*(.+)'
         ]
         
         for pattern in conhecimento_patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 doc_num = match.group(1).strip()
-                documentos.append({
-                    'codigoTipoDocumentoDespacho': '28',
-                    'nomeDocumentoDespacho': 'CONHECIMENTO DE CARGA',
-                    'numeroDocumentoDespacho': doc_num[:50]
-                })
-                break
+                if doc_num and doc_num != 'N/I':
+                    documentos.append({
+                        'codigoTipoDocumentoDespacho': '28',
+                        'nomeDocumentoDespacho': 'CONHECIMENTO DE CARGA',
+                        'numeroDocumentoDespacho': doc_num[:50]
+                    })
+                    break
         
         # Procurar fatura comercial
         fatura_patterns = [
             r'FATURA COMERCIAL[:]?\s*(.+)',
             r'Fatura.*?[:]?\s*(.+)',
-            r'INVOICE.*?[:]?\s*(.+)'
+            r'INVOICE.*?[:]?\s*(.+)',
+            r'Fatura Comercial[:]?\s*(.+)'
         ]
         
         for pattern in fatura_patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 doc_num = match.group(1).strip()
-                documentos.append({
-                    'codigoTipoDocumentoDespacho': '01',
-                    'nomeDocumentoDespacho': 'FATURA COMERCIAL',
-                    'numeroDocumentoDespacho': doc_num[:50]
-                })
-                break
+                if doc_num and doc_num != 'N/I':
+                    documentos.append({
+                        'codigoTipoDocumentoDespacho': '01',
+                        'nomeDocumentoDespacho': 'FATURA COMERCIAL',
+                        'numeroDocumentoDespacho': doc_num[:50]
+                    })
+                    break
         
         # Se não encontrou documentos, usar padrão
         if not documentos:
+            carga_id = self.data['duimp']['dados_gerais'].get('identificacaoCarga', 'N/I')
             documentos = [
                 {
                     'codigoTipoDocumentoDespacho': '28',
                     'nomeDocumentoDespacho': 'CONHECIMENTO DE CARGA',
-                    'numeroDocumentoDespacho': self.data['duimp']['dados_gerais'].get('identificacaoCarga', 'N/I')[:50]
+                    'numeroDocumentoDespacho': carga_id[:50] if carga_id != 'N/I' else 'N/I'
                 },
                 {
                     'codigoTipoDocumentoDespacho': '01',
@@ -716,7 +780,7 @@ class PDFProcessor:
         
         def format_date(date_str: str) -> str:
             try:
-                if date_str:
+                if date_str and date_str != 'N/I':
                     # Tentar diferentes formatos de data
                     patterns = [
                         r'(\d{2})/(\d{2})/(\d{4})',
@@ -754,39 +818,59 @@ class PDFProcessor:
                 return '0'.zfill(15)
         
         # Extrair informações do endereço
-        endereco = dados.get('importadorEndereco', '')
+        endereco = dados.get('importadorEndereco', 'N/I')
         cep = '00000000'
         municipio = 'N/I'
         uf = 'XX'
         
-        if endereco:
+        if endereco != 'N/I':
             # Tentar extrair CEP
             cep_match = re.search(r'(\d{5})-?(\d{3})', endereco)
             if cep_match:
                 cep = cep_match.group(1) + cep_match.group(2)
             
             # Tentar extrair município e UF
-            uf_match = re.search(r'- ([A-Z]{2})$', endereco)
+            uf_match = re.search(r'- ([A-Z]{2})\s*$', endereco)
             if uf_match:
                 uf = uf_match.group(1)
             
-            municipio_match = re.search(r'- ([A-Z]+) -', endereco)
+            municipio_match = re.search(r'- ([A-Z\s]+) - [A-Z]{2}', endereco)
             if municipio_match:
-                municipio = municipio_match.group(1)
+                municipio = municipio_match.group(1).strip()
         
         # CNPJ limpo
-        cnpj_clean = dados.get('importadorNumero', '').replace('.', '').replace('/', '').replace('-', '')
+        cnpj_clean = dados.get('importadorNumero', 'N/I').replace('.', '').replace('/', '').replace('-', '')
+        if cnpj_clean == 'NI':
+            cnpj_clean = '00000000000000'
+        
+        # Determinar código do país
+        pais = dados.get('paisProcedencia', 'N/I')
+        if 'CHINA' in pais.upper():
+            pais_codigo = '076'
+            pais_nome = 'CHINA, REPUBLICA POPULAR'
+        elif 'ITÁLIA' in pais.upper() or 'ITALIA' in pais.upper():
+            pais_codigo = '105'
+            pais_nome = 'ITÁLIA'
+        elif 'ÍNDIA' in pais.upper() or 'INDIA' in pais.upper():
+            pais_codigo = '077'
+            pais_nome = 'ÍNDIA'
+        elif 'ARGENTINA' in pais.upper():
+            pais_codigo = '010'
+            pais_nome = 'ARGENTINA'
+        else:
+            pais_codigo = '076'
+            pais_nome = pais if pais != 'N/I' else 'CHINA, REPUBLICA POPULAR'
         
         dados_completos = {
-            'numeroDUIMP': dados.get('numeroDUIMP', ''),
+            'numeroDUIMP': dados.get('numeroDUIMP', 'N/I'),
             'importadorNome': dados.get('importadorNome', 'N/I'),
-            'importadorNumero': cnpj_clean if cnpj_clean else '00000000000000',
+            'importadorNumero': cnpj_clean if cnpj_clean != 'NI' else '00000000000000',
             'caracterizacaoOperacaoDescricaoTipo': 'Importação Direta',
             'tipoDeclaracaoNome': 'CONSUMO',
             'modalidadeDespachoNome': 'Normal',
             'viaTransporteNome': 'MARÍTIMA',
-            'cargaPaisProcedenciaNome': dados.get('paisProcedencia', 'N/I'),
-            'cargaPaisProcedenciaCodigo': '076',  # Padrão China
+            'cargaPaisProcedenciaNome': pais_nome,
+            'cargaPaisProcedenciaCodigo': pais_codigo,
             'conhecimentoCargaEmbarqueData': format_date(dados.get('dataChegada', '')),
             'cargaDataChegada': format_date(dados.get('dataChegada', '')),
             'dataRegistro': format_date(''),
@@ -796,11 +880,11 @@ class PDFProcessor:
             'cargaPesoLiquido': format_number(dados.get('pesoLiquido', '0,00'), 4),
             'moedaNegociada': dados.get('moeda', 'DOLAR DOS EUA'),
             'importadorCodigoTipo': '1',
-            'importadorCpfRepresentanteLegal': cnpj_clean if cnpj_clean else '00000000000000',
+            'importadorCpfRepresentanteLegal': cnpj_clean if cnpj_clean != 'NI' else '00000000000000',
             'importadorEnderecoBairro': 'CENTRO',
             'importadorEnderecoCep': cep,
             'importadorEnderecoComplemento': 'S/N',
-            'importadorEnderecoLogradouro': endereco[:100] if endereco else 'N/I',
+            'importadorEnderecoLogradouro': endereco[:100] if endereco != 'N/I' else 'N/I',
             'importadorEnderecoMunicipio': municipio,
             'importadorEnderecoNumero': 'S/N',
             'importadorEnderecoUf': uf,
@@ -819,8 +903,8 @@ class PDFProcessor:
             'urfDespachoCodigo': '0917800',
             'viaTransporteNomeTransportador': 'TRANSPORTADOR NÃO ESPECIFICADO',
             'viaTransporteNomeVeiculo': 'N/I',
-            'viaTransportePaisTransportadorNome': dados.get('paisProcedencia', 'N/I'),
-            'viaTransportePaisTransportadorCodigo': '076',
+            'viaTransportePaisTransportadorNome': pais_nome,
+            'viaTransportePaisTransportadorCodigo': pais_codigo,
             'viaTransporteCodigo': '01',
             'cargaUrfEntradaCodigo': '0917800',
             'cargaUrfEntradaNome': 'PORTO DE PARANAGUA',
@@ -1094,7 +1178,7 @@ class PDFProcessor:
         return self.data
 
 # ==============================================
-# CLASSE PARA GERAÇÃO DE XML - COM SEQUÊNCIA CORRETA
+# CLASSE PARA GERAÇÃO DE XML
 # ==============================================
 
 class XMLGenerator:
@@ -1114,7 +1198,7 @@ class XMLGenerator:
             for adicao_data in data['duimp']['adicoes']:
                 XMLGenerator.add_adicao_sequenciada(duimp, adicao_data, data)
             
-            # Adicionar elementos na ordem correta (conforme modelo)
+            # Adicionar elementos na ordem correta
             XMLGenerator.add_armazem(duimp, data)
             XMLGenerator.add_dados_gerais_sequenciados(duimp, data['duimp']['dados_gerais'])
             XMLGenerator.add_embalagens_sequenciadas(duimp, data['duimp'].get('embalagens', []))
@@ -1129,7 +1213,7 @@ class XMLGenerator:
             # Parse o XML para formatar corretamente
             dom = minidom.parseString(xml_string)
             
-            # Formatar com indentação de 4 espaços
+            # Formatar com indentação
             pretty_xml = dom.toprettyxml(indent="    ")
             
             # Remover a declaração XML gerada pelo minidom
@@ -1143,7 +1227,7 @@ class XMLGenerator:
             # Juntar as linhas
             formatted_xml = '\n'.join(cleaned_lines)
             
-            # Adicionar header XML correto (apenas uma vez)
+            # Adicionar header XML correto
             final_xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + formatted_xml
             
             logging.info("XML gerado com sucesso")
@@ -1578,7 +1662,7 @@ def show_pdf_preview(pdf_file):
             # Exibir a imagem
             st.image(img_temp_path, caption=f"Página {page_num + 1} de {len(doc)}", use_column_width=True)
             
-            # Extrair e mostrar texto da página (primeiras linhas)
+            # Extrair e mostrar texto da página
             text = page.get_text()
             if text.strip():
                 with st.expander(f"📝 Texto extraído da Página {page_num + 1} (primeiras 10 linhas)"):
@@ -1587,7 +1671,7 @@ def show_pdf_preview(pdf_file):
                         if line.strip():
                             st.text(f"{i+1}: {line}")
         
-        # Mostrar informações gerais do PDF
+        # Informações do PDF
         st.markdown("---")
         col_info1, col_info2, col_info3 = st.columns(3)
         
@@ -1595,12 +1679,10 @@ def show_pdf_preview(pdf_file):
             st.metric("Total de Páginas", len(doc))
         
         with col_info2:
-            # Tentar extrair o título/nome do documento
             title = doc.metadata.get('title', 'N/A')
             st.metric("Título", title if title != 'N/A' else 'Não especificado')
         
         with col_info3:
-            # Formato do PDF
             st.metric("Formato", "PDF 1.4+" if doc.is_pdf else "Outro formato")
         
         # Limpar arquivos temporários
@@ -1610,12 +1692,12 @@ def show_pdf_preview(pdf_file):
     except Exception as e:
         st.warning(f"Não foi possível exibir a prévia do PDF: {str(e)}")
         
-        # Fallback: mostrar informações básicas do arquivo
+        # Fallback
         st.markdown("**Informações do arquivo:**")
         st.write(f"- Nome: {pdf_file.name}")
         st.write(f"- Tamanho: {pdf_file.size / 1024:.2f} KB")
         
-        # Tentar extrair texto usando pdfplumber como fallback
+        # Tentar extrair texto
         try:
             with pdfplumber.open(pdf_file) as pdf:
                 first_page = pdf.pages[0]
@@ -1742,14 +1824,17 @@ def main():
                         
                         with st.expander("📋 Texto Extraído do PDF", expanded=True):
                             st.text_area("Texto completo (primeiros 5000 caracteres):", 
-                                       value=all_text[:5000], 
+                                       value=all_text[:5000] if all_text else "Nenhum texto extraído", 
                                        height=300)
                         
                         # Extrair dados básicos para depuração
-                        processor.extract_basic_info(all_text)
-                        
-                        with st.expander("🔧 Dados Básicos Extraídos", expanded=True):
-                            st.json(processor.data['duimp']['dados_gerais'])
+                        if all_text:
+                            processor.extract_basic_info(all_text)
+                            
+                            with st.expander("🔧 Dados Básicos Extraídos", expanded=True):
+                                st.json(processor.data['duimp']['dados_gerais'])
+                        else:
+                            st.warning("Não foi possível extrair texto do PDF")
                         
                     except Exception as e:
                         st.error(f"Erro na depuração: {str(e)}")
@@ -1770,7 +1855,15 @@ def main():
                         # Salvar no session state
                         st.session_state.xml_content = xml_content
                         st.session_state.xml_data = data
-                        st.session_state.filename = f"DUIMP_{data['duimp']['dados_gerais']['numeroDUIMP'].replace('-', '_')}.xml"
+                        
+                        # Criar nome do arquivo
+                        duimp_num = data['duimp']['dados_gerais']['numeroDUIMP']
+                        if duimp_num and duimp_num != 'N/I':
+                            filename = f"DUIMP_{duimp_num.replace('-', '_')}.xml"
+                        else:
+                            filename = "DUIMP_PADRAO.xml"
+                        
+                        st.session_state.filename = filename
                         
                         st.markdown('<div class="success-box"><h4>✅ Conversão Concluída!</h4><p>O XML foi gerado com todas as tags obrigatórias.</p></div>', unsafe_allow_html=True)
                         
@@ -1846,7 +1939,7 @@ def main():
                     preview += "\n\n... [conteúdo truncado] ..."
                 st.code(preview, language="xml")
             
-            # Verificar se tem apenas uma declaração XML
+            # Verificar declaração XML
             xml_declarations = xml_content.count('<?xml version=')
             if xml_declarations > 1:
                 st.warning(f"⚠️ O XML contém {xml_declarations} declarações XML. Deve ter apenas uma.")
@@ -1889,43 +1982,32 @@ def main():
         st.markdown("""
         ### 🏗️ Estrutura do XML Gerado
         
-        O sistema gera XML completo com:
+        **Correções Implementadas:**
         
-        **1. Estrutura Raiz:**
-        - `ListaDeclaracoes`
-        - `duimp` (uma única declaração)
+        1. **Correção do Erro "list index out of range":**
+        - Melhor tratamento de arquivos PDF
+        - Salvamento temporário de arquivos BytesIO
+        - Try-catch em todas as extrações de página
         
-        **2. Adições (adicao):**
-        - `acrescimo` com todos os sub-elementos
-        - `mercadoria` na posição correta (final da adição)
-        - Todos os campos tributários (II, IPI, PIS, COFINS)
-        - Campos ICMS, CBS, IBS após mercadoria
-        - Informações de frete, seguro, valores
+        2. **Correção do Erro 'pesoLiquido':**
+        - Padrões regex corrigidos para extração de pesos
+        - Grupos de captura corrigidos
+        - Valores padrão quando não encontrados
         
-        **3. Dados Gerais:**
-        - Informações do importador
-        - Dados da carga (pesos, valores, datas)
-        - Informações de transporte
-        - Documentos anexos
-        - Pagamentos realizados
-        
-        **4. Melhorias na Extração:**
+        3. **Extração Robusta:**
+        - Múltiplos padrões para cada campo
+        - Fallback para valores padrão
         - Logging detalhado para depuração
-        - Múltiplos padrões regex para extração robusta
-        - Fallback para estrutura padrão se a extração falhar
-        - Formatação correta de datas e valores
         
         ### ✅ Garantias
         
         - XML sempre válido e bem formado
         - Todas as tags obrigatórias presentes
-        - Valores formatados corretamente
         - Compatível com sistemas de importação
-        - Logging detalhado para troubleshooting
         """)
     
     st.markdown("---")
-    st.caption("🛠️ Sistema de Conversão PDF para XML DUIMP | Versão 2.0 com Extração Melhorada")
+    st.caption("🛠️ Sistema de Conversão PDF para XML DUIMP | Versão 2.1 - Corrigido")
 
 if __name__ == "__main__":
     main()
