@@ -3,14 +3,11 @@ import fitz  # PyMuPDF
 import re
 from lxml import etree
 
-st.set_page_config(page_title="Conversor DUIMP (Nome Dinâmico)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP (Fornecedor Corrigido)", layout="wide")
 
 # ==============================================================================
-# 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO)
+# 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO - INTACTO)
 # ==============================================================================
-# A ordem desta lista garante que o XML saia idêntico ao modelo M-DUIMP-8686868686.xml
-# NÃO ALTERE A ORDEM DAS TAGS ABAIXO.
-
 ADICAO_FIELDS_ORDER = [
     {"tag": "acrescimo", "type": "complex", "children": [
         {"tag": "codigoAcrescimo", "default": "17"},
@@ -69,7 +66,7 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "dcrValorRecolher", "default": "000000000000000"},
     {"tag": "fornecedorCidade", "default": ""},
     {"tag": "fornecedorLogradouro", "default": ""},
-    {"tag": "fornecedorNome", "default": "FORNECEDOR ESTRANGEIRO"},
+    {"tag": "fornecedorNome", "default": ""},
     {"tag": "fornecedorNumero", "default": ""},
     {"tag": "freteMoedaNegociadaCodigo", "default": "978"},
     {"tag": "freteMoedaNegociadaNome", "default": "EURO/COM.EUROPEIA"},
@@ -100,7 +97,6 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "ipiAliquotaValorRecolher", "default": "000000000000000"},
     {"tag": "ipiRegimeTributacaoCodigo", "default": "4"},
     {"tag": "ipiRegimeTributacaoNome", "default": "SEM BENEFICIO"},
-    # Tag Mercadoria (Complexa)
     {"tag": "mercadoria", "type": "complex", "children": [
         {"tag": "descricaoMercadoria", "default": ""},
         {"tag": "numeroSequencialItem", "default": "01"},
@@ -128,13 +124,12 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "pisPasepAliquotaReduzida", "default": "00000"},
     {"tag": "pisPasepAliquotaValorDevido", "default": "000000000000000"},
     {"tag": "pisPasepAliquotaValorRecolher", "default": "000000000000000"},
-    # --- BLOCO ONDE A MÁGICA DE IBS/CBS VAI ACONTECER (MANTENDO A POSIÇÃO) ---
     {"tag": "icmsBaseCalculoValor", "default": "000000000000000"},
     {"tag": "icmsBaseCalculoAliquota", "default": "00000"},
     {"tag": "icmsBaseCalculoValorImposto", "default": "00000000000000"},
     {"tag": "icmsBaseCalculoValorDiferido", "default": "00000000000000"},
     {"tag": "cbsIbsCst", "default": "000"},
-    {"tag": "cbsIbsClasstrib", "default": "000001"}, # Valor Fixo pedido
+    {"tag": "cbsIbsClasstrib", "default": "000001"},
     {"tag": "cbsBaseCalculoValor", "default": "000000000000000"},
     {"tag": "cbsBaseCalculoAliquota", "default": "00000"},
     {"tag": "cbsBaseCalculoAliquotaReducao", "default": "00000"},
@@ -143,7 +138,6 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "ibsBaseCalculoAliquota", "default": "00000"},
     {"tag": "ibsBaseCalculoAliquotaReducao", "default": "00000"},
     {"tag": "ibsBaseCalculoValorImposto", "default": "00000000000000"},
-    # --------------------------------------------------------------------------
     {"tag": "relacaoCompradorVendedor", "default": "Fabricante é desconhecido"},
     {"tag": "seguroMoedaNegociadaCodigo", "default": "220"},
     {"tag": "seguroMoedaNegociadaNome", "default": "DOLAR DOS EUA"},
@@ -158,7 +152,7 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "vinculoCompradorVendedor", "default": "Não há vinculação entre comprador e vendedor."}
 ]
 
-# Tags de Rodapé (Mantendo a estrutura do seu modelo)
+# Tags de Rodapé
 FOOTER_TAGS = {
     "armazem": {"tag": "nomeArmazem", "default": "TCP"},
     "armazenamentoRecintoAduaneiroCodigo": "9801303",
@@ -256,7 +250,6 @@ class DataFormatter:
 
     @staticmethod
     def format_number(value, length=15):
-        """1066,01 -> 000000000106601"""
         if not value: return "0" * length
         clean = re.sub(r'\D', '', value)
         if not clean: return "0" * length
@@ -269,27 +262,75 @@ class DataFormatter:
 
     @staticmethod
     def calculate_cbs_ibs(base_xml_string):
-        """
-        Recebe a string da base (ex: '000000000160652')
-        Calcula CBS (0.009) e IBS (0.001)
-        Retorna tupla (valor_cbs_str, valor_ibs_str)
-        """
         try:
-            # Converte '000...160652' para float 1606.52
             base_int = int(base_xml_string)
             base_float = base_int / 100.0
             
-            # CBS: 0.90% (0.009)
             cbs_val = base_float * 0.009
             cbs_str = str(int(round(cbs_val * 100))).zfill(14)
             
-            # IBS: 0.10% (0.001)
             ibs_val = base_float * 0.001
             ibs_str = str(int(round(ibs_val * 100))).zfill(14)
             
             return cbs_str, ibs_str
         except:
             return "0".zfill(14), "0".zfill(14)
+
+    @staticmethod
+    def parse_supplier_info(raw_name, raw_addr):
+        """
+        Analisa as strings brutas do Fornecedor para extrair Nome, Logradouro, Número e Cidade.
+        Retorna dicionário.
+        """
+        data = {
+            "fornecedorNome": "",
+            "fornecedorLogradouro": "",
+            "fornecedorNumero": "S/N",
+            "fornecedorCidade": ""
+        }
+
+        # 1. Limpar Nome (Remove Código: "CODIGO-NOME")
+        if raw_name:
+            # Pega tudo após o primeiro hífen se existir, senão pega tudo
+            parts = raw_name.split('-', 1)
+            data["fornecedorNome"] = parts[-1].strip() if len(parts) > 1 else raw_name.strip()
+
+        # 2. Analisar Endereço
+        # Formato comum PDF: "RUA X, 123-CIDADE" ou "RUA Y-CIDADE-NUM"
+        if raw_addr:
+            clean_addr = DataFormatter.clean_text(raw_addr)
+            
+            # Tenta separar cidade pelo último traço (comum em NCMs/Endereços de importação)
+            parts_dash = clean_addr.rsplit('-', 1)
+            
+            if len(parts_dash) > 1:
+                # Assume que a última parte é a cidade (ou pais/cidade)
+                data["fornecedorCidade"] = parts_dash[1].strip()
+                street_part = parts_dash[0].strip()
+            else:
+                data["fornecedorCidade"] = "EXTERIOR"
+                street_part = clean_addr
+
+            # Tenta separar Logradouro e Número
+            # Procura por vírgula seguida de números
+            comma_split = street_part.rsplit(',', 1)
+            if len(comma_split) > 1:
+                # "Rua X, 123"
+                data["fornecedorLogradouro"] = comma_split[0].strip()
+                # Tenta limpar o número
+                num_match = re.search(r'\d+', comma_split[1])
+                if num_match:
+                    data["fornecedorNumero"] = num_match.group(0)
+            else:
+                # Se não tem vírgula, tenta achar numero no fim da string
+                num_match = re.search(r'(\d+)$', street_part)
+                if num_match:
+                    data["fornecedorNumero"] = num_match.group(1)
+                    data["fornecedorLogradouro"] = street_part[:num_match.start()].strip()
+                else:
+                    data["fornecedorLogradouro"] = street_part
+
+        return data
 
 # ==============================================================================
 # 3. PARSER
@@ -341,6 +382,17 @@ class PDFParser:
                 item["valorUnit"] = self._regex(r"Valor unitário na condição de venda:\s*([\d\.,]+)", content)
                 item["valorTotal"] = self._regex(r"Valor total na condição de venda:\s*([\d\.,]+)", content)
                 item["moeda"] = self._regex(r"Moeda negociada:\s*(.+)", content)
+                
+                # --- NOVAS CAPTURAS (FORNECEDOR) ---
+                # Código do Exportador
+                exp_match = re.search(r"Código do Exportador Estrangeiro:\s*(.+?)(?=\n\s*(?:Endereço|Dados))", content, re.DOTALL)
+                item["fornecedor_raw"] = exp_match.group(1).strip() if exp_match else ""
+                
+                # Endereço
+                addr_match = re.search(r"Endereço:\s*(.+?)(?=\n\s*(?:Dados da Mercadoria|Aplicação))", content, re.DOTALL)
+                item["endereco_raw"] = addr_match.group(1).strip() if addr_match else ""
+                # -----------------------------------
+
                 desc_match = re.search(r"Detalhamento do Produto:\s*(.+?)(?=\n\s*(?:Número de Identificação|Versão|Código de Class|Descrição complementar))", content, re.DOTALL)
                 item["descricao"] = desc_match.group(1).strip() if desc_match else ""
                 
@@ -351,7 +403,7 @@ class PDFParser:
         return match.group(1).strip() if match else ""
 
 # ==============================================================================
-# 4. XML BUILDER (COM LÓGICA DE CÁLCULO INJETADA)
+# 4. XML BUILDER
 # ==============================================================================
 
 class XMLBuilder:
@@ -364,21 +416,18 @@ class XMLBuilder:
         h = self.p.header
         duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
 
-        # --- A. ADIÇÕES ---
         for it in self.p.items:
             adicao = etree.SubElement(self.duimp, "adicao")
             
-            # 1. Preparar Valores Básicos do PDF
+            # --- PROCESSAMENTO ---
             base_total_reais = DataFormatter.format_number(it.get("valorTotal"), 15)
-            
-            # 2. CÁLCULO TRIBUTÁRIO (REGRA DE NEGÓCIO)
-            # Define Base ICMS = Valor Total Mercadoria (PDF)
             icms_base_valor = base_total_reais 
-            
-            # Calcula impostos baseados na Base ICMS
             cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
+            
+            # Processa dados do fornecedor
+            supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"), it.get("endereco_raw"))
 
-            # 3. Dicionário de Mapeamento (Valores do PDF -> Tags XML)
+            # Mapa de Valores
             extracted_map = {
                 "numeroAdicao": it["numeroAdicao"][-3:],
                 "numeroDUIMP": duimp_fmt,
@@ -398,39 +447,38 @@ class XMLBuilder:
                 "valorUnitario": DataFormatter.format_number(it.get("valorUnit"), 20),
                 "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800"),
                 
-                # --- CAMPOS CALCULADOS E FIXOS DE TRIBUTOS ---
+                # --- FORNECEDOR (PREENCHIDO) ---
+                "fornecedorNome": supplier_data["fornecedorNome"][:60], # Limite XML comum
+                "fornecedorLogradouro": supplier_data["fornecedorLogradouro"][:60],
+                "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
+                "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
+
+                # --- TRIBUTOS ---
                 "icmsBaseCalculoValor": icms_base_valor,
-                "icmsBaseCalculoAliquota": "01800", # Exemplo fixo
+                "icmsBaseCalculoAliquota": "01800",
                 "cbsIbsClasstrib": "000001",
-                # CBS
                 "cbsBaseCalculoValor": icms_base_valor,
-                "cbsBaseCalculoAliquota": "00090", # Fixo pedido
-                "cbsBaseCalculoValorImposto": cbs_imposto, # Calculado
-                # IBS
+                "cbsBaseCalculoAliquota": "00090",
+                "cbsBaseCalculoValorImposto": cbs_imposto,
                 "ibsBaseCalculoValor": icms_base_valor,
-                "ibsBaseCalculoAliquota": "00010", # Fixo pedido
-                "ibsBaseCalculoValorImposto": ibs_imposto # Calculado
+                "ibsBaseCalculoAliquota": "00010",
+                "ibsBaseCalculoValorImposto": ibs_imposto
             }
 
-            # 4. PREENCHIMENTO SEGUINDO A LISTA MESTRA (RIGIDEZ DO LAYOUT)
+            # Preenchimento XML (Layout Rígido)
             for field in ADICAO_FIELDS_ORDER:
                 tag_name = field["tag"]
-                
-                # Tag Complexa
                 if field.get("type") == "complex":
                     parent = etree.SubElement(adicao, tag_name)
                     for child in field["children"]:
                         c_tag = child["tag"]
-                        # Busca no mapa de extraídos, se não tiver, usa o default do Layout
                         val = extracted_map.get(c_tag, child["default"])
                         etree.SubElement(parent, c_tag).text = val
-                
-                # Tag Simples
                 else:
                     val = extracted_map.get(tag_name, field["default"])
                     etree.SubElement(adicao, tag_name).text = val
 
-        # --- B. RODAPÉ (DADOS GERAIS) ---
+        # Rodapé
         footer_map = {
             "numeroDUIMP": duimp_fmt,
             "importadorNome": h.get("nomeImportador", ""),
@@ -459,7 +507,7 @@ class XMLBuilder:
 # 5. APP
 # ==============================================================================
 
-st.title("Conversor DUIMP (Layout M-DUIMP + Cálculos)")
+st.title("Conversor DUIMP (Fornecedor + Cálculos)")
 
 file = st.file_uploader("Upload PDF", type="pdf")
 
@@ -474,7 +522,6 @@ if file:
             b = XMLBuilder(p)
             xml = b.build()
             
-            # NOME DINÂMICO DO ARQUIVO
             numero_duimp = p.header.get("numeroDUIMP", "00000000000").replace("/", "-")
             nome_arquivo = f"DUIMP_{numero_duimp}.xml"
 
