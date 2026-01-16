@@ -3,68 +3,260 @@ import fitz  # PyMuPDF
 import re
 from lxml import etree
 
-# --- Configuração da Página ---
-st.set_page_config(page_title="Conversor DUIMP (Com Cálculo IBS/CBS)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP (Layout Rígido + Calculo)", layout="wide")
 
-# --- LISTA MESTRA DE TAGS (ORDEM ESTRITA DO MAPEAMENTO) ---
-TAGS_ADICAO = [
-    "acrescimo", "cideValorAliquotaEspecifica", "cideValorDevido", "cideValorRecolher",
-    "codigoRelacaoCompradorVendedor", "codigoVinculoCompradorVendedor", "cofinsAliquotaAdValorem",
-    "cofinsAliquotaEspecificaQuantidadeUnidade", "cofinsAliquotaEspecificaValor", "cofinsAliquotaReduzida",
-    "cofinsAliquotaValorDevido", "cofinsAliquotaValorRecolher", "condicaoVendaIncoterm",
-    "condicaoVendaLocal", "condicaoVendaMetodoValoracaoCodigo", "condicaoVendaMetodoValoracaoNome",
-    "condicaoVendaMoedaCodigo", "condicaoVendaMoedaNome", "condicaoVendaValorMoeda",
-    "condicaoVendaValorReais", "dadosCambiaisCoberturaCambialCodigo", "dadosCambiaisCoberturaCambialNome",
-    "dadosCambiaisInstituicaoFinanciadoraCodigo", "dadosCambiaisInstituicaoFinanciadoraNome",
-    "dadosCambiaisMotivoSemCoberturaCodigo", "dadosCambiaisMotivoSemCoberturaNome",
-    "dadosCambiaisValorRealCambio", "dadosCargaPaisProcedenciaCodigo", "dadosCargaUrfEntradaCodigo",
-    "dadosCargaViaTransporteCodigo", "dadosCargaViaTransporteNome", "dadosMercadoriaAplicacao",
-    "dadosMercadoriaCodigoNaladiNCCA", "dadosMercadoriaCodigoNaladiSH", "dadosMercadoriaCodigoNcm",
-    "dadosMercadoriaCondicao", "dadosMercadoriaDescricaoTipoCertificado", "dadosMercadoriaIndicadorTipoCertificado",
-    "dadosMercadoriaMedidaEstatisticaQuantidade", "dadosMercadoriaMedidaEstatisticaUnidade",
-    "dadosMercadoriaNomeNcm", "dadosMercadoriaPesoLiquido", "dcrCoeficienteReducao",
-    "dcrIdentificacao", "dcrValorDevido", "dcrValorDolar", "dcrValorReal", "dcrValorRecolher",
-    "fornecedorCidade", "fornecedorLogradouro", "fornecedorNome", "fornecedorNumero",
-    "freteMoedaNegociadaCodigo", "freteMoedaNegociadaNome", "freteValorMoedaNegociada",
-    "freteValorReais", "iiAcordoTarifarioTipoCodigo", "iiAliquotaAcordo", "iiAliquotaAdValorem",
-    "iiAliquotaPercentualReducao", "iiAliquotaReduzida", "iiAliquotaValorCalculado",
-    "iiAliquotaValorDevido", "iiAliquotaValorRecolher", "iiAliquotaValorReduzido",
-    "iiBaseCalculo", "iiFundamentoLegalCodigo", "iiMotivoAdmissaoTemporariaCodigo",
-    "iiRegimeTributacaoCodigo", "iiRegimeTributacaoNome", "ipiAliquotaAdValorem",
-    "ipiAliquotaEspecificaCapacidadeRecipciente", "ipiAliquotaEspecificaQuantidadeUnidadeMedida",
-    "ipiAliquotaEspecificaTipoRecipienteCodigo", "ipiAliquotaEspecificaValorUnidadeMedida",
-    "ipiAliquotaNotaComplementarTIPI", "ipiAliquotaReduzida", "ipiAliquotaValorDevido",
-    "ipiAliquotaValorRecolher", "ipiRegimeTributacaoCodigo", "ipiRegimeTributacaoNome",
-    "mercadoria", 
-    "numeroAdicao", "numeroDUIMP", "numeroLI", "paisAquisicaoMercadoriaCodigo",
-    "paisAquisicaoMercadoriaNome", "paisOrigemMercadoriaCodigo", "paisOrigemMercadoriaNome",
-    "pisCofinsBaseCalculoAliquotaICMS", "pisCofinsBaseCalculoFundamentoLegalCodigo",
-    "pisCofinsBaseCalculoPercentualReducao", "pisCofinsBaseCalculoValor",
-    "pisCofinsFundamentoLegalReducaoCodigo", "pisCofinsRegimeTributacaoCodigo",
-    "pisCofinsRegimeTributacaoNome", "pisPasepAliquotaAdValorem",
-    "pisPasepAliquotaEspecificaQuantidadeUnidade", "pisPasepAliquotaEspecificaValor",
-    "pisPasepAliquotaReduzida", "pisPasepAliquotaValorDevido", "pisPasepAliquotaValorRecolher",
-    "icmsBaseCalculoValor", "icmsBaseCalculoAliquota", "icmsBaseCalculoValorImposto",
-    "icmsBaseCalculoValorDiferido", "cbsIbsCst", "cbsIbsClasstrib", "cbsBaseCalculoValor",
-    "cbsBaseCalculoAliquota", "cbsBaseCalculoAliquotaReducao", "cbsBaseCalculoValorImposto",
-    "ibsBaseCalculoValor", "ibsBaseCalculoAliquota", "ibsBaseCalculoAliquotaReducao",
-    "ibsBaseCalculoValorImposto", "relacaoCompradorVendedor", "seguroMoedaNegociadaCodigo",
-    "seguroMoedaNegociadaNome", "seguroValorMoedaNegociada", "seguroValorReais",
-    "sequencialRetificacao", "valorMultaARecolher", "valorMultaARecolherAjustado",
-    "valorReaisFreteInternacional", "valorReaisSeguroInternacional", "valorTotalCondicaoVenda",
-    "vinculoCompradorVendedor"
+# ==============================================================================
+# 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO)
+# ==============================================================================
+# A ordem desta lista garante que o XML saia idêntico ao modelo M-DUIMP-8686868686.xml
+# NÃO ALTERE A ORDEM DAS TAGS ABAIXO.
+
+ADICAO_FIELDS_ORDER = [
+    {"tag": "acrescimo", "type": "complex", "children": [
+        {"tag": "codigoAcrescimo", "default": "17"},
+        {"tag": "denominacao", "default": "OUTROS ACRESCIMOS AO VALOR ADUANEIRO"},
+        {"tag": "moedaNegociadaCodigo", "default": "978"},
+        {"tag": "moedaNegociadaNome", "default": "EURO/COM.EUROPEIA"},
+        {"tag": "valorMoedaNegociada", "default": "000000000000000"},
+        {"tag": "valorReais", "default": "000000000000000"}
+    ]},
+    {"tag": "cideValorAliquotaEspecifica", "default": "00000000000"},
+    {"tag": "cideValorDevido", "default": "000000000000000"},
+    {"tag": "cideValorRecolher", "default": "000000000000000"},
+    {"tag": "codigoRelacaoCompradorVendedor", "default": "3"},
+    {"tag": "codigoVinculoCompradorVendedor", "default": "1"},
+    {"tag": "cofinsAliquotaAdValorem", "default": "00965"},
+    {"tag": "cofinsAliquotaEspecificaQuantidadeUnidade", "default": "000000000"},
+    {"tag": "cofinsAliquotaEspecificaValor", "default": "0000000000"},
+    {"tag": "cofinsAliquotaReduzida", "default": "00000"},
+    {"tag": "cofinsAliquotaValorDevido", "default": "000000000000000"},
+    {"tag": "cofinsAliquotaValorRecolher", "default": "000000000000000"},
+    {"tag": "condicaoVendaIncoterm", "default": "FCA"},
+    {"tag": "condicaoVendaLocal", "default": ""},
+    {"tag": "condicaoVendaMetodoValoracaoCodigo", "default": "01"},
+    {"tag": "condicaoVendaMetodoValoracaoNome", "default": "METODO 1 - ART. 1 DO ACORDO (DECRETO 92930/86)"},
+    {"tag": "condicaoVendaMoedaCodigo", "default": "978"},
+    {"tag": "condicaoVendaMoedaNome", "default": "EURO/COM.EUROPEIA"},
+    {"tag": "condicaoVendaValorMoeda", "default": "000000000000000"},
+    {"tag": "condicaoVendaValorReais", "default": "000000000000000"},
+    {"tag": "dadosCambiaisCoberturaCambialCodigo", "default": "1"},
+    {"tag": "dadosCambiaisCoberturaCambialNome", "default": "COM COBERTURA CAMBIAL E PAGAMENTO FINAL A PRAZO DE ATE' 180"},
+    {"tag": "dadosCambiaisInstituicaoFinanciadoraCodigo", "default": "00"},
+    {"tag": "dadosCambiaisInstituicaoFinanciadoraNome", "default": "N/I"},
+    {"tag": "dadosCambiaisMotivoSemCoberturaCodigo", "default": "00"},
+    {"tag": "dadosCambiaisMotivoSemCoberturaNome", "default": "N/I"},
+    {"tag": "dadosCambiaisValorRealCambio", "default": "000000000000000"},
+    {"tag": "dadosCargaPaisProcedenciaCodigo", "default": "000"},
+    {"tag": "dadosCargaUrfEntradaCodigo", "default": "0000000"},
+    {"tag": "dadosCargaViaTransporteCodigo", "default": "01"},
+    {"tag": "dadosCargaViaTransporteNome", "default": "MARÍTIMA"},
+    {"tag": "dadosMercadoriaAplicacao", "default": "REVENDA"},
+    {"tag": "dadosMercadoriaCodigoNaladiNCCA", "default": "0000000"},
+    {"tag": "dadosMercadoriaCodigoNaladiSH", "default": "00000000"},
+    {"tag": "dadosMercadoriaCodigoNcm", "default": "00000000"},
+    {"tag": "dadosMercadoriaCondicao", "default": "NOVA"},
+    {"tag": "dadosMercadoriaDescricaoTipoCertificado", "default": "Sem Certificado"},
+    {"tag": "dadosMercadoriaIndicadorTipoCertificado", "default": "1"},
+    {"tag": "dadosMercadoriaMedidaEstatisticaQuantidade", "default": "00000000000000"},
+    {"tag": "dadosMercadoriaMedidaEstatisticaUnidade", "default": "UNIDADE"},
+    {"tag": "dadosMercadoriaNomeNcm", "default": "DESCRIÇÃO PADRÃO NCM"},
+    {"tag": "dadosMercadoriaPesoLiquido", "default": "000000000000000"},
+    {"tag": "dcrCoeficienteReducao", "default": "00000"},
+    {"tag": "dcrIdentificacao", "default": "00000000"},
+    {"tag": "dcrValorDevido", "default": "000000000000000"},
+    {"tag": "dcrValorDolar", "default": "000000000000000"},
+    {"tag": "dcrValorReal", "default": "000000000000000"},
+    {"tag": "dcrValorRecolher", "default": "000000000000000"},
+    {"tag": "fornecedorCidade", "default": ""},
+    {"tag": "fornecedorLogradouro", "default": ""},
+    {"tag": "fornecedorNome", "default": "FORNECEDOR ESTRANGEIRO"},
+    {"tag": "fornecedorNumero", "default": ""},
+    {"tag": "freteMoedaNegociadaCodigo", "default": "978"},
+    {"tag": "freteMoedaNegociadaNome", "default": "EURO/COM.EUROPEIA"},
+    {"tag": "freteValorMoedaNegociada", "default": "000000000000000"},
+    {"tag": "freteValorReais", "default": "000000000000000"},
+    {"tag": "iiAcordoTarifarioTipoCodigo", "default": "0"},
+    {"tag": "iiAliquotaAcordo", "default": "00000"},
+    {"tag": "iiAliquotaAdValorem", "default": "00000"},
+    {"tag": "iiAliquotaPercentualReducao", "default": "00000"},
+    {"tag": "iiAliquotaReduzida", "default": "00000"},
+    {"tag": "iiAliquotaValorCalculado", "default": "000000000000000"},
+    {"tag": "iiAliquotaValorDevido", "default": "000000000000000"},
+    {"tag": "iiAliquotaValorRecolher", "default": "000000000000000"},
+    {"tag": "iiAliquotaValorReduzido", "default": "000000000000000"},
+    {"tag": "iiBaseCalculo", "default": "000000000000000"},
+    {"tag": "iiFundamentoLegalCodigo", "default": "00"},
+    {"tag": "iiMotivoAdmissaoTemporariaCodigo", "default": "00"},
+    {"tag": "iiRegimeTributacaoCodigo", "default": "1"},
+    {"tag": "iiRegimeTributacaoNome", "default": "RECOLHIMENTO INTEGRAL"},
+    {"tag": "ipiAliquotaAdValorem", "default": "00000"},
+    {"tag": "ipiAliquotaEspecificaCapacidadeRecipciente", "default": "00000"},
+    {"tag": "ipiAliquotaEspecificaQuantidadeUnidadeMedida", "default": "000000000"},
+    {"tag": "ipiAliquotaEspecificaTipoRecipienteCodigo", "default": "00"},
+    {"tag": "ipiAliquotaEspecificaValorUnidadeMedida", "default": "0000000000"},
+    {"tag": "ipiAliquotaNotaComplementarTIPI", "default": "00"},
+    {"tag": "ipiAliquotaReduzida", "default": "00000"},
+    {"tag": "ipiAliquotaValorDevido", "default": "000000000000000"},
+    {"tag": "ipiAliquotaValorRecolher", "default": "000000000000000"},
+    {"tag": "ipiRegimeTributacaoCodigo", "default": "4"},
+    {"tag": "ipiRegimeTributacaoNome", "default": "SEM BENEFICIO"},
+    # Tag Mercadoria (Complexa)
+    {"tag": "mercadoria", "type": "complex", "children": [
+        {"tag": "descricaoMercadoria", "default": ""},
+        {"tag": "numeroSequencialItem", "default": "01"},
+        {"tag": "quantidade", "default": "00000000000000"},
+        {"tag": "unidadeMedida", "default": "UNIDADE"},
+        {"tag": "valorUnitario", "default": "00000000000000000000"}
+    ]},
+    {"tag": "numeroAdicao", "default": "001"},
+    {"tag": "numeroDUIMP", "default": ""},
+    {"tag": "numeroLI", "default": "0000000000"},
+    {"tag": "paisAquisicaoMercadoriaCodigo", "default": "000"},
+    {"tag": "paisAquisicaoMercadoriaNome", "default": ""},
+    {"tag": "paisOrigemMercadoriaCodigo", "default": "000"},
+    {"tag": "paisOrigemMercadoriaNome", "default": ""},
+    {"tag": "pisCofinsBaseCalculoAliquotaICMS", "default": "00000"},
+    {"tag": "pisCofinsBaseCalculoFundamentoLegalCodigo", "default": "00"},
+    {"tag": "pisCofinsBaseCalculoPercentualReducao", "default": "00000"},
+    {"tag": "pisCofinsBaseCalculoValor", "default": "000000000000000"},
+    {"tag": "pisCofinsFundamentoLegalReducaoCodigo", "default": "00"},
+    {"tag": "pisCofinsRegimeTributacaoCodigo", "default": "1"},
+    {"tag": "pisCofinsRegimeTributacaoNome", "default": "RECOLHIMENTO INTEGRAL"},
+    {"tag": "pisPasepAliquotaAdValorem", "default": "00000"},
+    {"tag": "pisPasepAliquotaEspecificaQuantidadeUnidade", "default": "000000000"},
+    {"tag": "pisPasepAliquotaEspecificaValor", "default": "0000000000"},
+    {"tag": "pisPasepAliquotaReduzida", "default": "00000"},
+    {"tag": "pisPasepAliquotaValorDevido", "default": "000000000000000"},
+    {"tag": "pisPasepAliquotaValorRecolher", "default": "000000000000000"},
+    # --- BLOCO ONDE A MÁGICA DE IBS/CBS VAI ACONTECER (MANTENDO A POSIÇÃO) ---
+    {"tag": "icmsBaseCalculoValor", "default": "000000000000000"},
+    {"tag": "icmsBaseCalculoAliquota", "default": "00000"},
+    {"tag": "icmsBaseCalculoValorImposto", "default": "00000000000000"},
+    {"tag": "icmsBaseCalculoValorDiferido", "default": "00000000000000"},
+    {"tag": "cbsIbsCst", "default": "000"},
+    {"tag": "cbsIbsClasstrib", "default": "000001"}, # Valor Fixo pedido
+    {"tag": "cbsBaseCalculoValor", "default": "000000000000000"},
+    {"tag": "cbsBaseCalculoAliquota", "default": "00000"},
+    {"tag": "cbsBaseCalculoAliquotaReducao", "default": "00000"},
+    {"tag": "cbsBaseCalculoValorImposto", "default": "00000000000000"},
+    {"tag": "ibsBaseCalculoValor", "default": "000000000000000"},
+    {"tag": "ibsBaseCalculoAliquota", "default": "00000"},
+    {"tag": "ibsBaseCalculoAliquotaReducao", "default": "00000"},
+    {"tag": "ibsBaseCalculoValorImposto", "default": "00000000000000"},
+    # --------------------------------------------------------------------------
+    {"tag": "relacaoCompradorVendedor", "default": "Fabricante é desconhecido"},
+    {"tag": "seguroMoedaNegociadaCodigo", "default": "220"},
+    {"tag": "seguroMoedaNegociadaNome", "default": "DOLAR DOS EUA"},
+    {"tag": "seguroValorMoedaNegociada", "default": "000000000000000"},
+    {"tag": "seguroValorReais", "default": "000000000000000"},
+    {"tag": "sequencialRetificacao", "default": "00"},
+    {"tag": "valorMultaARecolher", "default": "000000000000000"},
+    {"tag": "valorMultaARecolherAjustado", "default": "000000000000000"},
+    {"tag": "valorReaisFreteInternacional", "default": "000000000000000"},
+    {"tag": "valorReaisSeguroInternacional", "default": "000000000000000"},
+    {"tag": "valorTotalCondicaoVenda", "default": "00000000000"},
+    {"tag": "vinculoCompradorVendedor", "default": "Não há vinculação entre comprador e vendedor."}
 ]
 
-# --- Classes Auxiliares ---
+# Tags de Rodapé (Mantendo a estrutura do seu modelo)
+FOOTER_TAGS = {
+    "armazem": {"tag": "nomeArmazem", "default": "TCP"},
+    "armazenamentoRecintoAduaneiroCodigo": "9801303",
+    "armazenamentoRecintoAduaneiroNome": "TCP - TERMINAL",
+    "armazenamentoSetor": "002",
+    "canalSelecaoParametrizada": "001",
+    "caracterizacaoOperacaoCodigoTipo": "1",
+    "caracterizacaoOperacaoDescricaoTipo": "Importação Própria",
+    "cargaDataChegada": "20251120",
+    "cargaNumeroAgente": "N/I",
+    "cargaPaisProcedenciaCodigo": "386",
+    "cargaPaisProcedenciaNome": "",
+    "cargaPesoBruto": "000000000000000",
+    "cargaPesoLiquido": "000000000000000",
+    "cargaUrfEntradaCodigo": "0917800",
+    "cargaUrfEntradaNome": "PORTO DE PARANAGUA",
+    "conhecimentoCargaEmbarqueData": "20251025",
+    "conhecimentoCargaEmbarqueLocal": "EXTERIOR",
+    "conhecimentoCargaId": "CE123456",
+    "conhecimentoCargaIdMaster": "CE123456",
+    "conhecimentoCargaTipoCodigo": "12",
+    "conhecimentoCargaTipoNome": "HBL - House Bill of Lading",
+    "conhecimentoCargaUtilizacao": "1",
+    "conhecimentoCargaUtilizacaoNome": "Total",
+    "dataDesembaraco": "20251124",
+    "dataRegistro": "20251124",
+    "documentoChegadaCargaCodigoTipo": "1",
+    "documentoChegadaCargaNome": "Manifesto da Carga",
+    "documentoChegadaCargaNumero": "1625502058594",
+    "embalagem": [{"tag": "codigoTipoEmbalagem", "default": "60"}, {"tag": "nomeEmbalagem", "default": "PALLETS"}, {"tag": "quantidadeVolume", "default": "00001"}],
+    "freteCollect": "000000000000000",
+    "freteEmTerritorioNacional": "000000000000000",
+    "freteMoedaNegociadaCodigo": "978",
+    "freteMoedaNegociadaNome": "EURO/COM.EUROPEIA",
+    "fretePrepaid": "000000000000000",
+    "freteTotalDolares": "000000000000000",
+    "freteTotalMoeda": "000000000000000",
+    "freteTotalReais": "000000000000000",
+    "icms": [{"tag": "agenciaIcms", "default": "00000"}, {"tag": "codigoTipoRecolhimentoIcms", "default": "3"}, {"tag": "nomeTipoRecolhimentoIcms", "default": "Exoneração do ICMS"}, {"tag": "numeroSequencialIcms", "default": "001"}, {"tag": "ufIcms", "default": "PR"}, {"tag": "valorTotalIcms", "default": "000000000000000"}],
+    "importadorCodigoTipo": "1",
+    "importadorCpfRepresentanteLegal": "00000000000",
+    "importadorEnderecoBairro": "CENTRO",
+    "importadorEnderecoCep": "00000000",
+    "importadorEnderecoComplemento": "",
+    "importadorEnderecoLogradouro": "RUA PRINCIPAL",
+    "importadorEnderecoMunicipio": "CIDADE",
+    "importadorEnderecoNumero": "00",
+    "importadorEnderecoUf": "PR",
+    "importadorNome": "",
+    "importadorNomeRepresentanteLegal": "REPRESENTANTE",
+    "importadorNumero": "",
+    "importadorNumeroTelefone": "0000000000",
+    "informacaoComplementar": "Informações extraídas do Extrato DUIMP.",
+    "localDescargaTotalDolares": "000000000000000",
+    "localDescargaTotalReais": "000000000000000",
+    "localEmbarqueTotalDolares": "000000000000000",
+    "localEmbarqueTotalReais": "000000000000000",
+    "modalidadeDespachoCodigo": "1",
+    "modalidadeDespachoNome": "Normal",
+    "numeroDUIMP": "",
+    "operacaoFundap": "N",
+    "pagamento": [{"tag": "agenciaPagamento", "default": "3715"}, {"tag": "bancoPagamento", "default": "341"}, {"tag": "codigoReceita", "default": "0086"}, {"tag": "valorReceita", "default": "000000000000000"}],
+    "seguroMoedaNegociadaCodigo": "220",
+    "seguroMoedaNegociadaNome": "DOLAR DOS EUA",
+    "seguroTotalDolares": "000000000000000",
+    "seguroTotalMoedaNegociada": "000000000000000",
+    "seguroTotalReais": "000000000000000",
+    "sequencialRetificacao": "00",
+    "situacaoEntregaCarga": "ENTREGA CONDICIONADA",
+    "tipoDeclaracaoCodigo": "01",
+    "tipoDeclaracaoNome": "CONSUMO",
+    "totalAdicoes": "000",
+    "urfDespachoCodigo": "0917800",
+    "urfDespachoNome": "PORTO DE PARANAGUA",
+    "valorTotalMultaARecolherAjustado": "000000000000000",
+    "viaTransporteCodigo": "01",
+    "viaTransporteMultimodal": "N",
+    "viaTransporteNome": "MARÍTIMA",
+    "viaTransporteNomeTransportador": "MAERSK A/S",
+    "viaTransporteNomeVeiculo": "MAERSK",
+    "viaTransportePaisTransportadorCodigo": "741",
+    "viaTransportePaisTransportadorNome": "CINGAPURA"
+}
+
+# ==============================================================================
+# 2. UTILS
+# ==============================================================================
 
 class DataFormatter:
     @staticmethod
     def clean_text(text):
         if not text: return ""
-        return " ".join(text.split()).strip()
+        text = text.replace('\n', ' ').replace('\r', '')
+        return re.sub(r'\s+', ' ', text).strip()
 
     @staticmethod
     def format_number(value, length=15):
+        """1066,01 -> 000000000106601"""
         if not value: return "0" * length
         clean = re.sub(r'\D', '', value)
         if not clean: return "0" * length
@@ -76,28 +268,32 @@ class DataFormatter:
         return re.sub(r'\D', '', value)[:8]
 
     @staticmethod
-    def calculate_tax_value(base_str, rate_percent):
+    def calculate_cbs_ibs(base_xml_string):
         """
-        Calcula o valor do imposto com base na string de entrada.
-        Ex: Base "000000000160652" (1606.52) * 0.9% -> retorna string formatada
+        Recebe a string da base (ex: '000000000160652')
+        Calcula CBS (0.009) e IBS (0.001)
+        Retorna tupla (valor_cbs_str, valor_ibs_str)
         """
-        if not base_str:
-            return "0".zfill(14)
-        
         try:
-            # Assume que os últimos 2 dígitos são decimais
-            base_float = float(base_str) / 100
+            # Converte '000...160652' para float 1606.52
+            base_int = int(base_xml_string)
+            base_float = base_int / 100.0
             
-            # Calcula o imposto (rate_percent ex: 0.9 para 0.90%)
-            tax_value = base_float * (rate_percent / 100)
+            # CBS: 0.90% (0.009)
+            cbs_val = base_float * 0.009
+            cbs_str = str(int(round(cbs_val * 100))).zfill(14)
             
-            # Converte de volta para inteiro (formato XML sem ponto)
-            # Arredonda para 2 casas decimais e multiplica por 100
-            tax_int = int(round(tax_value, 2) * 100)
+            # IBS: 0.10% (0.001)
+            ibs_val = base_float * 0.001
+            ibs_str = str(int(round(ibs_val * 100))).zfill(14)
             
-            return str(tax_int).zfill(14) # Tags de imposto CBS/IBS costumam ter 14 dígitos no exemplo
+            return cbs_str, ibs_str
         except:
-            return "0".zfill(14)
+            return "0".zfill(14), "0".zfill(14)
+
+# ==============================================================================
+# 3. PARSER
+# ==============================================================================
 
 class PDFParser:
     def __init__(self, file_stream):
@@ -116,7 +312,6 @@ class PDFParser:
                 if "Extrato da DUIMP" in l_strip: continue
                 if "Data, hora e responsável" in l_strip: continue
                 if re.match(r'^\d+\s*/\s*\d+$', l_strip): continue
-                if "The following table" in l_strip: continue
                 clean_lines.append(line)
         self.full_text = "\n".join(clean_lines)
 
@@ -155,6 +350,10 @@ class PDFParser:
         match = re.search(pattern, text)
         return match.group(1).strip() if match else ""
 
+# ==============================================================================
+# 4. XML BUILDER (COM LÓGICA DE CÁLCULO INJETADA)
+# ==============================================================================
+
 class XMLBuilder:
     def __init__(self, parser):
         self.p = parser
@@ -165,136 +364,104 @@ class XMLBuilder:
         h = self.p.header
         duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
 
+        # --- A. ADIÇÕES ---
         for it in self.p.items:
             adicao = etree.SubElement(self.duimp, "adicao")
             
-            # Formata valores base
-            valor_total_fmt = DataFormatter.format_number(it.get("valorTotal"), 15)
+            # 1. Preparar Valores Básicos do PDF
+            base_total_reais = DataFormatter.format_number(it.get("valorTotal"), 15)
             
-            # --- REGRA DE NEGÓCIO: DEFINIÇÃO DA BASE DE CÁLCULO ---
-            # Se o PDF não tiver ICMS explícito, usamos o Valor Total (em Reais) como base
-            # para garantir que o cálculo aconteça.
-            icms_base_raw = valor_total_fmt # Aqui assume-se que Valor Total = Base ICMS para este extrato simplificado
+            # 2. CÁLCULO TRIBUTÁRIO (REGRA DE NEGÓCIO)
+            # Define Base ICMS = Valor Total Mercadoria (PDF)
+            icms_base_valor = base_total_reais 
             
-            # --- CÁLCULO AUTOMÁTICO IBS / CBS ---
-            cbs_aliquota = 0.90
-            ibs_aliquota = 0.10
-            
-            cbs_valor_imposto = DataFormatter.calculate_tax_value(icms_base_raw, cbs_aliquota)
-            ibs_valor_imposto = DataFormatter.calculate_tax_value(icms_base_raw, ibs_aliquota)
+            # Calcula impostos baseados na Base ICMS
+            cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
 
-            # Mapeamento completo
-            vals = {
+            # 3. Dicionário de Mapeamento (Valores do PDF -> Tags XML)
+            extracted_map = {
                 "numeroAdicao": it["numeroAdicao"][-3:],
                 "numeroDUIMP": duimp_fmt,
-                "numeroLI": "0000000000",
-                "dadosCargaPaisProcedenciaCodigo": "000",
-                "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800"),
-                "dadosCargaViaTransporteCodigo": "01",
-                "dadosCargaViaTransporteNome": "MARÍTIMA",
-                "dadosMercadoriaAplicacao": "REVENDA",
                 "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
-                "dadosMercadoriaCondicao": "NOVA",
                 "dadosMercadoriaMedidaEstatisticaQuantidade": DataFormatter.format_number(it.get("quantidade"), 14),
-                "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "UNIDADE").upper(),
-                "dadosMercadoriaNomeNcm": "DESCRIÇÃO PADRÃO NCM",
+                "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "").upper(),
                 "dadosMercadoriaPesoLiquido": DataFormatter.format_number(it.get("pesoLiq"), 15),
-                "condicaoVendaIncoterm": "FCA",
-                "condicaoVendaMoedaNome": it.get("moeda", "EURO").upper(),
-                "condicaoVendaValorMoeda": valor_total_fmt,
-                "condicaoVendaValorReais": valor_total_fmt,
+                "condicaoVendaMoedaNome": it.get("moeda", "").upper(),
+                "condicaoVendaValorMoeda": base_total_reais,
+                "condicaoVendaValorReais": base_total_reais,
                 "paisOrigemMercadoriaNome": it.get("paisOrigem", "").upper(),
                 "paisAquisicaoMercadoriaNome": it.get("paisOrigem", "").upper(),
                 "valorTotalCondicaoVenda": DataFormatter.format_number(it.get("valorTotal"), 11),
-                "vinculoCompradorVendedor": "Não há vinculação entre comprador e vendedor.",
-                "iiRegimeTributacaoNome": "RECOLHIMENTO INTEGRAL",
-                "pisCofinsRegimeTributacaoNome": "RECOLHIMENTO INTEGRAL",
-                "ipiRegimeTributacaoNome": "SEM BENEFICIO",
+                "descricaoMercadoria": DataFormatter.clean_text(it.get("descricao", "")),
+                "quantidade": DataFormatter.format_number(it.get("quantidade"), 14),
+                "unidadeMedida": it.get("unidade", "").upper(),
+                "valorUnitario": DataFormatter.format_number(it.get("valorUnit"), 20),
+                "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800"),
                 
-                # --- CAMPOS TRIBUTÁRIOS CALCULADOS ---
-                "icmsBaseCalculoValor": icms_base_raw, # Base mestre
-                "icmsBaseCalculoAliquota": "01800",   # Ex: 18% fixo para teste
-                
-                # CBS
-                "cbsIbsCst": "000",
+                # --- CAMPOS CALCULADOS E FIXOS DE TRIBUTOS ---
+                "icmsBaseCalculoValor": icms_base_valor,
+                "icmsBaseCalculoAliquota": "01800", # Exemplo fixo
                 "cbsIbsClasstrib": "000001",
-                "cbsBaseCalculoValor": icms_base_raw, # Copia da Base ICMS
-                "cbsBaseCalculoAliquota": "00090",    # 0.90%
-                "cbsBaseCalculoAliquotaReducao": "00000",
-                "cbsBaseCalculoValorImposto": cbs_valor_imposto, # Calculado
-
+                # CBS
+                "cbsBaseCalculoValor": icms_base_valor,
+                "cbsBaseCalculoAliquota": "00090", # Fixo pedido
+                "cbsBaseCalculoValorImposto": cbs_imposto, # Calculado
                 # IBS
-                "ibsBaseCalculoValor": icms_base_raw, # Copia da Base ICMS
-                "ibsBaseCalculoAliquota": "00010",    # 0.10%
-                "ibsBaseCalculoAliquotaReducao": "00000",
-                "ibsBaseCalculoValorImposto": ibs_valor_imposto  # Calculado
+                "ibsBaseCalculoValor": icms_base_valor,
+                "ibsBaseCalculoAliquota": "00010", # Fixo pedido
+                "ibsBaseCalculoValorImposto": ibs_imposto # Calculado
             }
 
-            for tag in TAGS_ADICAO:
-                if tag == "acrescimo":
-                    node = etree.SubElement(adicao, "acrescimo")
-                    etree.SubElement(node, "codigoAcrescimo").text = "17"
-                    etree.SubElement(node, "denominacao").text = "OUTROS ACRESCIMOS AO VALOR ADUANEIRO"
-                    etree.SubElement(node, "moedaNegociadaCodigo").text = "978"
-                    etree.SubElement(node, "moedaNegociadaNome").text = "EURO/COM.EUROPEIA"
-                    etree.SubElement(node, "valorMoedaNegociada").text = "000000000000000"
-                    etree.SubElement(node, "valorReais").text = "000000000000000"
+            # 4. PREENCHIMENTO SEGUINDO A LISTA MESTRA (RIGIDEZ DO LAYOUT)
+            for field in ADICAO_FIELDS_ORDER:
+                tag_name = field["tag"]
                 
-                elif tag == "mercadoria":
-                    node = etree.SubElement(adicao, "mercadoria")
-                    desc = DataFormatter.clean_text(it.get("descricao", ""))
-                    etree.SubElement(node, "descricaoMercadoria").text = desc
-                    etree.SubElement(node, "numeroSequencialItem").text = "01"
-                    etree.SubElement(node, "quantidade").text = DataFormatter.format_number(it.get("quantidade"), 14)
-                    etree.SubElement(node, "unidadeMedida").text = it.get("unidade", "UNIDADE").upper()
-                    etree.SubElement(node, "valorUnitario").text = DataFormatter.format_number(it.get("valorUnit"), 20)
+                # Tag Complexa
+                if field.get("type") == "complex":
+                    parent = etree.SubElement(adicao, tag_name)
+                    for child in field["children"]:
+                        c_tag = child["tag"]
+                        # Busca no mapa de extraídos, se não tiver, usa o default do Layout
+                        val = extracted_map.get(c_tag, child["default"])
+                        etree.SubElement(parent, c_tag).text = val
                 
+                # Tag Simples
                 else:
-                    if tag in vals:
-                        etree.SubElement(adicao, tag).text = vals[tag]
-                    else:
-                        # Preenchimento Padrão para manter XML válido
-                        if "Valor" in tag or "Quantidade" in tag or "Peso" in tag or "BaseCalculo" in tag:
-                            etree.SubElement(adicao, tag).text = "0" * 15
-                        elif "ValorImposto" in tag: # Correção para comprimento 14 comum em CBS/IBS
-                             etree.SubElement(adicao, tag).text = "0" * 14
-                        elif "Aliquota" in tag:
-                             etree.SubElement(adicao, tag).text = "00000"
-                        elif "Codigo" in tag:
-                             etree.SubElement(adicao, tag).text = "00"
-                        else:
-                            etree.SubElement(adicao, tag).text = ""
+                    val = extracted_map.get(tag_name, field["default"])
+                    etree.SubElement(adicao, tag_name).text = val
 
-        # --- Rodapé ---
-        armazem = etree.SubElement(self.duimp, "armazem")
-        etree.SubElement(armazem, "nomeArmazem").text = "TCP"
-        
-        etree.SubElement(self.duimp, "armazenamentoRecintoAduaneiroCodigo").text = "9801303"
-        etree.SubElement(self.duimp, "armazenamentoRecintoAduaneiroNome").text = "TCP - TERMINAL"
-        etree.SubElement(self.duimp, "armazenamentoSetor").text = "002"
-        etree.SubElement(self.duimp, "canalSelecaoParametrizada").text = "001"
-        etree.SubElement(self.duimp, "cargaDataChegada").text = "20251120"
-        etree.SubElement(self.duimp, "cargaPesoBruto").text = DataFormatter.format_number(h.get("pesoBruto"), 15)
-        etree.SubElement(self.duimp, "cargaPesoLiquido").text = DataFormatter.format_number(h.get("pesoLiquido"), 15)
-        etree.SubElement(self.duimp, "cargaUrfEntradaCodigo").text = h.get("urf", "0917800")
-        etree.SubElement(self.duimp, "importadorNome").text = h.get("nomeImportador", "")
-        etree.SubElement(self.duimp, "importadorNumero").text = DataFormatter.format_number(h.get("cnpj"), 14)
-        etree.SubElement(self.duimp, "numeroDUIMP").text = duimp_fmt
-        
-        pgto = etree.SubElement(self.duimp, "pagamento")
-        etree.SubElement(pgto, "codigoReceita").text = "0086"
-        etree.SubElement(pgto, "valorReceita").text = "000000000000000"
-        
-        etree.SubElement(self.duimp, "totalAdicoes").text = str(len(self.p.items)).zfill(3)
-        etree.SubElement(self.duimp, "viaTransporteNome").text = "MARÍTIMA"
+        # --- B. RODAPÉ (DADOS GERAIS) ---
+        footer_map = {
+            "numeroDUIMP": duimp_fmt,
+            "importadorNome": h.get("nomeImportador", ""),
+            "importadorNumero": DataFormatter.format_number(h.get("cnpj"), 14),
+            "cargaPesoBruto": DataFormatter.format_number(h.get("pesoBruto"), 15),
+            "cargaPesoLiquido": DataFormatter.format_number(h.get("pesoLiquido"), 15),
+            "cargaPaisProcedenciaNome": h.get("paisProcedencia", "").upper(),
+            "totalAdicoes": str(len(self.p.items)).zfill(3)
+        }
+
+        for tag, default_val in FOOTER_TAGS.items():
+            if isinstance(default_val, list):
+                parent = etree.SubElement(self.duimp, tag)
+                for subfield in default_val:
+                    etree.SubElement(parent, subfield["tag"]).text = subfield["default"]
+            elif isinstance(default_val, dict):
+                parent = etree.SubElement(self.duimp, tag)
+                etree.SubElement(parent, default_val["tag"]).text = default_val["default"]
+            else:
+                val = footer_map.get(tag, default_val)
+                etree.SubElement(self.duimp, tag).text = val
 
         return etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=True)
 
-# --- Interface ---
-st.title("Extrator DUIMP (Full Calc)")
-st.markdown("Extração com cálculo automático de CBS (0.90%) e IBS (0.10%) sobre a Base ICMS.")
+# ==============================================================================
+# 5. APP
+# ==============================================================================
 
-file = st.file_uploader("PDF da DUIMP", type="pdf")
+st.title("Conversor DUIMP (Layout M-DUIMP + Cálculos)")
+
+file = st.file_uploader("Upload PDF", type="pdf")
 
 if file:
     if st.button("Gerar XML"):
@@ -307,8 +474,8 @@ if file:
             b = XMLBuilder(p)
             xml = b.build()
             
-            st.success("Sucesso!")
-            st.download_button("Baixar XML", xml, "DUIMP_Calculada.xml", "text/xml")
+            st.success(f"Sucesso! {len(p.items)} itens processados.")
+            st.download_button("Baixar XML", xml, "DUIMP_Final.xml", "text/xml")
             
         except Exception as e:
             st.error(f"Erro: {e}")
