@@ -3,7 +3,7 @@ import fitz  # PyMuPDF
 import re
 from lxml import etree
 
-st.set_page_config(page_title="Conversor DUIMP (Layout Rígido + Calculo)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP (Nome Dinâmico)", layout="wide")
 
 # ==============================================================================
 # 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO)
@@ -474,8 +474,12 @@ if file:
             b = XMLBuilder(p)
             xml = b.build()
             
+            # NOME DINÂMICO DO ARQUIVO
+            numero_duimp = p.header.get("numeroDUIMP", "00000000000").replace("/", "-")
+            nome_arquivo = f"DUIMP_{numero_duimp}.xml"
+
             st.success(f"Sucesso! {len(p.items)} itens processados.")
-            st.download_button("Baixar XML", xml, "DUIMP_Final.xml", "text/xml")
+            st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
             
         except Exception as e:
             st.error(f"Erro: {e}")
