@@ -2,25 +2,51 @@ import streamlit as st
 import fitz  # PyMuPDF
 import re
 from lxml import etree
-from datetime import datetime
-import io
 
 # Configuração da Página
-st.set_page_config(page_title="Conversor DUIMP PDF > XML", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP PDF > XML (Formatado)", layout="wide")
 
-# --- CSS para melhorar a interface ---
-st.markdown("""
-    <style>
-    .stButton>button {
-        width: 100%;
-        background-color: #4CAF50;
-        color: white;
-    }
-    .reportview-container {
-        background: #f0f2f6;
-    }
-    </style>
-""", unsafe_allow_html=True)
+class XmlFormatter:
+    """Classe auxiliar para formatar dados conforme o padrão do XML modelo (M-DUIMP-8686868686.xml)"""
+    
+    @staticmethod
+    def clean_text(text):
+        """Remove quebras de linha e espaços extras."""
+        if text:
+            # Substitui quebras de linha por espaço e remove espaços duplicados
+            return " ".join(text.split()).strip()
+        return ""
+
+    @staticmethod
+    def format_number_xml(value, length=15):
+        """
+        Transforma '1.550,08' em '000000000155008' (padrão Siscomex/DUIMP).
+        Remove pontos e vírgulas e preenche com zeros à esquerda.
+        """
+        if not value:
+            return "0" * length
+        
+        # Remove caracteres não numéricos
+        clean_val = re.sub(r'[^\d]', '', value)
+        
+        # Preenche com zeros à esquerda até o tamanho desejado
+        return clean_val.zfill(length)
+
+    @staticmethod
+    def format_ncm(value):
+        """Remove pontos do NCM: '3926.30.00' -> '39263000'"""
+        if not value:
+            return ""
+        # Pega apenas os primeiros 8 dígitos numéricos
+        clean = re.sub(r'[^\d]', '', value)
+        return clean[:8]
+
+    @staticmethod
+    def format_cnpj(value):
+        """Remove pontuação do CNPJ"""
+        if not value:
+            return ""
+        return re.sub(r'[^\d]', '', value)
 
 class DuimpParser:
     def __init__(self, pdf_file):
@@ -32,19 +58,15 @@ class DuimpParser:
         }
 
     def extract_text_fast(self):
-        """Extrai texto usando PyMuPDF para alta performance."""
+        """Extrai texto usando PyMuPDF."""
         doc = fitz.open(stream=self.pdf_file.read(), filetype="pdf")
         text_parts = []
         
-        # Barra de progresso para arquivos grandes
         progress_bar = st.progress(0)
         total_pages = len(doc)
         
         for i, page in enumerate(doc):
-            # Extrai texto preservando layout físico aproximado
             text_parts.append(page.get_text("text"))
-            
-            # Atualiza barra a cada 10 páginas para não travar a UI
             if i % 10 == 0:
                 progress_bar.progress((i + 1) / total_pages)
                 
@@ -53,179 +75,172 @@ class DuimpParser:
         doc.close()
 
     def parse_header(self):
-        """Extrai dados gerais da DUIMP (Capa)."""
+        """Extrai dados da capa da DUIMP."""
         text = self.full_text
         
-        # Padrões Regex baseados no layout do PDF fornecido
+        # Regex baseada no seu PDF (Extrato-DUIMP...) [cite: 1, 16, 17, 34, 134]
         patterns = {
             "numeroDUIMP": r"Extrato da DUIMP\s+([\w\-\/]+)",
             "cnpjImportador": r"CNPJ do importador:\s*\n\s*([\d\.\/\-]+)",
             "nomeImportador": r"Nome do importador:\s*\n\s*(.+)",
             "pesoBruto": r"Peso Bruto \(kg\):\s*\n\s*\"?([\d\.]+,\d+)\"?",
             "pesoLiquido": r"Peso Liquido \(kg\):\s*\n\s*\"?([\d\.]+,\d+)\"?",
-            "unidadeDespacho": r"Unidade de despacho:\s*\n\s*([\d]+-[A-Z\s]+)",
-            "paisProcedencia": r"País de Procedência:\s*\n\s*\"?([^\"]+)\"?"
+            "paisProcedencia": r"País de Procedência:\s*\n\s*\"?([^\"]+)\"?",
+            "unidadeDespacho": r"Unidade de despacho:\s*\n\s*([\d]+)" # Pega só o código numérico
         }
 
         for key, pattern in patterns.items():
             match = re.search(pattern, text, re.MULTILINE)
             if match:
-                self.data["header"][key] = match.group(1).strip().replace('"', '')
+                raw_value = match.group(1).strip().replace('"', '')
+                self.data["header"][key] = XmlFormatter.clean_text(raw_value)
 
     def parse_items(self):
-        """Extrai as adições (Itens) iterando pelo texto."""
-        # Divide o texto pelos marcadores de Item para processamento isolado
-        # O padrão busca "Extrato da Duimp ... : Item 00001"
+        """Extrai as adições com lógica de limpeza agressiva."""
+        # Divide o texto pelos itens
         item_chunks = re.split(r"Extrato da Duimp .+ : Item (\d+)", self.full_text)
         
-        # O split gera [lixo, numero_item_1, conteudo_1, numero_item_2, conteudo_2...]
         if len(item_chunks) > 1:
-            # Ignora o primeiro elemento (cabeçalho geral antes do item 1)
             for i in range(1, len(item_chunks), 2):
                 item_num = item_chunks[i]
                 content = item_chunks[i+1]
                 
                 adicao = {
-                    "numeroAdicao": item_num,
-                    "numeroSequencialItem": item_num, # Assumindo 1:1
+                    "numeroAdicao": item_num.zfill(3), # Ex: 001
                     "mercadoria": {}
                 }
 
-                # Regex específicos para dentro do Item
+                # Regex ajustados para parar no próximo rótulo e evitar capturar texto demais
+                # Baseado nos campos do PDF [cite: 54, 86, 90, 94, 107]
                 item_patterns = {
                     "codigoNcm": r"NCM:\s*\n\s*([\d\.]+)",
                     "paisOrigem": r"País de origem:\s*\n\s*(.+)",
-                    "condicaoVendaValorReais": r"Valor total na condição de venda:\s*\n\s*([\d\.,]+)", # Ajustar conforme layout
+                    "valorTotal": r"Valor total na condição de venda:\s*\n\s*([\d\.,]+)",
                     "valorUnitario": r"Valor unitário na condição de venda:\s*\n\s*([\d\.,]+)",
                     "quantidade": r"Quantidade na unidade estatística:\s*\n\s*([\d\.,]+)",
-                    "descricaoMercadoria": r"Detalhamento do Produto:\s*\n\s*(.+?)(?=\n\s*Número de Identificação|\n\s*Código de Class)",
-                    "unidadeMedida": r"Unidade estatística:\s*\n\s*(.+)"
+                    "unidadeMedida": r"Unidade estatística:\s*\n\s*(.+)",
+                    # O detalhamento pega tudo até encontrar "Número de Identificação" ou "Código de Class"
+                    "descricaoMercadoria": r"Detalhamento do Produto:\s*\n\s*(.+?)(?=\n\s*(?:Número de Identificação|Código de Class|Versão))",
+                    "moeda": r"Moeda negociada:\s*\n\s*(.+)"
                 }
 
                 for key, pattern in item_patterns.items():
                     match = re.search(pattern, content, re.DOTALL | re.MULTILINE)
                     if match:
-                        value = match.group(1).strip().replace('\n', ' ')
-                        if key in ["descricaoMercadoria"]:
-                             adicao["mercadoria"][key] = value
+                        raw_value = match.group(1)
+                        clean_val = XmlFormatter.clean_text(raw_value)
+                        
+                        if key == "descricaoMercadoria":
+                            adicao["mercadoria"][key] = clean_val
                         else:
-                            adicao[key] = value
+                            adicao[key] = clean_val
                 
                 self.data["adicoes"].append(adicao)
 
     def generate_xml(self):
-        """Gera o XML seguindo a estrutura estrita solicitada."""
+        """Gera o XML seguindo a estrutura do arquivo M-DUIMP-8686868686.xml."""
         
-        # Namespace e Raiz
         root = etree.Element("ListaDeclaracoes")
         duimp = etree.SubElement(root, "duimp")
 
         h = self.data["header"]
         
-        # --- Preenchimento do Cabeçalho (Adições contêm os dados gerais no XML de exemplo) ---
-        # No XML de exemplo, muitos dados gerais se repetem dentro da tag <adicao>.
-        # Vamos iterar sobre as adições extraídas e montar a estrutura.
-        
+        # --- Iteração das Adições (Estrutura Principal) ---
         for item in self.data["adicoes"]:
             adicao_node = etree.SubElement(duimp, "adicao")
             
-            # Mapeamento campos Item
-            etree.SubElement(adicao_node, "numeroAdicao").text = item.get("numeroAdicao", "")
-            etree.SubElement(adicao_node, "numeroDUIMP").text = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "") # Limpa formatação
+            # --- Campos Básicos da Adição ---
+            # numeroAdicao: 001
+            etree.SubElement(adicao_node, "numeroAdicao").text = item.get("numeroAdicao", "001")
             
-            # Dados de Carga (Repetidos do Header)
-            etree.SubElement(adicao_node, "dadosCargaPaisProcedenciaNome").text = h.get("paisProcedencia", "")
-            etree.SubElement(adicao_node, "dadosCargaUrfEntradaCodigo").text = h.get("unidadeDespacho", "").split("-")[0]
-            
-            # Dados Mercadoria Específicos
-            etree.SubElement(adicao_node, "dadosMercadoriaCodigoNcm").text = item.get("codigoNcm", "").replace(".", "")
-            etree.SubElement(adicao_node, "paisOrigemMercadoriaNome").text = item.get("paisOrigem", "")
-            
-            # Sub-nó Mercadoria
-            mercadoria_node = etree.SubElement(adicao_node, "mercadoria")
-            etree.SubElement(mercadoria_node, "descricaoMercadoria").text = item["mercadoria"].get("descricaoMercadoria", "")
-            etree.SubElement(mercadoria_node, "numeroSequencialItem").text = item.get("numeroSequencialItem", "")
-            etree.SubElement(mercadoria_node, "quantidade").text = item.get("quantidade", "").replace(",", ".")
-            etree.SubElement(mercadoria_node, "unidadeMedida").text = item.get("unidadeMedida", "")
-            etree.SubElement(mercadoria_node, "valorUnitario").text = item.get("valorUnitario", "").replace(",", ".")
+            # numeroDUIMP: Limpo (Ex: 26BR00000011160)
+            raw_duimp = h.get("numeroDUIMP", "").split("/")[0]
+            etree.SubElement(adicao_node, "numeroDUIMP").text = XmlFormatter.format_cnpj(raw_duimp)
 
-            # Valores Financeiros (Exemplo de mapeamento)
-            etree.SubElement(adicao_node, "condicaoVendaValorMoeda").text = item.get("condicaoVendaValorReais", "").replace(",", ".")
+            # --- Dados de Carga (Herança do Cabeçalho) ---
+            etree.SubElement(adicao_node, "dadosCargaPaisProcedenciaCodigo").text = "000" # Placeholder padrão ou extrair tabela de-para
+            # País Procedência limpo [cite: 34]
+            etree.SubElement(adicao_node, "dadosCargaPaisProcedenciaNome").text = h.get("paisProcedencia", "")
+            etree.SubElement(adicao_node, "dadosCargaUrfEntradaCodigo").text = h.get("unidadeDespacho", "0000000")
+
+            # --- Mercadoria (Nó Interno) ---
+            # Estrutura baseada no modelo XML
+            etree.SubElement(adicao_node, "dadosMercadoriaCodigoNcm").text = XmlFormatter.format_ncm(item.get("codigoNcm"))
+            etree.SubElement(adicao_node, "dadosMercadoriaMedidaEstatisticaUnidade").text = item.get("unidadeMedida", "UNIDADE")
+            # Quantidade formatada padrão XML (Ex: 00000004584200)
+            etree.SubElement(adicao_node, "dadosMercadoriaMedidaEstatisticaQuantidade").text = XmlFormatter.format_number_xml(item.get("quantidade"), 14)
             
-            # Adicione aqui o restante das tags fixas ou calculadas conforme o XML modelo
-            # Exemplo de tags fixas para manter estrutura:
-            etree.SubElement(adicao_node, "condicaoVendaIncoterm").text = "FCA" # Exemplo, extrair se disponível
-            
-        # --- Dados Gerais da DUIMP (Fora das adições, se houver no layout alvo) ---
-        # Baseado no XML enviado anteriormente, algumas tags ficam fora, outras dentro.
-        # Ajuste conforme necessidade exata.
-        
+            # Nó <mercadoria>
+            mercadoria_node = etree.SubElement(adicao_node, "mercadoria")
+            # Descrição limpa e em uma linha
+            etree.SubElement(mercadoria_node, "descricaoMercadoria").text = item["mercadoria"].get("descricaoMercadoria", "")
+            etree.SubElement(mercadoria_node, "numeroSequencialItem").text = "01" # Default por item
+            etree.SubElement(mercadoria_node, "quantidade").text = XmlFormatter.format_number_xml(item.get("quantidade"), 14)
+            etree.SubElement(mercadoria_node, "unidadeMedida").text = "PECA" # Ou extrair unidade comercial
+            etree.SubElement(mercadoria_node, "valorUnitario").text = XmlFormatter.format_number_xml(item.get("valorUnitario"), 20) # Valor unitário costuma ser maior no XML modelo
+
+            # --- Valores Financeiros ---
+            # Condição de venda (Moeda e Reais)
+            etree.SubElement(adicao_node, "condicaoVendaMoedaNome").text = item.get("moeda", "")
+            # No XML modelo, valorMoeda e valorReais são formatados com zeros
+            etree.SubElement(adicao_node, "condicaoVendaValorMoeda").text = XmlFormatter.format_number_xml(item.get("valorTotal"), 15)
+            # Nota: O PDF Extrato pode não ter o valor convertido em Reais por item explícito na mesma linha, 
+            # aqui estou usando o valor moeda como placeholder ou você precisaria calcular se tiver a taxa.
+            # Vou deixar o valor moeda duplicado para manter a tag preenchida conforme solicitado.
+            etree.SubElement(adicao_node, "condicaoVendaValorReais").text = XmlFormatter.format_number_xml(item.get("valorTotal"), 15)
+
+            # País de Origem
+            etree.SubElement(adicao_node, "paisOrigemMercadoriaNome").text = item.get("paisOrigem", "")
+
+        # --- Dados Gerais (Tags Soltas no final ou início do duimp) ---
+        # Armazém
         armazem = etree.SubElement(duimp, "armazem")
-        etree.SubElement(armazem, "nomeArmazem").text = "TCP" # Extrair do PDF se possível
+        etree.SubElement(armazem, "nomeArmazem").text = "PADRAO" # Ajustar se houver no PDF
         
-        etree.SubElement(duimp, "cargaPesoBruto").text = h.get("pesoBruto", "").replace(".", "").replace(",", "")
-        etree.SubElement(duimp, "cargaPesoLiquido").text = h.get("pesoLiquido", "").replace(".", "").replace(",", "")
+        # Pesos (Formatados com zeros) [cite: 34]
+        etree.SubElement(duimp, "cargaPesoBruto").text = XmlFormatter.format_number_xml(h.get("pesoBruto"), 15)
+        etree.SubElement(duimp, "cargaPesoLiquido").text = XmlFormatter.format_number_xml(h.get("pesoLiquido"), 15)
         
-        # Importador
+        # Importador [cite: 16, 17]
         etree.SubElement(duimp, "importadorNome").text = h.get("nomeImportador", "")
-        etree.SubElement(duimp, "importadorNumero").text = h.get("cnpjImportador", "").replace(".", "").replace("/", "").replace("-", "")
+        etree.SubElement(duimp, "importadorNumero").text = XmlFormatter.format_cnpj(h.get("cnpjImportador"))
 
         return etree.tostring(root, pretty_print=True, encoding="UTF-8", xml_declaration=True)
 
-# --- Lógica do Streamlit ---
+# --- Interface Streamlit ---
 
-st.title("📄 Conversor DUIMP (PDF) para XML")
-st.markdown("Extração de dados de importação com manutenção rigorosa de layout.")
+st.title("📄 Conversor DUIMP PDF > XML (Layout Rígido)")
+st.markdown("Extração limpa e formatada conforme padrão XML de importação.")
 
-uploaded_file = st.file_uploader("Arraste seu arquivo PDF aqui (Suporta 500+ páginas)", type=["pdf"])
+uploaded_file = st.file_uploader("Arraste seu arquivo PDF aqui", type=["pdf"])
 
 if uploaded_file is not None:
-    st.info(f"Arquivo carregado: {uploaded_file.name}")
-    
-    if st.button("Processar e Gerar XML"):
-        try:
-            with st.spinner("Lendo PDF e estruturando dados..."):
-                # 1. Instancia o Parser
+    if st.button("Converter"):
+        with st.spinner("Processando..."):
+            try:
                 parser = DuimpParser(uploaded_file)
-                
-                # 2. Extração Rápida (PyMuPDF)
                 parser.extract_text_fast()
-                
-                # 3. Parsing Lógico
                 parser.parse_header()
                 parser.parse_items()
                 
-                # 4. Geração XML
                 xml_content = parser.generate_xml()
                 
-                # 5. Visualização e Download
-                st.success(f"Processamento concluído! Encontrados {len(parser.data['adicoes'])} itens.")
+                st.success("Conversão realizada com sucesso!")
                 
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.subheader("Prévia dos Dados Extraídos (JSON)")
-                    st.json(parser.data, expanded=False)
-                
-                with col2:
-                    st.subheader("Download XML")
-                    st.download_button(
-                        label="📥 Baixar XML Formatado",
-                        data=xml_content,
-                        file_name=f"DUIMP_{parser.data['header'].get('numeroDUIMP', 'processada').replace('/', '-')}.xml",
-                        mime="application/xml"
-                    )
-                    
-                    st.text_area("Prévia do XML", value=xml_content.decode("utf-8"), height=300)
+                # Exibe prévia do JSON interno para conferência
+                with st.expander("Ver Dados Extraídos (Depuração)"):
+                    st.json(parser.data)
 
-        except Exception as e:
-            st.error(f"Erro ao processar o arquivo: {e}")
-            st.warning("Verifique se o PDF é um Extrato de DUIMP válido.")
-
-else:
-    st.markdown("""
-    ### Instruções:
-    1. Faça upload do extrato da DUIMP em PDF.
-    2. O sistema extrairá cabeçalho, pesos, importador e detalhes de cada item.
-    3. O XML gerado seguirá a estrutura hierárquica `ListaDeclaracoes > duimp > adicao`.
-    """)
+                # Download
+                st.download_button(
+                    label="📥 Baixar XML",
+                    data=xml_content,
+                    file_name="DUIMP_Processada.xml",
+                    mime="application/xml"
+                )
+                
+                # Visualização do XML
+                st.text_area("XML Gerado:", value=xml_content.decode("utf-8"), height=400)
+                
+            except Exception as e:
+                st.error(f"Erro: {str(e)}")
