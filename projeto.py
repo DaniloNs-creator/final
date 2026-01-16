@@ -1,6 +1,6 @@
 import streamlit as st
 import pdfplumber
-import pypdf  # <--- Nova biblioteca para o plano B
+import pypdf  
 import re
 import io
 import pandas as pd
