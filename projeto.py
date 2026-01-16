@@ -1,419 +1,274 @@
 import streamlit as st
 import pdfplumber
-import pypdf
+import xml.etree.ElementTree as ET
 import re
-import io
-import pandas as pd
-from datetime import datetime
+from io import BytesIO
+import datetime
 
-# --- CONFIGURAÇÕES E UTILITÁRIOS ---
-st.set_page_config(page_title="Conversor DUIMP Pro", layout="wide")
+# --- CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="Conversor DUIMP PDF > XML SAP", layout="wide")
 
-def clean_text(text):
-    """Remove quebras de linha e espaços múltiplos."""
-    if not text: return ""
-    return re.sub(r'\s+', ' ', text).strip()
+# --- FUNÇÕES AUXILIARES DE FORMATAÇÃO ---
 
-def format_siscomex(value, length=15, decimals=2):
+def format_sap_number(value, length=15, decimal_places=2):
     """
-    Formata valores para o padrão Siscomex/Serpro:
-    - Remove pontos de milhar.
-    - Mantém decimais fixos.
-    - Remove vírgula/ponto decimal.
-    - Preenche com zeros à esquerda (Zfill).
-    Ex: 1.200,50 -> 0000000120050 (para length=13, decimals=2)
+    Formata um valor numérico (string ou float) para o padrão SAP:
+    Ex: 100,50 -> Remove pontuação, ajusta decimais e preenche com zeros à esquerda.
     """
     if not value:
         return "0" * length
     
-    # 1. Limpeza básica (deixa apenas digitos e virgula/ponto)
-    # Trata formato brasileiro 1.000,00
-    if ',' in str(value):
-        clean = str(value).replace('.', '') # Remove milhar
-        parts = clean.split(',')
-        if len(parts) > 1:
-            integer = parts[0]
-            fraction = parts[1][:decimals].ljust(decimals, '0')
-            raw = f"{integer}{fraction}"
-        else:
-            raw = f"{parts[0]}{'0'*decimals}"
-    # Trata formato americano ou float puro
-    elif '.' in str(value):
-        parts = str(value).split('.')
-        integer = parts[0]
-        fraction = parts[1][:decimals].ljust(decimals, '0')
-        raw = f"{integer}{fraction}"
-    # Trata inteiros
+    # Limpeza básica da string vinda do PDF
+    if isinstance(value, str):
+        # Remove pontos de milhar e substitui vírgula decimal por ponto
+        clean_val = value.replace('.', '').replace(',', '.')
+        try:
+            num = float(clean_val)
+        except ValueError:
+            return "0" * length
     else:
-        raw = f"{str(value)}{'0'*decimals}"
+        num = float(value)
 
-    # Remove qualquer caractere não numérico restante
-    final_digits = re.sub(r'\D', '', raw)
+    # Converter para inteiro removendo o ponto decimal (multiplicando pela precisão)
+    # O XML parece usar representação sem vírgula, apenas digitos.
+    # Ex: 1066.01 -> 106601
+    int_val = int(round(num * (10**decimal_places)))
+    str_val = str(int_val)
     
-    return final_digits.zfill(length)
+    return str_val.zfill(length)
 
-def extract_field(text, pattern, default=""):
-    """Extração segura via Regex."""
-    if not text: return default
-    match = re.search(pattern, text, re.IGNORECASE)
-    return match.group(1).strip() if match else default
+def clean_text(text):
+    """Remove quebras de linha e espaços extras."""
+    if text:
+        return text.replace('\n', ' ').strip()
+    return ""
 
-# --- MOTOR DE EXTRAÇÃO HÍBRIDO ---
+def extract_field(text_block, pattern):
+    """Extrai dados usando Regex de um bloco de texto."""
+    match = re.search(pattern, text_block, re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return ""
 
-def process_pdf_data(pdf_file):
-    """
-    Lê o PDF e extrai dados estruturados mapeando o arquivo Extrato-DUIMP.
-    Usa pdfplumber (preciso) e pypdf (backup).
-    """
-    full_text = ""
-    
-    # Leitura do PDF
-    try:
-        pdf_bytes = pdf_file.read()
-        
-        # Tentativa 1: pdfplumber
-        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            for page in pdf.pages:
-                try:
-                    text = page.extract_text()
-                    if text: full_text += text + "\n"
-                except: pass
-        
-        # Tentativa 2: pypdf (se falhar ou vier vazio)
-        if len(full_text) < 100:
-            reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
-            full_text = ""
-            for page in reader.pages:
-                full_text += page.extract_text() + "\n"
-                
-    except Exception as e:
-        return None, f"Erro na leitura: {str(e)}"
+# --- LÓGICA DE EXTRAÇÃO DO PDF ---
 
-    # --- MAPEAMENTO DE DADOS (Baseado nos [sources] do prompt) ---
+def parse_duimp_pdf(pdf_file):
     data = {
         "header": {},
-        "itens": []
+        "itens": [],
+        "tributos_gerais": {} # Caso haja tributos consolidados
     }
-
-    # 1. Dados Capa (Header)
-    # Número DUIMP
-    data["header"]["numero_duimp"] = extract_field(full_text, r"Extrato da DUIMP\s+([0-9BR-]+)")
-    # CNPJ Importador
-    data["header"]["cnpj"] = extract_field(full_text, r"CNPJ do importador:\s*([\d\.\/-]+)")
-    # País Procedência
-    data["header"]["pais_proc"] = extract_field(full_text, r"País de Procedência:\s*(.+?)(?=\n)", "CHINA")
-    # URF Entrada
-    data["header"]["urf_entrada"] = extract_field(full_text, r"UNIDADE DE ENTRADA.*?(\d{7})", "0000000")
-    # Frete Total
-    data["header"]["frete_total"] = extract_field(full_text, r"VALOR DO FRETE\s*:\s*([\d\.,]+)", "0,00")
-    # Totais Impostos (II, IPI, PIS, COFINS globais se houver)
-    # Nota: O layout pede por ITEM. Vamos tentar extrair por item, mas usar globais como fallback visual.
-
-    # 2. Dados dos Itens (Adições)
-    # Regex para quebrar o texto nos marcadores "Extrato da Duimp... Item X"
-    # 
-    raw_itens = re.split(r"(?i)Extrato da Duimp.*?Item\s+(\d+)", full_text)
-
-    if len(raw_itens) > 1:
-        # Pula o índice 0 (cabeçalho geral) e itera em pares (Numero, Conteudo)
-        iterator = iter(raw_itens[1:])
-        for item_num, content in zip(iterator, iterator):
-            item = {}
-            item["numero"] = item_num
-            
-            # NCM
-            item["ncm"] = extract_field(content, r"NCM:\s*([\d\.]+)")
-            
-            # Descrição
-            desc = re.search(r"Detalhamento do Produto:\s*(.*?)(?=\nCódigo de Class|Tributos|Versão)", content, re.DOTALL)
-            item["descricao"] = clean_text(desc.group(1)) if desc else "DESCRIÇÃO NÃO ENCONTRADA"
-            
-            # Quantidade
-            item["quantidade"] = extract_field(content, r"Quantidade na unidade comercializada:\s*([\d\.,]+)")
-            
-            # Valor Unitário
-            item["valor_unit"] = extract_field(content, r"Valor unitário na condição de venda:\s*([\d\.,]+)")
-            
-            # Valor Total Local (VMLD ou VMLE dependendo do Incoterm, aqui pega Condição Venda)
-            item["valor_total"] = extract_field(content, r"Valor total na condição de venda:\s*([\d\.,]+)")
-            
-            # Peso Líquido
-            item["peso_liq"] = extract_field(content, r"Peso l[íi]quido \(kg\):\s*([\d\.,]+)")
-            
-            # Tributos (Se houver tabela no item)
-            # Como o XML M-DUIMP exige campos específicos (II, IPI, PIS, COFINS, ICMS, CBS, IBS)
-            # e o PDF muitas vezes diz "Nenhum resultado encontrado", preencheremos com 0 para manter o layout.
-            
-            data["itens"].append(item)
-            
-    return data, None
-
-# --- GERADOR DE XML (LAYOUT M-DUIMP OBRIGATÓRIO) ---
-
-def generate_xml_m_duimp(data):
-    """
-    Gera o XML preenchendo o template M-DUIMP-8686868686.xml.
-    Não usa bibliotecas de XML para garantir a ordem estrita das tags.
-    """
     
-    # Header Estático
-    xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-    xml += '<ListaDeclaracoes>\n'
-    xml += '    <duimp>\n'
+    with pdfplumber.open(pdf_file) as pdf:
+        full_text = ""
+        for page in pdf.pages:
+            full_text += page.extract_text() + "\n"
+
+        # --- 1. Extração Cabeçalho e Importador ---
+        # DUIMP Numero
+        duimp_match = re.search(r'Extrato da DUIMP\s+([0-9BR-]+)', full_text)
+        data["header"]["numero_duimp"] = duimp_match.group(1).replace('-', '').replace('/', '') if duimp_match else "0000000000"
+        
+        # Importador
+        data["header"]["cnpj_importador"] = extract_field(full_text, r'CNPJ do importador:\s*([\d\./-]+)').replace('.','').replace('/','').replace('-','')
+        data["header"]["nome_importador"] = extract_field(full_text, r'Nome do importador:\s*(.+)')
+        
+        # Endereço (Simplificado via regex, pode precisar de ajuste fino dependendo da variação do endereço)
+        endereco_match = re.search(r'Endereço do importador:\s*(.+?)(?=Informações Complementares|Carga)', full_text, re.DOTALL)
+        data["header"]["endereco_importador"] = clean_text(endereco_match.group(1)) if endereco_match else ""
+
+        # --- 2. Dados da Carga ---
+        # Peso Bruto e Líquido (Geral) - Busca na tabela de carga
+        peso_bruto_match = re.search(r'Peso Bruto \(kg\):\s*([\d\.,]+)', full_text)
+        data["header"]["peso_bruto_total"] = peso_bruto_match.group(1) if peso_bruto_match else "0"
+        
+        peso_liq_match = re.search(r'Peso Liquido \(kg\):\s*([\d\.,]+)', full_text)
+        data["header"]["peso_liquido_total"] = peso_liq_match.group(1) if peso_liq_match else "0"
+
+        data["header"]["pais_procedencia"] = extract_field(full_text, r'País de Procedência:\s*(.+)')
+        
+        # --- 3. Extração dos Itens (Adições) ---
+        # A lógica aqui procura por padrões "Item 00001", "Item 00002" etc.
+        # Como o PDFplumber extrai texto linear, vamos dividir pelos marcadores de item.
+        
+        # Regex para identificar início de item
+        item_splits = re.split(r'(Extrato da Duimp .* Item \d+)', full_text)
+        
+        # O primeiro split geralmente é o cabeçalho geral, ignoramos
+        for i in range(1, len(item_splits), 2):
+            header_item = item_splits[i] # O texto "Item 00001"
+            content_item = item_splits[i+1] # O conteúdo do item
+            
+            item_data = {}
+            
+            # Numero Adição
+            num_adicao_match = re.search(r'Item\s+(\d+)', header_item)
+            item_data["numero_adicao"] = num_adicao_match.group(1) if num_adicao_match else f"{i:03d}"
+            
+            # Dados do Produto
+            item_data["codigo_produto"] = extract_field(content_item, r'Código do produto:\s*(.+)')
+            item_data["ncm"] = extract_field(content_item, r'NCM:\s*(\d+)')
+            item_data["descricao"] = extract_field(content_item, r'Detalhamento do Produto:\s*(.+?)(?=Número de Identificação|Código de Class)')
+            
+            # País Origem
+            item_data["pais_origem"] = extract_field(content_item, r'País de origem:\s*(.+?)(?=Código do Fabricante|Material)')
+            
+            # Valores e Pesos do Item
+            peso_liq_item = extract_field(content_item, r'Peso líquido \(kg\):\s*([\d\.,]+)')
+            item_data["peso_liquido"] = peso_liq_item if peso_liq_item else "0"
+            
+            qtd_est = extract_field(content_item, r'Quantidade na unidade estatística:\s*([\d\.,]+)')
+            item_data["qtd_estatistica"] = qtd_est if qtd_est else "0"
+            
+            valor_unit = extract_field(content_item, r'Valor unitário na condição de venda:\s*([\d\.,]+)')
+            item_data["valor_unitario"] = valor_unit if valor_unit else "0"
+            
+            valor_total = extract_field(content_item, r'Valor total na condição de venda:\s*([\d\.,]+)')
+            item_data["valor_total_moeda"] = valor_total if valor_total else "0"
+            
+            # Fabricante
+            fab_nome = extract_field(content_item, r'Código do Fabricante/Produtor:\s*(.+?)(?=Endereço)')
+            item_data["fabricante_nome"] = clean_text(fab_nome)
+
+            # TRIBUTOS (Simulação de extração - muitas vezes o PDF de extrato tem tabela vazia se for preliminar)
+            # Aqui tentamos pegar a tabela de tributos se existir texto
+            # Padrão: II, IPI, PIS, COFINS
+            # Nota: No seu PDF de exemplo os tributos estavam vazios ou zerados. 
+            # O código abaixo assume valores padrão zerados se não encontrar, para respeitar o XML.
+            
+            data["itens"].append(item_data)
+
+    return data
+
+# --- LÓGICA DE GERAÇÃO DO XML ---
+
+def generate_sap_xml(data):
+    root = ET.Element("ListaDeclaracoes")
+    duimp = ET.SubElement(root, "duimp")
     
-    # --- LOOP DE ADIÇÕES ---
+    # 1. Loop das Adições (Itens)
     for item in data["itens"]:
-        # Formatações Siscomex
-        ncm_clean = item["ncm"].replace(".", "")
-        qtd_fmt = format_siscomex(item["quantidade"], 14, 5) # Exemplo de precisão
-        peso_fmt = format_siscomex(item["peso_liq"], 15, 5)
-        val_unit_fmt = format_siscomex(item["valor_unit"], 20, 8) # Alta precisão
-        val_total_fmt = format_siscomex(item["valor_total"], 15, 2)
+        adicao = ET.SubElement(duimp, "adicao")
         
-        # Dados de IDs
-        num_adicao = item["numero"].zfill(3)
-        num_duimp_clean = data["header"]["numero_duimp"].replace(".", "").replace("-", "").replace("/", "")[:10]
+        # --- Bloco Acrescimo (Exemplo fixo ou calculado) ---
+        acrescimo = ET.SubElement(adicao, "acrescimo")
+        ET.SubElement(acrescimo, "codigoAcrescimo").text = "17" # Padrão observado
+        ET.SubElement(acrescimo, "denominacao").text = "OUTROS ACRESCIMOS AO VALOR ADUANEIRO"
+        # Valores simulados ou extraídos se disponíveis (Colocando placeholder formatado)
+        ET.SubElement(acrescimo, "valorReais").text = format_sap_number("0", 15) 
+        
+        # --- CIDE ---
+        ET.SubElement(adicao, "cideValorDevido").text = format_sap_number("0", 15)
 
-        xml += '        <adicao>\n'
+        # --- Condição de Venda ---
+        ET.SubElement(adicao, "condicaoVendaIncoterm").text = "FCA" # Exemplo, ideal extrair do PDF se existir
+        ET.SubElement(adicao, "condicaoVendaValorReais").text = format_sap_number(item["valor_total_moeda"], 15) # Simplificação: usando valor moeda como base
         
-        # ACRESCIMO
-        xml += '            <acrescimo>\n'
-        xml += '                <codigoAcrescimo>17</codigoAcrescimo>\n'
-        xml += '                <denominacao>OUTROS ACRESCIMOS AO VALOR ADUANEIRO                        </denominacao>\n'
-        xml += '                <moedaNegociadaCodigo>220</moedaNegociadaCodigo>\n' # Default USD
-        xml += '                <moedaNegociadaNome>DOLAR DOS EUA</moedaNegociadaNome>\n'
-        xml += '                <valorMoedaNegociada>000000000000000</valorMoedaNegociada>\n'
-        xml += '                <valorReais>000000000000000</valorReais>\n'
-        xml += '            </acrescimo>\n'
+        # --- Dados Mercadoria ---
+        ET.SubElement(adicao, "dadosMercadoriaCodigoNcm").text = item["ncm"].replace('.', '')
+        ET.SubElement(adicao, "dadosMercadoriaCondicao").text = "NOVA"
+        ET.SubElement(adicao, "dadosMercadoriaPesoLiquido").text = format_sap_number(item["peso_liquido"], 15, 5) # Peso costuma ter 5 casas no XML SAP
         
-        # CIDE
-        xml += '            <cideValorAliquotaEspecifica>00000000000</cideValorAliquotaEspecifica>\n'
-        xml += '            <cideValorDevido>000000000000000</cideValorDevido>\n'
-        xml += '            <cideValorRecolher>000000000000000</cideValorRecolher>\n'
+        # --- Fornecedor ---
+        ET.SubElement(adicao, "fornecedorNome").text = item["fabricante_nome"][:60] # Limite caracteres
         
-        # RELAÇÃO
-        xml += '            <codigoRelacaoCompradorVendedor>3</codigoRelacaoCompradorVendedor>\n'
-        xml += '            <codigoVinculoCompradorVendedor>1</codigoVinculoCompradorVendedor>\n'
-        
-        # COFINS
-        xml += '            <cofinsAliquotaAdValorem>00000</cofinsAliquotaAdValorem>\n'
-        xml += '            <cofinsAliquotaEspecificaQuantidadeUnidade>000000000</cofinsAliquotaEspecificaQuantidadeUnidade>\n'
-        xml += '            <cofinsAliquotaEspecificaValor>0000000000</cofinsAliquotaEspecificaValor>\n'
-        xml += '            <cofinsAliquotaReduzida>00000</cofinsAliquotaReduzida>\n'
-        xml += '            <cofinsAliquotaValorDevido>000000000000000</cofinsAliquotaValorDevido>\n'
-        xml += '            <cofinsAliquotaValorRecolher>000000000000000</cofinsAliquotaValorRecolher>\n'
-        
-        # CONDIÇÃO VENDA
-        xml += '            <condicaoVendaIncoterm>FCA</condicaoVendaIncoterm>\n'
-        xml += '            <condicaoVendaLocal>EXTERIOR</condicaoVendaLocal>\n'
-        xml += '            <condicaoVendaMetodoValoracaoCodigo>01</condicaoVendaMetodoValoracaoCodigo>\n'
-        xml += '            <condicaoVendaMetodoValoracaoNome>METODO 1 - ART. 1 DO ACORDO (DECRETO 92930/86)</condicaoVendaMetodoValoracaoNome>\n'
-        xml += '            <condicaoVendaMoedaCodigo>220</condicaoVendaMoedaCodigo>\n'
-        xml += '            <condicaoVendaMoedaNome>DOLAR DOS EUA</condicaoVendaMoedaNome>\n'
-        xml += f'            <condicaoVendaValorMoeda>{val_total_fmt}</condicaoVendaValorMoeda>\n'
-        xml += '            <condicaoVendaValorReais>000000000000000</condicaoVendaValorReais>\n'
-        
-        # DADOS CAMBIAIS
-        xml += '            <dadosCambiaisCoberturaCambialCodigo>1</dadosCambiaisCoberturaCambialCodigo>\n'
-        xml += '            <dadosCambiaisCoberturaCambialNome>COM COBERTURA CAMBIAL E PAGAMENTO FINAL A PRAZO DE ATE\' 180</dadosCambiaisCoberturaCambialNome>\n'
-        xml += '            <dadosCambiaisInstituicaoFinanciadoraCodigo>00</dadosCambiaisInstituicaoFinanciadoraCodigo>\n'
-        xml += '            <dadosCambiaisInstituicaoFinanciadoraNome>N/I</dadosCambiaisInstituicaoFinanciadoraNome>\n'
-        xml += '            <dadosCambiaisMotivoSemCoberturaCodigo>00</dadosCambiaisMotivoSemCoberturaCodigo>\n'
-        xml += '            <dadosCambiaisMotivoSemCoberturaNome>N/I</dadosCambiaisMotivoSemCoberturaNome>\n'
-        xml += '            <dadosCambiaisValorRealCambio>000000000000000</dadosCambiaisValorRealCambio>\n'
-        
-        # DADOS CARGA
-        xml += '            <dadosCargaPaisProcedenciaCodigo>000</dadosCargaPaisProcedenciaCodigo>\n'
-        xml += '            <dadosCargaUrfEntradaCodigo>0000000</dadosCargaUrfEntradaCodigo>\n'
-        xml += '            <dadosCargaViaTransporteCodigo>01</dadosCargaViaTransporteCodigo>\n'
-        xml += '            <dadosCargaViaTransporteNome>MARÍTIMA</dadosCargaViaTransporteNome>\n'
-        
-        # DADOS MERCADORIA (CRUCIAL)
-        xml += '            <dadosMercadoriaAplicacao>REVENDA</dadosMercadoriaAplicacao>\n'
-        xml += '            <dadosMercadoriaCodigoNaladiNCCA>0000000</dadosMercadoriaCodigoNaladiNCCA>\n'
-        xml += '            <dadosMercadoriaCodigoNaladiSH>00000000</dadosMercadoriaCodigoNaladiSH>\n'
-        xml += f'            <dadosMercadoriaCodigoNcm>{ncm_clean}</dadosMercadoriaCodigoNcm>\n'
-        xml += '            <dadosMercadoriaCondicao>NOVA</dadosMercadoriaCondicao>\n'
-        xml += '            <dadosMercadoriaDescricaoTipoCertificado>Sem Certificado</dadosMercadoriaDescricaoTipoCertificado>\n'
-        xml += '            <dadosMercadoriaIndicadorTipoCertificado>1</dadosMercadoriaIndicadorTipoCertificado>\n'
-        xml += f'            <dadosMercadoriaMedidaEstatisticaQuantidade>{qtd_fmt}</dadosMercadoriaMedidaEstatisticaQuantidade>\n'
-        xml += '            <dadosMercadoriaMedidaEstatisticaUnidade>QUILOGRAMA LIQUIDO</dadosMercadoriaMedidaEstatisticaUnidade>\n'
-        xml += '            <dadosMercadoriaNomeNcm>DESC NCM</dadosMercadoriaNomeNcm>\n'
-        xml += f'            <dadosMercadoriaPesoLiquido>{peso_fmt}</dadosMercadoriaPesoLiquido>\n'
-        
-        # DCR / FORNECEDOR
-        xml += '            <dcrCoeficienteReducao>00000</dcrCoeficienteReducao>\n'
-        xml += '            <dcrIdentificacao>00000000</dcrIdentificacao>\n'
-        xml += '            <dcrValorDevido>000000000000000</dcrValorDevido>\n'
-        xml += '            <dcrValorDolar>000000000000000</dcrValorDolar>\n'
-        xml += '            <dcrValorReal>000000000000000</dcrValorReal>\n'
-        xml += '            <dcrValorRecolher>000000000000000</dcrValorRecolher>\n'
-        xml += '            <fornecedorCidade>EXTERIOR</fornecedorCidade>\n'
-        xml += '            <fornecedorLogradouro>RUA EXTERIOR</fornecedorLogradouro>\n'
-        xml += '            <fornecedorNome>FORNECEDOR PADRAO</fornecedorNome>\n'
-        xml += '            <fornecedorNumero>00</fornecedorNumero>\n'
-        
-        # FRETE
-        xml += '            <freteMoedaNegociadaCodigo>220</freteMoedaNegociadaCodigo>\n'
-        xml += '            <freteMoedaNegociadaNome>DOLAR DOS EUA</freteMoedaNegociadaNome>\n'
-        xml += '            <freteValorMoedaNegociada>000000000000000</freteValorMoedaNegociada>\n'
-        xml += '            <freteValorReais>000000000000000</freteValorReais>\n'
-        
-        # IMPOSTO IMPORTAÇÃO (II)
-        xml += '            <iiAcordoTarifarioTipoCodigo>0</iiAcordoTarifarioTipoCodigo>\n'
-        xml += '            <iiAliquotaAcordo>00000</iiAliquotaAcordo>\n'
-        xml += '            <iiAliquotaAdValorem>00000</iiAliquotaAdValorem>\n'
-        xml += '            <iiAliquotaPercentualReducao>00000</iiAliquotaPercentualReducao>\n'
-        xml += '            <iiAliquotaReduzida>00000</iiAliquotaReduzida>\n'
-        xml += '            <iiAliquotaValorCalculado>000000000000000</iiAliquotaValorCalculado>\n'
-        xml += '            <iiAliquotaValorDevido>000000000000000</iiAliquotaValorDevido>\n'
-        xml += '            <iiAliquotaValorRecolher>000000000000000</iiAliquotaValorRecolher>\n'
-        xml += '            <iiAliquotaValorReduzido>000000000000000</iiAliquotaValorReduzido>\n'
-        xml += '            <iiBaseCalculo>000000000000000</iiBaseCalculo>\n'
-        xml += '            <iiFundamentoLegalCodigo>00</iiFundamentoLegalCodigo>\n'
-        xml += '            <iiMotivoAdmissaoTemporariaCodigo>00</iiMotivoAdmissaoTemporariaCodigo>\n'
-        xml += '            <iiRegimeTributacaoCodigo>1</iiRegimeTributacaoCodigo>\n'
-        xml += '            <iiRegimeTributacaoNome>RECOLHIMENTO INTEGRAL</iiRegimeTributacaoNome>\n'
-        
-        # IPI
-        xml += '            <ipiAliquotaAdValorem>00000</ipiAliquotaAdValorem>\n'
-        xml += '            <ipiAliquotaEspecificaCapacidadeRecipciente>00000</ipiAliquotaEspecificaCapacidadeRecipciente>\n'
-        xml += '            <ipiAliquotaEspecificaQuantidadeUnidadeMedida>000000000</ipiAliquotaEspecificaQuantidadeUnidadeMedida>\n'
-        xml += '            <ipiAliquotaEspecificaTipoRecipienteCodigo>00</ipiAliquotaEspecificaTipoRecipienteCodigo>\n'
-        xml += '            <ipiAliquotaEspecificaValorUnidadeMedida>0000000000</ipiAliquotaEspecificaValorUnidadeMedida>\n'
-        xml += '            <ipiAliquotaNotaComplementarTIPI>00</ipiAliquotaNotaComplementarTIPI>\n'
-        xml += '            <ipiAliquotaReduzida>00000</ipiAliquotaReduzida>\n'
-        xml += '            <ipiAliquotaValorDevido>000000000000000</ipiAliquotaValorDevido>\n'
-        xml += '            <ipiAliquotaValorRecolher>000000000000000</ipiAliquotaValorRecolher>\n'
-        xml += '            <ipiRegimeTributacaoCodigo>4</ipiRegimeTributacaoCodigo>\n'
-        xml += '            <ipiRegimeTributacaoNome>SEM BENEFICIO</ipiRegimeTributacaoNome>\n'
-        
-        # DETALHAMENTO ITEM (MERCADORIA)
-        xml += '            <mercadoria>\n'
-        # Limite de caracteres para descrição para evitar erro de buffer no ERP
-        xml += f'                <descricaoMercadoria>{item["descricao"][:250]}</descricaoMercadoria>\n'
-        xml += f'                <numeroSequencialItem>{item["numero"].zfill(2)}</numeroSequencialItem>\n'
-        xml += f'                <quantidade>{qtd_fmt}</quantidade>\n'
-        xml += '                <unidadeMedida>PECA                </unidadeMedida>\n'
-        xml += f'                <valorUnitario>{val_unit_fmt}</valorUnitario>\n'
-        xml += '            </mercadoria>\n'
-        
-        # TAGS DE IDENTIFICAÇÃO E LINKAGEM
-        xml += f'            <numeroAdicao>{num_adicao}</numeroAdicao>\n'
-        xml += f'            <numeroDUIMP>{num_duimp_clean}</numeroDUIMP>\n'	
-        xml += '            <numeroLI>0000000000</numeroLI>\n'
-        xml += '            <paisAquisicaoMercadoriaCodigo>076</paisAquisicaoMercadoriaCodigo>\n'
-        xml += '            <paisAquisicaoMercadoriaNome>CHINA</paisAquisicaoMercadoriaNome>\n'
-        xml += '            <paisOrigemMercadoriaCodigo>076</paisOrigemMercadoriaCodigo>\n'
-        xml += '            <paisOrigemMercadoriaNome>CHINA</paisOrigemMercadoriaNome>\n'
-        
-        # PIS/PASEP
-        xml += '            <pisCofinsBaseCalculoAliquotaICMS>00000</pisCofinsBaseCalculoAliquotaICMS>\n'
-        xml += '            <pisCofinsBaseCalculoFundamentoLegalCodigo>00</pisCofinsBaseCalculoFundamentoLegalCodigo>\n'
-        xml += '            <pisCofinsBaseCalculoPercentualReducao>00000</pisCofinsBaseCalculoPercentualReducao>\n'
-        xml += '            <pisCofinsBaseCalculoValor>000000000000000</pisCofinsBaseCalculoValor>\n'
-        xml += '            <pisCofinsFundamentoLegalReducaoCodigo>00</pisCofinsFundamentoLegalReducaoCodigo>\n'
-        xml += '            <pisCofinsRegimeTributacaoCodigo>1</pisCofinsRegimeTributacaoCodigo>\n'
-        xml += '            <pisCofinsRegimeTributacaoNome>RECOLHIMENTO INTEGRAL</pisCofinsRegimeTributacaoNome>\n'
-        xml += '            <pisPasepAliquotaAdValorem>00000</pisPasepAliquotaAdValorem>\n'
-        xml += '            <pisPasepAliquotaEspecificaQuantidadeUnidade>000000000</pisPasepAliquotaEspecificaQuantidadeUnidade>\n'
-        xml += '            <pisPasepAliquotaEspecificaValor>0000000000</pisPasepAliquotaEspecificaValor>\n'
-        xml += '            <pisPasepAliquotaReduzida>00000</pisPasepAliquotaReduzida>\n'
-        xml += '            <pisPasepAliquotaValorDevido>000000000000000</pisPasepAliquotaValorDevido>\n'
-        xml += '            <pisPasepAliquotaValorRecolher>000000000000000</pisPasepAliquotaValorRecolher>\n'
-        
-        # ICMS (Obrigatório conforme arquivo de exemplo)
-        xml += '            <icmsBaseCalculoValor>000000000000000</icmsBaseCalculoValor>\n'
-        xml += '            <icmsBaseCalculoAliquota>00000</icmsBaseCalculoAliquota>\n'
-        xml += '            <icmsBaseCalculoValorImposto>00000000000000</icmsBaseCalculoValorImposto>\n'
-        xml += '            <icmsBaseCalculoValorDiferido>00000000000000</icmsBaseCalculoValorDiferido>\n'
-        
-        # CBS / IBS (Reforma Tributária - Presente no Layout)
-        xml += '            <cbsIbsCst>000</cbsIbsCst>\n'
-        xml += '            <cbsIbsClasstrib>000001</cbsIbsClasstrib>\n'
-        xml += '            <cbsBaseCalculoValor>00000000000000</cbsBaseCalculoValor>\n'
-        xml += '            <cbsBaseCalculoAliquota>00000</cbsBaseCalculoAliquota>\n'
-        xml += '            <cbsBaseCalculoAliquotaReducao>00000</cbsBaseCalculoAliquotaReducao>\n'
-        xml += '            <cbsBaseCalculoValorImposto>00000000000000</cbsBaseCalculoValorImposto>\n'
-        xml += '            <ibsBaseCalculoValor>00000000000000</ibsBaseCalculoValor>\n'
-        xml += '            <ibsBaseCalculoAliquota>00000</ibsBaseCalculoAliquota>\n'
-        xml += '            <ibsBaseCalculoAliquotaReducao>00000</ibsBaseCalculoAliquotaReducao>\n'
-        xml += '            <ibsBaseCalculoValorImposto>00000000000000</ibsBaseCalculoValorImposto>\n'
-        
-        # RODAPÉ DO ITEM
-        xml += '            <relacaoCompradorVendedor>Fabricante é desconhecido</relacaoCompradorVendedor>\n'
-        xml += '            <seguroMoedaNegociadaCodigo>220</seguroMoedaNegociadaCodigo>\n'
-        xml += '            <seguroMoedaNegociadaNome>DOLAR DOS EUA</seguroMoedaNegociadaNome>\n'
-        xml += '            <seguroValorMoedaNegociada>000000000000000</seguroValorMoedaNegociada>\n'
-        xml += '            <seguroValorReais>000000000000000</seguroValorReais>\n'
-        xml += '            <sequencialRetificacao>00</sequencialRetificacao>\n'
-        xml += '            <valorMultaARecolher>000000000000000</valorMultaARecolher>\n'
-        xml += '            <valorMultaARecolherAjustado>000000000000000</valorMultaARecolherAjustado>\n'
-        xml += '            <valorReaisFreteInternacional>000000000000000</valorReaisFreteInternacional>\n'
-        xml += '            <valorReaisSeguroInternacional>000000000000000</valorReaisSeguroInternacional>\n'
-        xml += f'            <valorTotalCondicaoVenda>{val_total_fmt}</valorTotalCondicaoVenda>\n'
-        xml += '            <vinculoCompradorVendedor>Não há vinculação entre comprador e vendedor.</vinculoCompradorVendedor>\n'
-        xml += '        </adicao>\n'
+        # --- II (Imposto Importação) ---
+        ET.SubElement(adicao, "iiRegimeTributacaoCode").text = "1"
+        ET.SubElement(adicao, "iiAliquotaValorRecolher").text = format_sap_number("0", 15)
 
-    # --- TAGS FINAIS (ARMAZÉM, CARGA, PAGAMENTO) ---
-    # URF Entrada
-    urf_entrada = data["header"]["urf_entrada"]
+        # --- Mercadoria Detalhe ---
+        mercadoria = ET.SubElement(adicao, "mercadoria")
+        ET.SubElement(mercadoria, "descricaoMercadoria").text = clean_text(item["descricao"])[:200]
+        ET.SubElement(mercadoria, "numeroSequencialItem").text = item["numero_adicao"]
+        ET.SubElement(mercadoria, "quantidade").text = format_sap_number(item["qtd_estatistica"], 14, 5)
+        ET.SubElement(mercadoria, "unidadeMedida").text = "UNIDADE" # Padrão, extrair se possível
+        ET.SubElement(mercadoria, "valorUnitario").text = format_sap_number(item["valor_unitario"], 20, 8)
+
+        # --- Identificadores Chave ---
+        ET.SubElement(adicao, "numeroAdicao").text = item["numero_adicao"].zfill(3)
+        ET.SubElement(adicao, "numeroDUIMP").text = data["header"]["numero_duimp"]
+        
+        # --- Pais Origem ---
+        ET.SubElement(adicao, "paisOrigemMercadoriaNome").text = item["pais_origem"]
+
+        # --- PIS/COFINS/ICMS (Placeholders estruturais conforme XML modelo) ---
+        ET.SubElement(adicao, "pisPasepAliquotaValorRecolher").text = format_sap_number("0", 15)
+        ET.SubElement(adicao, "cofinsAliquotaValorRecolher").text = format_sap_number("0", 15)
+        ET.SubElement(adicao, "icmsBaseCalculoValor").text = format_sap_number("0", 15)
+        
+        # --- CBS/IBS (Reforma Tributária - presente no seu PDF) ---
+        ET.SubElement(adicao, "cbsIbsClasstrib").text = "000001"
+        
+        ET.SubElement(adicao, "vinculoCompradorVendedor").text = "Não há vinculação entre comprador e vendedor."
+
+    # 2. Dados Gerais da DUIMP (Tags finais do XML)
+    ET.SubElement(duimp, "armazenamentoRecintoAduaneiroNome").text = "PORTO - RECINTO PADRAO" # Extrair do PDF se disponível
+    ET.SubElement(duimp, "cargaPesoBruto").text = format_sap_number(data["header"]["peso_bruto_total"], 15, 5)
+    ET.SubElement(duimp, "cargaUrfEntradaNome").text = "PORTO DE PARANAGUA" # Fixo baseado no PDF exemplo ou extrair
     
-    xml += '        <armazem>\n'
-    xml += '            <nomeArmazem>PORTO PADRAO</nomeArmazem>\n'
-    xml += '        </armazem>\n'
-    xml += f'        <armazenamentoRecintoAduaneiroCodigo>{urf_entrada}</armazenamentoRecintoAduaneiroCodigo>\n'
-    xml += '        <armazenamentoRecintoAduaneiroNome>RECINTO ALFANDEGADO</armazenamentoRecintoAduaneiroNome>\n'
-    xml += '        <armazenamentoSetor>002</armazenamentoSetor>\n'
-    xml += '        <canalSelecaoParametrizada>001</canalSelecaoParametrizada>\n'
-    xml += '        <caracterizacaoOperacaoCodigoTipo>1</caracterizacaoOperacaoCodigoTipo>\n'
-    xml += '        <caracterizacaoOperacaoDescricaoTipo>Importação Própria</caracterizacaoOperacaoDescricaoTipo>\n'
-    xml += '        <cargaDataChegada>20250101</cargaDataChegada>\n'
-    xml += '        <cargaNumeroAgente>N/I</cargaNumeroAgente>\n'
-    xml += '        <cargaPaisProcedenciaCodigo>076</cargaPaisProcedenciaCodigo>\n'
-    xml += f'        <cargaPaisProcedenciaNome>{data["header"]["pais_proc"]}</cargaPaisProcedenciaNome>\n'
-    xml += '        <cargaPesoBruto>000000000000000</cargaPesoBruto>\n'
-    xml += '        <cargaPesoLiquido>000000000000000</cargaPesoLiquido>\n'
-    xml += f'        <cargaUrfEntradaCodigo>{urf_entrada}</cargaUrfEntradaCodigo>\n'
-    xml += '        <cargaUrfEntradaNome>PORTO DE ENTRADA</cargaUrfEntradaNome>\n'
-    # Tags de Documento/Pagamento inseridas como dummy para validação de estrutura
-    xml += '        <modalidadeDespachoCodigo>1</modalidadeDespachoCodigo>\n'
-    xml += '        <modalidadeDespachoNome>Normal</modalidadeDespachoNome>\n'
-    xml += f'        <numeroDUIMP>{data["header"]["numero_duimp"].replace(".","").replace("-","").replace("/","")[:10]}</numeroDUIMP>\n'
-    xml += '    </duimp>\n'
-    xml += '</ListaDeclaracoes>'
+    # Importador
+    ET.SubElement(duimp, "importadorNome").text = data["header"]["nome_importador"]
+    ET.SubElement(duimp, "importadorNumero").text = data["header"]["cnpj_importador"]
     
-    return xml
+    # Info Complementar
+    ET.SubElement(duimp, "informacaoComplementar").text = f"DUIMP {data['header']['numero_duimp']} gerada via conversor PDF."
+    ET.SubElement(duimp, "numeroDUIMP").text = data["header"]["numero_duimp"]
 
-# --- UI APP STREAMLIT ---
+    # Formatação final para string bonita
+    # Python 3.9+ 
+    ET.indent(root, space="    ")
+    return ET.tostring(root, encoding='utf-8', method='xml')
 
-st.title("🏭 Conversor DUIMP para Layout XML (Integrador)")
-st.info("Layout: M-DUIMP-8686868686 | Formatação: Padrão Siscomex (Zeros à esquerda)")
+# --- INTERFACE STREAMLIT ---
 
-uploaded = st.file_uploader("Upload PDF DUIMP", type="pdf")
+st.title("📄 Conversor Extrato DUIMP (PDF) -> XML SAP")
+st.markdown("""
+Esta ferramenta extrai dados de **Extratos de DUIMP em PDF** e gera um arquivo **XML formatado** para importação em sistemas ERP (Padrão SAP/Comex).
+""")
 
-if uploaded:
-    if st.button("Converter"):
-        with st.spinner("Processando (Plumber + Regex)..."):
-            extracted_data, error = process_pdf_data(uploaded)
+uploaded_file = st.file_uploader("Faça upload do PDF da DUIMP", type="pdf")
+
+if uploaded_file is not None:
+    with st.spinner('Lendo e processando PDF...'):
+        try:
+            # 1. Parse do PDF
+            parsed_data = parse_duimp_pdf(uploaded_file)
             
-            if error:
-                st.error(error)
-            elif not extracted_data["itens"]:
-                st.warning("Nenhum item encontrado. Verifique se o PDF é um extrato válido.")
-            else:
-                st.success(f"Extração concluída: {len(extracted_data['itens'])} itens.")
-                
-                # Preview
-                df = pd.DataFrame(extracted_data["itens"])
-                st.dataframe(df[["numero", "ncm", "valor_total", "descricao"]].head())
-                
-                # Geração XML
-                xml_out = generate_xml_m_duimp(extracted_data)
-                
-                st.download_button(
-                    "📥 Download XML Mapeado",
-                    data=xml_out,
-                    file_name=f"DUIMP_FINAL_{datetime.now().strftime('%H%M%S')}.xml",
-                    mime="text/xml"
-                )
+            st.success(f"PDF Processado com sucesso! DUIMP: {parsed_data['header']['numero_duimp']}")
+            
+            # Preview dos dados extraídos
+            st.subheader("Dados Extraídos (Preview)")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.info(f"**Importador:** {parsed_data['header']['nome_importador']}")
+                st.info(f"**Peso Bruto Total:** {parsed_data['header']['peso_bruto_total']} kg")
+            with col2:
+                st.info(f"**Total de Itens Identificados:** {len(parsed_data['itens'])}")
+            
+            with st.expander("Ver detalhes dos Itens Extraídos"):
+                st.json(parsed_data["itens"])
+
+            # 2. Geração do XML
+            xml_output = generate_sap_xml(parsed_data)
+            
+            st.subheader("Arquivo XML Gerado")
+            st.text_area("XML Preview (Início)", value=xml_output.decode("utf-8")[:1000] + "...", height=200)
+            
+            # Botão de Download
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+            file_name = f"M-DUIMP-{parsed_data['header']['numero_duimp']}_{timestamp}.xml"
+            
+            st.download_button(
+                label="📥 Baixar XML Completo",
+                data=xml_output,
+                file_name=file_name,
+                mime="application/xml"
+            )
+
+        except Exception as e:
+            st.error(f"Erro ao processar o arquivo: {e}")
+            st.warning("Verifique se o PDF é um 'Extrato da DUIMP' válido e legível.")
+
+# Rodapé
+st.markdown("---")
+st.caption("Desenvolvido para automação de processos de Comércio Exterior.")
