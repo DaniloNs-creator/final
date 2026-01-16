@@ -2,14 +2,14 @@ import streamlit as st
 import fitz  # PyMuPDF
 import re
 from lxml import etree
-import io
 
 # --- Configuração da Página ---
-st.set_page_config(page_title="Conversor DUIMP Pro (Layout Rígido)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP XML (Layout Mapeado)", layout="wide")
 
-# --- Definição da Ordem Estrita das Tags (Baseado no XML Modelo DUIMP_25BR...) ---
-# Esta lista garante que as tags sejam escritas EXATAMENTE nesta sequência.
-TAGS_ORDER_ADICAO = [
+# --- LISTA MESTRA DE TAGS (ORDEM ESTRITA DO MAPEAMENTO) ---
+# Qualquer tag fora desta lista não será gerada. A ordem é sagrada.
+
+TAGS_ADICAO = [
     "acrescimo", "cideValorAliquotaEspecifica", "cideValorDevido", "cideValorRecolher",
     "codigoRelacaoCompradorVendedor", "codigoVinculoCompradorVendedor", "cofinsAliquotaAdValorem",
     "cofinsAliquotaEspecificaQuantidadeUnidade", "cofinsAliquotaEspecificaValor", "cofinsAliquotaReduzida",
@@ -37,6 +37,7 @@ TAGS_ORDER_ADICAO = [
     "ipiAliquotaEspecificaTipoRecipienteCodigo", "ipiAliquotaEspecificaValorUnidadeMedida",
     "ipiAliquotaNotaComplementarTIPI", "ipiAliquotaReduzida", "ipiAliquotaValorDevido",
     "ipiAliquotaValorRecolher", "ipiRegimeTributacaoCodigo", "ipiRegimeTributacaoNome",
+    "mercadoria", # Tag complexa (abre sub-nós)
     "numeroAdicao", "numeroDUIMP", "numeroLI", "paisAquisicaoMercadoriaCodigo",
     "paisAquisicaoMercadoriaNome", "paisOrigemMercadoriaCodigo", "paisOrigemMercadoriaNome",
     "pisCofinsBaseCalculoAliquotaICMS", "pisCofinsBaseCalculoFundamentoLegalCodigo",
@@ -45,269 +46,235 @@ TAGS_ORDER_ADICAO = [
     "pisCofinsRegimeTributacaoNome", "pisPasepAliquotaAdValorem",
     "pisPasepAliquotaEspecificaQuantidadeUnidade", "pisPasepAliquotaEspecificaValor",
     "pisPasepAliquotaReduzida", "pisPasepAliquotaValorDevido", "pisPasepAliquotaValorRecolher",
-    "relacaoCompradorVendedor", "seguroMoedaNegociadaCodigo", "seguroMoedaNegociadaNome",
-    "seguroValorMoedaNegociada", "seguroValorReais", "sequencialRetificacao",
-    "valorMultaARecolher", "valorMultaARecolherAjustado", "valorReaisFreteInternacional",
-    "valorReaisSeguroInternacional", "valorTotalCondicaoVenda", "vinculoCompradorVendedor",
-    "mercadoria", # Tag complexa
     "icmsBaseCalculoValor", "icmsBaseCalculoAliquota", "icmsBaseCalculoValorImposto",
     "icmsBaseCalculoValorDiferido", "cbsIbsCst", "cbsIbsClasstrib", "cbsBaseCalculoValor",
     "cbsBaseCalculoAliquota", "cbsBaseCalculoAliquotaReducao", "cbsBaseCalculoValorImposto",
     "ibsBaseCalculoValor", "ibsBaseCalculoAliquota", "ibsBaseCalculoAliquotaReducao",
-    "ibsBaseCalculoValorImposto"
+    "ibsBaseCalculoValorImposto", "relacaoCompradorVendedor", "seguroMoedaNegociadaCodigo",
+    "seguroMoedaNegociadaNome", "seguroValorMoedaNegociada", "seguroValorReais",
+    "sequencialRetificacao", "valorMultaARecolher", "valorMultaARecolherAjustado",
+    "valorReaisFreteInternacional", "valorReaisSeguroInternacional", "valorTotalCondicaoVenda",
+    "vinculoCompradorVendedor"
 ]
 
-# --- Classes de Processamento ---
+# --- Classes Auxiliares ---
 
 class DataFormatter:
     @staticmethod
     def clean_text(text):
-        """Limpa espaços extras e quebras de linha."""
+        """Limpa quebras de linha e espaços múltiplos."""
         if not text: return ""
         return " ".join(text.split()).strip()
 
     @staticmethod
     def format_number(value, length=15):
-        """Formata numeros para o padrão '000000000100000' (sem ponto/virgula)."""
+        """Formata para o padrão 000000000100000 (sem virgula/ponto)."""
         if not value: return "0" * length
-        # Mantém apenas digitos
         clean = re.sub(r'\D', '', value)
+        if not clean: return "0" * length
         return clean.zfill(length)
 
     @staticmethod
     def format_ncm(value):
-        """Remove pontos do NCM."""
-        if not value: return ""
-        return re.sub(r'\D', '', value).strip()[:8]
+        if not value: return "00000000"
+        return re.sub(r'\D', '', value)[:8]
 
-class PDFProcessor:
-    def __init__(self, file_bytes):
-        self.doc = fitz.open(stream=file_bytes, filetype="pdf")
+class PDFParser:
+    def __init__(self, file_stream):
+        self.doc = fitz.open(stream=file_stream, filetype="pdf")
         self.full_text = ""
-        self.header_info = {}
+        self.header = {}
         self.items = []
 
-    def preprocess_text(self):
-        """
-        Lê o PDF e remove cabeçalhos/rodapés repetitivos ANTES de processar.
-        Isso evita que dados de cabeçalho 'sujem' as adições.
-        """
-        raw_lines = []
+    def preprocess(self):
+        """Remove cabeçalhos e rodapés de todas as páginas antes de processar."""
+        clean_lines = []
         for page in self.doc:
             text = page.get_text("text")
             lines = text.split('\n')
             for line in lines:
-                l = line.strip()
-                # Remove linhas de "lixo" identificadas no extrato
-                if "Extrato da DUIMP" in l: continue
-                if "Data, hora e responsável" in l: continue
-                if "Extrato da Duimp" in l and "Versão" in l: continue
-                if re.match(r'^\d+\s*/\s*\d+$', l): continue # Paginação 1/14
+                l_strip = line.strip()
+                # Filtros de lixo baseados no seu PDF
+                if "Extrato da DUIMP" in l_strip: continue
+                if "Data, hora e responsável" in l_strip: continue
+                if "Extrato da Duimp" in l_strip and "Versão" in l_strip: continue
+                if re.match(r'^\d+\s*/\s*\d+$', l_strip): continue # Paginação 1/9
+                if "The following table" in l_strip: continue
                 
-                raw_lines.append(line) # Mantém original para regex funcionar melhor com espaços
-        
-        self.full_text = "\n".join(raw_lines)
+                clean_lines.append(line)
+        self.full_text = "\n".join(clean_lines)
 
     def extract_header(self):
-        """Extrai dados gerais da capa (DUIMP, Importador, Totais)."""
         txt = self.full_text
-        
-        # Regex ajustados para o layout do PDF limpo
-        self.header_info["numeroDUIMP"] = re.search(r"Extrato da Duimp\s+([\w\-\/]+)", self.doc[0].get_text("text")) # Pega da pág 1 bruta
-        if self.header_info["numeroDUIMP"]:
-            self.header_info["numeroDUIMP"] = self.header_info["numeroDUIMP"].group(1).split('/')[0].strip()
-        
-        self.header_info["cnpj"] = re.search(r"CNPJ do importador:\s*([\d\.\/\-]+)", txt)
-        self.header_info["nomeImportador"] = re.search(r"Nome do importador:\s*\n?(.+)", txt)
-        self.header_info["pesoBruto"] = re.search(r"Peso Bruto \(kg\):\s*([\d\.,]+)", txt)
-        self.header_info["pesoLiquido"] = re.search(r"Peso Liquido \(kg\):\s*([\d\.,]+)", txt)
-        self.header_info["urf"] = re.search(r"Unidade de despacho:\s*([\d]+)", txt)
-        self.header_info["paisProcedencia"] = re.search(r"País de Procedência:\s*\n?(.+)", txt)
-
-        # Limpeza
-        for k, v in self.header_info.items():
-            if hasattr(v, 'group'):
-                self.header_info[k] = v.group(1).strip()
+        # Regex para dados gerais
+        self.header["numeroDUIMP"] = self._regex(r"Extrato da Duimp\s+([\w\-\/]+)", txt)
+        self.header["cnpj"] = self._regex(r"CNPJ do importador:\s*([\d\.\/\-]+)", txt)
+        self.header["nomeImportador"] = self._regex(r"Nome do importador:\s*\n?(.+)", txt)
+        self.header["pesoBruto"] = self._regex(r"Peso Bruto \(kg\):\s*([\d\.,]+)", txt)
+        self.header["pesoLiquido"] = self._regex(r"Peso Liquido \(kg\):\s*([\d\.,]+)", txt)
+        self.header["urf"] = self._regex(r"Unidade de despacho:\s*([\d]+)", txt)
+        self.header["paisProcedencia"] = self._regex(r"País de Procedência:\s*\n?(.+)", txt)
 
     def extract_items(self):
-        """Extrai cada item (Adição) usando regex de bloco."""
-        # Divide o texto pelos marcadores de Item (ex: "Item 00001")
-        # Regex busca "Item" seguido de 5 digitos
-        blocks = re.split(r"Item\s+(\d{5})", self.full_text)
+        # Separa por "Item 00001"
+        chunks = re.split(r"Item\s+(\d{5})", self.full_text)
         
-        # blocks[0] é lixo inicial. blocks[1]=NumItem1, blocks[2]=TextoItem1, blocks[3]=NumItem2...
-        if len(blocks) > 1:
-            for i in range(1, len(blocks), 2):
-                num_item = blocks[i]
-                content = blocks[i+1]
+        if len(chunks) > 1:
+            for i in range(1, len(chunks), 2):
+                num = chunks[i]
+                content = chunks[i+1]
                 
-                item_data = {"numeroAdicao": num_item}
+                item = {"numeroAdicao": num}
                 
-                # Extração de campos específicos dentro do bloco do item
-                patterns = {
-                    "ncm": r"NCM:\s*([\d\.]+)",
-                    "paisOrigem": r"País de origem:\s*\n?(.+)",
-                    "quantidade": r"Quantidade na unidade estatística:\s*([\d\.,]+)",
-                    "unidade": r"Unidade estatística:\s*(.+)",
-                    "pesoLiquidoItem": r"Peso líquido \(kg\):\s*([\d\.,]+)",
-                    "valorMoeda": r"Valor total na condição de venda:\s*([\d\.,]+)",
-                    "valorUnitario": r"Valor unitário na condição de venda:\s*([\d\.,]+)",
-                    "moeda": r"Moeda negociada:\s*(.+)",
-                    "condicaoVenda": r"Condição de venda:\s*(.+)", # Se houver
-                    # Descrição: Pega tudo entre "Detalhamento" e o próximo label forte
-                    "descricao": r"Detalhamento do Produto:\s*(.+?)(?=\n\s*(?:Número de Identificação|Versão|Código de Class|Descrição complementar))"
-                }
+                # Regex Item
+                item["ncm"] = self._regex(r"NCM:\s*([\d\.]+)", content)
+                item["paisOrigem"] = self._regex(r"País de origem:\s*\n?(.+)", content)
+                item["quantidade"] = self._regex(r"Quantidade na unidade estatística:\s*([\d\.,]+)", content)
+                item["unidade"] = self._regex(r"Unidade estatística:\s*(.+)", content)
+                item["pesoLiq"] = self._regex(r"Peso líquido \(kg\):\s*([\d\.,]+)", content)
+                item["valorUnit"] = self._regex(r"Valor unitário na condição de venda:\s*([\d\.,]+)", content)
+                item["valorTotal"] = self._regex(r"Valor total na condição de venda:\s*([\d\.,]+)", content)
+                item["moeda"] = self._regex(r"Moeda negociada:\s*(.+)", content)
+                # Descrição limpa
+                desc_match = re.search(r"Detalhamento do Produto:\s*(.+?)(?=\n\s*(?:Número de Identificação|Versão|Código de Class|Descrição complementar))", content, re.DOTALL)
+                item["descricao"] = desc_match.group(1).strip() if desc_match else ""
+                
+                self.items.append(item)
 
-                for key, pattern in patterns.items():
-                    match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
-                    if match:
-                        item_data[key] = match.group(1).strip()
-                    else:
-                        item_data[key] = ""
+    def _regex(self, pattern, text):
+        match = re.search(pattern, text)
+        return match.group(1).strip() if match else ""
 
-                self.items.append(item_data)
-
-class XMLGenerator:
-    def __init__(self, pdf_processor):
-        self.pp = pdf_processor
+class XMLBuilder:
+    def __init__(self, parser):
+        self.p = parser
         self.root = etree.Element("ListaDeclaracoes")
         self.duimp = etree.SubElement(self.root, "duimp")
 
     def build(self):
-        h = self.pp.header_info
-        duimp_clean = h.get("numeroDUIMP", "").replace("-", "").replace(".", "")
+        h = self.p.header
+        duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
 
         # --- Geração das Adições ---
-        for it in self.pp.items:
+        for it in self.p.items:
             adicao = etree.SubElement(self.duimp, "adicao")
             
-            # Prepara dados para preencher na ordem correta
-            data_map = {
-                "numeroAdicao": it["numeroAdicao"][-3:], # Ex: 001
-                "numeroDUIMP": duimp_clean,
+            # Mapeamento de Valores REAIS extraídos
+            # O que não estiver aqui será preenchido com DEFAULT
+            vals = {
+                "numeroAdicao": it["numeroAdicao"][-3:],
+                "numeroDUIMP": duimp_fmt,
                 "numeroLI": "0000000000",
-                "condicaoVendaIncoterm": "FCA", # Default ou extrair se tiver
-                "condicaoVendaMoedaNome": it.get("moeda", "DOLAR DOS EUA").upper(),
-                "condicaoVendaValorMoeda": DataFormatter.format_number(it.get("valorMoeda"), 15),
-                "dadosCargaPaisProcedenciaCodigo": "076", # Exemplo fixo ou extrair de tabela de-para
+                "dadosCargaPaisProcedenciaCodigo": "000",
+                "dadosCargaUrfEntradaCodigo": h.get("urf", "0000000"),
+                "dadosCargaViaTransporteCodigo": "01",
+                "dadosCargaViaTransporteNome": "MARÍTIMA",
                 "dadosMercadoriaAplicacao": "REVENDA",
                 "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
                 "dadosMercadoriaCondicao": "NOVA",
-                "dadosMercadoriaMedidaEstatisticaQuantidade": DataFormatter.format_number(it.get("quantidade"), 15),
+                "dadosMercadoriaMedidaEstatisticaQuantidade": DataFormatter.format_number(it.get("quantidade"), 14),
                 "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "UNIDADE").upper(),
-                "dadosMercadoriaPesoLiquido": DataFormatter.format_number(it.get("pesoLiquidoItem"), 15),
-                "dadosMercadoriaNomeNcm": "Descrição Padrão NCM", # PDF não costuma trazer nome NCM limpo
-                "paisOrigemMercadoriaNome": it.get("paisOrigem", "CHINA, REPUBLICA POPULAR").upper(),
-                "paisAquisicaoMercadoriaNome": it.get("paisOrigem", "CHINA, REPUBLICA POPULAR").upper(), # Geralmente igual origem
-                "valorTotalCondicaoVenda": DataFormatter.format_number(it.get("valorMoeda"), 11), # Tamanho variavel no XML modelo?
+                "dadosMercadoriaNomeNcm": "DESCRIÇÃO NCM",
+                "dadosMercadoriaPesoLiquido": DataFormatter.format_number(it.get("pesoLiq"), 15),
+                "condicaoVendaIncoterm": "FCA",
+                "condicaoVendaMoedaNome": it.get("moeda", "EURO").upper(),
+                "condicaoVendaValorMoeda": DataFormatter.format_number(it.get("valorTotal"), 15),
+                "condicaoVendaValorReais": DataFormatter.format_number(it.get("valorTotal"), 15), # Placeholder
+                "paisOrigemMercadoriaNome": it.get("paisOrigem", "").upper(),
+                "paisAquisicaoMercadoriaNome": it.get("paisOrigem", "").upper(),
+                "valorTotalCondicaoVenda": DataFormatter.format_number(it.get("valorTotal"), 11),
                 "vinculoCompradorVendedor": "Não há vinculação entre comprador e vendedor.",
-                # Valores padrão para tags obrigatórias que não estão no extrato PDF simplificado
+                # Valores Fixos para validação (zeros)
                 "iiRegimeTributacaoNome": "RECOLHIMENTO INTEGRAL",
                 "pisCofinsRegimeTributacaoNome": "RECOLHIMENTO INTEGRAL",
-                "ipiRegimeTributacaoNome": "SEM BENEFICIO",
-                "codigoRelacaoCompradorVendedor": "3",
-                "codigoVinculoCompradorVendedor": "1"
+                "ipiRegimeTributacaoNome": "SEM BENEFICIO"
             }
 
-            # Itera sobre a LISTA ESTRITA de tags para criar na ordem
-            for tag in TAGS_ORDER_ADICAO:
-                if tag == "mercadoria":
-                    # Sub-bloco mercadoria
-                    merc = etree.SubElement(adicao, "mercadoria")
-                    
-                    # Descrição Limpa (sem quebras)
-                    desc_clean = DataFormatter.clean_text(it.get("descricao", "DESCRIÇÃO NÃO ENCONTRADA"))
-                    etree.SubElement(merc, "descricaoMercadoria").text = desc_clean[:3999] # Truncate safe
-                    
-                    etree.SubElement(merc, "numeroSequencialItem").text = it["numeroAdicao"][-2:]
-                    etree.SubElement(merc, "quantidade").text = DataFormatter.format_number(it.get("quantidade"), 14)
-                    etree.SubElement(merc, "unidadeMedida").text = it.get("unidade", "UNIDADE").upper()
-                    etree.SubElement(merc, "valorUnitario").text = DataFormatter.format_number(it.get("valorUnitario"), 20)
+            # Loop Mestre de Tags
+            for tag in TAGS_ADICAO:
+                if tag == "acrescimo":
+                    # Bloco complexo Acresicmo
+                    node = etree.SubElement(adicao, "acrescimo")
+                    etree.SubElement(node, "codigoAcrescimo").text = "17"
+                    etree.SubElement(node, "denominacao").text = "OUTROS ACRESCIMOS AO VALOR ADUANEIRO"
+                    etree.SubElement(node, "moedaNegociadaCodigo").text = "978"
+                    etree.SubElement(node, "moedaNegociadaNome").text = "EURO/COM.EUROPEIA"
+                    etree.SubElement(node, "valorMoedaNegociada").text = "000000000000000"
+                    etree.SubElement(node, "valorReais").text = "000000000000000"
                 
-                elif tag == "acrescimo":
-                    # Bloco Acrescimo (Exemplo Fixo para estrutura)
-                    acr = etree.SubElement(adicao, "acrescimo")
-                    etree.SubElement(acr, "codigoAcrescimo").text = "17"
-                    etree.SubElement(acr, "denominacao").text = "OUTROS ACRESCIMOS AO VALOR ADUANEIRO"
-                    etree.SubElement(acr, "moedaNegociadaCodigo").text = "978"
-                    etree.SubElement(acr, "moedaNegociadaNome").text = "DOLAR DOS EUA"
-                    etree.SubElement(acr, "valorMoedaNegociada").text = "000000000000000"
-                    etree.SubElement(acr, "valorReais").text = "000000000000000"
+                elif tag == "mercadoria":
+                    # Bloco complexo Mercadoria
+                    node = etree.SubElement(adicao, "mercadoria")
+                    desc = DataFormatter.clean_text(it.get("descricao", ""))
+                    etree.SubElement(node, "descricaoMercadoria").text = desc
+                    etree.SubElement(node, "numeroSequencialItem").text = "01"
+                    etree.SubElement(node, "quantidade").text = DataFormatter.format_number(it.get("quantidade"), 14)
+                    etree.SubElement(node, "unidadeMedida").text = it.get("unidade", "UNIDADE").upper()
+                    etree.SubElement(node, "valorUnitario").text = DataFormatter.format_number(it.get("valorUnit"), 20)
                 
                 else:
-                    # Tags normais
-                    val = data_map.get(tag)
-                    if val is not None:
-                         etree.SubElement(adicao, tag).text = val
+                    # Tags simples
+                    if tag in vals:
+                        etree.SubElement(adicao, tag).text = vals[tag]
                     else:
-                        # Se não tem mapeado, preenche com Zeros ou Vazio conforme padrão do modelo
-                        if "Valor" in tag or "Quantidade" in tag or "Peso" in tag:
-                            etree.SubElement(adicao, tag).text = "0" * 15
-                        elif "Codigo" in tag and "Moeda" not in tag:
+                        # Preenchimento padrão para tags faltantes
+                        if "Valor" in tag or "Quantidade" in tag or "Peso" in tag or "BaseCalculo" in tag:
+                            etree.SubElement(adicao, tag).text = "0" * 15 # Zeros padrão financeiro
+                        elif "Aliquota" in tag:
+                             etree.SubElement(adicao, tag).text = "00000"
+                        elif "Codigo" in tag:
                              etree.SubElement(adicao, tag).text = "00"
                         else:
-                            etree.SubElement(adicao, tag).text = "" # Tag vazia para manter estrutura
+                            etree.SubElement(adicao, tag).text = "" # Vazio
 
-        # --- Dados Gerais da DUIMP (Fim do XML) ---
+        # --- Tags Gerais (Pós-Adições) ---
+        # Armazem
         armazem = etree.SubElement(self.duimp, "armazem")
-        etree.SubElement(armazem, "nomeArmazem").text = "IRF - PORTO DE SUAPE"
+        etree.SubElement(armazem, "nomeArmazem").text = "TCP"
         
-        etree.SubElement(self.duimp, "armazenamentoRecintoAduaneiroCodigo").text = h.get("urf", "0000000")
+        # Campos Gerais
+        etree.SubElement(self.duimp, "armazenamentoRecintoAduaneiroCodigo").text = "9801303"
+        etree.SubElement(self.duimp, "armazenamentoRecintoAduaneiroNome").text = "TCP - TERMINAL"
+        etree.SubElement(self.duimp, "armazenamentoSetor").text = "002"
+        etree.SubElement(self.duimp, "canalSelecaoParametrizada").text = "001"
+        etree.SubElement(self.duimp, "cargaDataChegada").text = "20251120"
         etree.SubElement(self.duimp, "cargaPesoBruto").text = DataFormatter.format_number(h.get("pesoBruto"), 15)
         etree.SubElement(self.duimp, "cargaPesoLiquido").text = DataFormatter.format_number(h.get("pesoLiquido"), 15)
+        etree.SubElement(self.duimp, "cargaUrfEntradaCodigo").text = h.get("urf", "0917800")
         etree.SubElement(self.duimp, "importadorNome").text = h.get("nomeImportador", "")
-        etree.SubElement(self.duimp, "importadorNumero").text = DataFormatter.clean_text(h.get("cnpj")).replace(".", "").replace("/", "").replace("-", "")
+        etree.SubElement(self.duimp, "importadorNumero").text = DataFormatter.format_number(h.get("cnpj"), 14)
         etree.SubElement(self.duimp, "numeroDUIMP").text = duimp_fmt
         
-        # Tags finais obrigatórias
-        etree.SubElement(self.duimp, "totalAdicoes").text = str(len(self.pp.items)).zfill(3)
-        etree.SubElement(self.duimp, "viaTransporteNome").text = "MARÍTIMA"
+        # Pagamentos (Exemplo de repetição estruturada)
+        pgto = etree.SubElement(self.duimp, "pagamento")
+        etree.SubElement(pgto, "codigoReceita").text = "0086"
+        etree.SubElement(pgto, "valorReceita").text = "000000000000000"
         
+        etree.SubElement(self.duimp, "totalAdicoes").text = str(len(self.p.items)).zfill(3)
+        etree.SubElement(self.duimp, "viaTransporteNome").text = "MARÍTIMA"
+
         return etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=True)
 
-# --- Interface Streamlit ---
+# --- Interface ---
+st.title("Extrator DUIMP (XML Mapeado)")
+st.markdown("Extração de PDF e Geração de XML seguindo estritamente o layout `M-DUIMP-8686868686`.")
 
-st.header("🚀 Extrator de DUIMP com Layout Rígido")
-st.markdown("""
-Esta ferramenta foi ajustada para:
-1. **Remover cabeçalhos repetitivos** do PDF que quebram os dados.
-2. **Forçar a sequência exata de tags** conforme o XML modelo `DUIMP_25BR...`.
-3. **Formatar números** com zeros à esquerda (ex: `0000001000`).
-""")
+file = st.file_uploader("PDF da DUIMP", type="pdf")
 
-uploaded_file = st.file_uploader("Carregue o Extrato DUIMP (PDF)", type="pdf")
-
-if uploaded_file:
+if file:
     if st.button("Gerar XML"):
-        with st.spinner("Processando..."):
-            try:
-                # 1. Processamento
-                processor = PDFProcessor(uploaded_file.read())
-                processor.preprocess_text() # Limpeza crucial
-                processor.extract_header()
-                processor.extract_items()
-                
-                # 2. Geração XML
-                generator = XMLGenerator(processor)
-                xml_data = generator.build()
-                
-                # 3. Output
-                st.success(f"XML Gerado com {len(processor.items)} adições!")
-                
-                # Botão Download
-                st.download_button(
-                    label="📥 Baixar XML Formatado",
-                    data=xml_data,
-                    file_name="DUIMP_Formatada.xml",
-                    mime="text/xml"
-                )
-                
-                # Preview
-                with st.expander("Visualizar XML (Primeiras 50 linhas)"):
-                    st.code(xml_data.decode("utf-8")[:3000], language="xml")
-                    
-                with st.expander("Debug: Dados Extraídos"):
-                    st.json(processor.items)
-                    
-            except Exception as e:
-                st.error(f"Erro Crítico: {e}")
+        try:
+            p = PDFParser(file.read())
+            p.preprocess()
+            p.extract_header()
+            p.extract_items()
+            
+            b = XMLBuilder(p)
+            xml = b.build()
+            
+            st.success("Sucesso!")
+            st.download_button("Baixar XML", xml, "DUIMP_Mapeada.xml", "text/xml")
+            
+            st.text_area("XML", xml.decode(), height=500)
+        except Exception as e:
+            st.error(f"Erro: {e}")
