@@ -6,9 +6,11 @@ from xml.dom import minidom
 import time
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Häfele | DUIMP Converter V21 (Final)", page_icon="📦", layout="wide")
+st.set_page_config(page_title="Häfele | DUIMP Converter V22 (Restored)", page_icon="📦", layout="wide")
 
-# --- ESTILOS ---
+# ==============================================================================
+# 0. UI SETUP
+# ==============================================================================
 def apply_custom_ui():
     st.markdown("""
     <style>
@@ -22,14 +24,6 @@ def apply_custom_ui():
             box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
             margin-bottom: 2rem;
         }
-        .stat-card {
-            background: white;
-            padding: 1.5rem;
-            border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            text-align: center;
-            border: 1px solid #e2e8f0;
-        }
         h1 { color: #1e293b; font-weight: 700; }
         .stSuccess { border-left: 5px solid #28a745; }
         .stError { border-left: 5px solid #dc3545; }
@@ -37,7 +31,7 @@ def apply_custom_ui():
     """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 1. ESTRUTURA XML OBRIGATÓRIA (ADICAO)
+# 1. ESTRUTURA XML OBRIGATÓRIA (LAYOUT RÍGIDO)
 # ==============================================================================
 ADICAO_FIELDS_ORDER = [
     {"tag": "acrescimo", "type": "complex", "children": [
@@ -164,11 +158,11 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "cbsBaseCalculoValor", "default": "000000000000000"},
     {"tag": "cbsBaseCalculoAliquota", "default": "00000"},
     {"tag": "cbsBaseCalculoAliquotaReducao", "default": "00000"},
-    {"tag": "cbsBaseCalculoValorImposto", "default": "00000000000000"},
+    {"tag": "cbsBaseCalculoValorImposto", "default": "00000000000000"}, # CALCULADO
     {"tag": "ibsBaseCalculoValor", "default": "000000000000000"},
     {"tag": "ibsBaseCalculoAliquota", "default": "00000"},
     {"tag": "ibsBaseCalculoAliquotaReducao", "default": "00000"},
-    {"tag": "ibsBaseCalculoValorImposto", "default": "00000000000000"},
+    {"tag": "ibsBaseCalculoValorImposto", "default": "00000000000000"}, # CALCULADO
     {"tag": "relacaoCompradorVendedor", "default": "Fabricante é desconhecido"},
     {"tag": "seguroMoedaNegociadaCodigo", "default": "220"},
     {"tag": "seguroMoedaNegociadaNome", "default": "DOLAR DOS EUA"},
@@ -183,8 +177,6 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "vinculoCompradorVendedor", "default": "Não há vinculação entre comprador e vendedor."}
 ]
 
-# --- ESTRUTURA GERAL (RODAPÉ) ---
-# Aqui mapeamos os dados que não são de Adição (Header/Footer)
 FOOTER_TAGS_MAP = {
     "armazem": {"tag": "nomeArmazem", "default": "TCP"},
     "armazenamentoRecintoAduaneiroCodigo": "9801303",
@@ -233,9 +225,9 @@ FOOTER_TAGS_MAP = {
     "importadorEnderecoMunicipio": "CIDADE",
     "importadorEnderecoNumero": "00",
     "importadorEnderecoUf": "PR",
-    "importadorNome": "", # Preenchido via código
+    "importadorNome": "", # Preenchido
     "importadorNomeRepresentanteLegal": "REPRESENTANTE",
-    "importadorNumero": "", # Preenchido via código
+    "importadorNumero": "", # Preenchido
     "importadorNumeroTelefone": "0000000000",
     "informacaoComplementar": "Informações extraídas do Extrato Conferência.",
     "localDescargaTotalDolares": "000000000000000",
@@ -244,7 +236,7 @@ FOOTER_TAGS_MAP = {
     "localEmbarqueTotalReais": "000000000000000",
     "modalidadeDespachoCodigo": "1",
     "modalidadeDespachoNome": "Normal",
-    "numeroDUIMP": "", # Preenchido via código
+    "numeroDUIMP": "", # Preenchido
     "operacaoFundap": "N",
     "pagamento": [{"tag": "agenciaPagamento", "default": "3715"}, {"tag": "bancoPagamento", "default": "341"}, {"tag": "codigoReceita", "default": "0086"}, {"tag": "valorReceita", "default": "000000000000000"}],
     "seguroMoedaNegociadaCodigo": "220",
@@ -256,7 +248,7 @@ FOOTER_TAGS_MAP = {
     "situacaoEntregaCarga": "ENTREGA CONDICIONADA",
     "tipoDeclaracaoCodigo": "01",
     "tipoDeclaracaoNome": "CONSUMO",
-    "totalAdicoes": "000", # Preenchido via código
+    "totalAdicoes": "000", # Preenchido
     "urfDespachoCodigo": "0917800",
     "urfDespachoNome": "PORTO DE PARANAGUA",
     "valorTotalMultaARecolherAjustado": "000000000000000",
@@ -363,16 +355,20 @@ class PDFParserPlumber:
                     prog.progress((i+1)/total)
             prog.progress(100)
             
-        # Concatena tudo num texto único
+        # Concatena tudo num texto único (Stitching)
         self.full_text = "\n".join(text_parts)
         
-        # 2. Cabeçalho
+        # 2. Cabeçalho Global
         self.header["processo"] = re.search(r"PROCESSO\s*#?(\d+)", self.full_text, re.I).group(1) if re.search(r"PROCESSO\s*#?(\d+)", self.full_text, re.I) else "N/A"
         duimp_match = re.search(r"Numero\s*[:\n]*\s*([\dBR]+)", self.full_text, re.I)
         self.header["duimp"] = duimp_match.group(1) if duimp_match else "00000000000"
         
-        imp_match = re.search(r"IMPORTADOR\s*\n\s*\"?([^\"]+)", self.full_text, re.IGNORECASE)
+        # MELHORIA: Regex mais flexível para Importador
+        imp_match = re.search(r"IMPORTADOR\s*[:\n]*\s*\"?([^\"]+)", self.full_text, re.IGNORECASE)
+        if not imp_match:
+             imp_match = re.search(r"IMPORTADOR\s*\n\s*(.+)", self.full_text, re.IGNORECASE)
         self.header["importadorNome"] = imp_match.group(1).strip() if imp_match else ""
+        
         cnpj_match = re.search(r"CNPJ\s*\n\s*([\d./-]+)", self.full_text, re.IGNORECASE)
         self.header["cnpj"] = cnpj_match.group(1) if cnpj_match else ""
         
@@ -384,16 +380,11 @@ class PDFParserPlumber:
         forn_match = re.search(r"EXPORTADOR ESTRANGEIRO\s*[:\n]?\s*(.+?)(?=\n)", self.full_text, re.IGNORECASE)
         self.header["fornecedorGlobal"] = forn_match.group(1).strip() if forn_match else ""
 
-        # 3. Itens (Split com Regex "Nº Adição")
-        # Isso quebra o texto gigante em blocos de itens
-        parts = re.split(r"Nº\s*Adição\s*[:\n]?\s*(\d+)", self.full_text, flags=re.IGNORECASE)
-        
-        # parts[0] = lixo inicial
-        # parts[1] = Numero Item 1
-        # parts[2] = Texto do Item 1
-        # parts[3] = Numero Item 2
-        # parts[4] = Texto do Item 2 ...
-        
+        # 3. Extração de Itens (Split Inteligente)
+        parts = re.split(r"ITENS DA DUIMP\s*[-–]?\s*(\d+)", self.full_text)
+        if len(parts) <= 1:
+             parts = re.split(r"Nº Adição\s*[:\n]?\s*(\d+)", self.full_text)
+
         if len(parts) > 1:
             for i in range(1, len(parts), 2):
                 if i+1 >= len(parts): break
@@ -404,7 +395,7 @@ class PDFParserPlumber:
                 item = {}
                 item["numeroAdicao"] = num.zfill(3)
                 
-                # --- Dados do Item ---
+                # --- DESCRIÇÃO & PARTNUMBER (PRECISÃO V21) ---
                 raw_desc_match = re.search(r"DENOMINACAO DO PRODUTO\s+(.*?)\s+(?:C[ÓO]DIGO|DETALHAMENTO)", block, re.S | re.I)
                 raw_desc = raw_desc_match.group(1) if raw_desc_match else ""
                 
@@ -435,7 +426,8 @@ class PDFParserPlumber:
                 forn_spec = re.search(r"EXPORTADOR ESTRANGEIRO\s*[:\n]?\s*(.+?)(?=\n)", block, re.IGNORECASE)
                 item["fornecedor_raw"] = forn_spec.group(1).strip() if forn_spec else self.header.get("fornecedorGlobal", "")
 
-                # --- SCANNER FISCAL (IMPOSTOS) ---
+                # 4. SCANNER FISCAL (IMPOSTOS)
+                # Garante que cada item tenha seus próprios impostos extraídos do seu bloco
                 item.update(self._scan_taxes(block))
                 
                 self.items.append(item)
@@ -459,8 +451,8 @@ class PDFParserPlumber:
         for tax_label, (k_rate, k_val) in tax_map.items():
             idx = block_text.find(tax_label)
             if idx != -1:
-                # Pega 300 chars à frente do label
-                snippet = block_text[idx:idx+300]
+                # Pega 200 chars à frente do label
+                snippet = block_text[idx:idx+200]
                 nums = re.findall(r"([\d]{1,3}(?:[.]\d{3})*,\d{2,4})", snippet)
                 if len(nums) >= 2:
                     candidates = []
@@ -470,8 +462,10 @@ class PDFParserPlumber:
                             candidates.append((val, n))
                         except: pass
                     if candidates:
+                        # Ordena: Menor = Alíquota, Maior = Valor (aprox)
                         candidates.sort(key=lambda x: x[0])
                         taxes[k_rate] = candidates[0][1] # Menor = Rate
+                        # Heurística: Pega o segundo menor (o valor do imposto)
                         taxes[k_val] = candidates[1][1] if len(candidates) >= 2 else candidates[0][1]
         return taxes
 
@@ -487,43 +481,39 @@ class XMLBuilder:
 
     def build(self):
         h = self.p.header
-        duimp_fmt = re.sub(r'[^a-zA-Z0-9]', '', h.get("duimp", "00000000000"))
+        duimp_fmt = re.sub(r'[^a-zA-Z0-9]', '', h.get("numeroDUIMP", ""))
 
         for it in self.p.items:
             adicao = etree.SubElement(self.duimp, "adicao")
             
-            # Formatações
-            v_total_reais = DataFormatter.format_number(it.get("v_total", "0"), 15)
-            icms_base = v_total_reais
-            
-            # --- CÁLCULO DE IBS / CBS (2026) ---
-            cbs, ibs = DataFormatter.calculate_cbs_ibs(icms_base)
-            
-            supplier = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"))
+            base_total_reais = DataFormatter.format_number(it.get("v_total", "0"), 15)
+            icms_base_valor = base_total_reais 
+            cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
+            supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"))
 
             extracted_map = {
                 "numeroAdicao": it["numeroAdicao"],
                 "numeroDUIMP": duimp_fmt,
-                "dadosMercadoriaCodigoNcm": it["ncm"],
-                "dadosMercadoriaMedidaEstatisticaQuantidade": DataFormatter.format_number(it["quantidade"], 14),
+                "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
+                "dadosMercadoriaMedidaEstatisticaQuantidade": DataFormatter.format_number(it.get("quantidade"), 14),
                 "dadosMercadoriaMedidaEstatisticaUnidade": "UNIDADE",
-                "dadosMercadoriaPesoLiquido": DataFormatter.format_number(it["pesoLiq"], 15),
+                "dadosMercadoriaPesoLiquido": DataFormatter.format_number(it.get("pesoLiq"), 15),
                 "condicaoVendaMoedaNome": "DOLAR DOS EUA",
-                "condicaoVendaValorMoeda": v_total_reais,
-                "condicaoVendaValorReais": v_total_reais,
+                "condicaoVendaValorMoeda": base_total_reais,
+                "condicaoVendaValorReais": base_total_reais,
                 "paisOrigemMercadoriaNome": "EXTERIOR",
                 "paisAquisicaoMercadoriaNome": "EXTERIOR",
                 "valorTotalCondicaoVenda": DataFormatter.format_number(it.get("v_total", "0"), 11),
-                "descricaoMercadoria": it["descricao"],
-                "quantidade": DataFormatter.format_number(it["quantidade"], 14),
+                "descricaoMercadoria": DataFormatter.clean_text(it.get("descricao")),
+                "quantidade": DataFormatter.format_number(it.get("quantidade"), 14),
                 "unidadeMedida": "UNIDADE",
                 "valorUnitario": DataFormatter.format_number(it.get("v_unit", "0"), 20),
                 "dadosCargaUrfEntradaCodigo": "0000000",
                 
-                "fornecedorNome": supplier["fornecedorNome"],
-                "fornecedorLogradouro": supplier["fornecedorLogradouro"],
-                "fornecedorNumero": supplier["fornecedorNumero"],
-                "fornecedorCidade": supplier["fornecedorCidade"],
+                "fornecedorNome": supplier_data["fornecedorNome"][:60],
+                "fornecedorLogradouro": supplier_data["fornecedorLogradouro"][:60],
+                "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
+                "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
 
                 "iiAliquotaAdValorem": DataFormatter.format_rate_xml(it["ii_rate"]),
                 "iiAliquotaValorDevido": DataFormatter.format_number(it["ii_val"], 15),
@@ -536,15 +526,15 @@ class XMLBuilder:
                 "cofinsAliquotaValorDevido": DataFormatter.format_number(it["cofins_val"], 15),
                 "cofinsAliquotaValorRecolher": DataFormatter.format_number(it["cofins_val"], 15),
 
-                "icmsBaseCalculoValor": icms_base,
+                "icmsBaseCalculoValor": icms_base_valor,
                 "icmsBaseCalculoAliquota": "01800",
                 "cbsIbsClasstrib": "000001",
-                "cbsBaseCalculoValor": icms_base,
+                "cbsBaseCalculoValor": icms_base_valor,
                 "cbsBaseCalculoAliquota": "00090",
-                "cbsBaseCalculoValorImposto": cbs,
-                "ibsBaseCalculoValor": icms_base,
+                "cbsBaseCalculoValorImposto": cbs_imposto,
+                "ibsBaseCalculoValor": icms_base_valor,
                 "ibsBaseCalculoAliquota": "00010",
-                "ibsBaseCalculoValorImposto": ibs
+                "ibsBaseCalculoValorImposto": ibs_imposto
             }
 
             for field in ADICAO_FIELDS_ORDER:
@@ -559,10 +549,10 @@ class XMLBuilder:
                     val = extracted_map.get(tag_name, field["default"])
                     etree.SubElement(adicao, tag_name).text = val
 
-        # Footer (Tags Gerais fora de Adição)
+        # Footer (CORRIGIDO: Importador e Dados Gerais)
         footer_map = {
             "numeroDUIMP": duimp_fmt,
-            "importadorNome": h.get("importadorNome", "HAFELE"),
+            "importadorNome": h.get("importadorNome", ""),
             "importadorNumero": DataFormatter.format_number(h.get("cnpj"), 14),
             "cargaPesoBruto": DataFormatter.format_number(h.get("pesoBruto"), 15),
             "cargaPesoLiquido": DataFormatter.format_number(h.get("pesoLiquido"), 15),
@@ -616,7 +606,7 @@ def main():
                         b = XMLBuilder(p)
                         xml = b.build()
                         
-                        duimp_clean = p.header.get("duimp", "000").replace("/", "-")
+                        duimp_clean = p.header.get("numeroDUIMP", "000").replace("/", "-")
                         fname = f"DUIMP_{duimp_clean}.xml"
                         
                         st.success(f"SUCESSO! {len(p.items)} itens processados com tributos.")
