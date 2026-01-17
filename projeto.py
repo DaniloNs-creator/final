@@ -4,189 +4,214 @@ import pandas as pd
 import re
 import io
 
-# Configuração da Página para modo "Wide" (melhor para visualizar DataFrames grandes)
-st.set_page_config(page_title="Extrator DUIMP Pro", layout="wide", page_icon="📄")
+# --- CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(
+    page_title="Extrator DUIMP Master",
+    layout="wide",
+    page_icon="🚢",
+    initial_sidebar_state="expanded"
+)
+
+# --- FUNÇÕES UTILITÁRIAS (ENGINEERING) ---
 
 def clean_currency(value_str):
-    """
-    Converte strings de moeda brasileira (1.000,00) para float (1000.00).
-    Retorna 0.0 se falhar.
-    """
-    if not value_str:
-        return 0.0
+    """Converte '1.000,00' para float 1000.00. Retorna 0.0 se falhar."""
+    if not value_str: return 0.0
     try:
-        # Remove pontos de milhar e troca vírgula por ponto
-        clean_str = value_str.replace('.', '').replace(',', '.')
-        return float(clean_str)
-    except ValueError:
+        # Remove caracteres indesejados que não sejam números, ponto ou vírgula
+        clean = re.sub(r'[^\d,.]', '', str(value_str))
+        # Remove ponto de milhar e troca vírgula decimal
+        return float(clean.replace('.', '').replace(',', '.'))
+    except:
         return 0.0
 
-def extract_data_from_pdf(uploaded_file):
-    """
-    Lê o PDF e retorna um dicionário com dados da Capa e um DataFrame com os Itens.
-    """
-    full_text = ""
+def extract_field(pattern, text, type='text'):
+    """Função genérica segura para extração via Regex."""
+    match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+    if match:
+        val = match.group(1).strip()
+        if type == 'currency':
+            return clean_currency(val)
+        return val
+    return 0.0 if type == 'currency' else ""
+
+def process_pdf(uploaded_file):
+    all_text = ""
     
-    # 1. Leitura do PDF
+    # 1. LEITURA COMPLETA (GLOBAL CONTEXT)
     with pdfplumber.open(uploaded_file) as pdf:
         for page in pdf.pages:
-            # Extraímos o texto mantendo o layout visual aproximado
-            text = page.extract_text()
-            if text:
-                full_text += "\n" + text
+            # Extração física mantendo fluxo visual
+            page_text = page.extract_text(x_tolerance=2, y_tolerance=2)
+            if page_text:
+                all_text += "\n" + page_text
 
-    # 2. Limpeza básica (remover cabeçalhos/rodapés repetitivos se necessário)
-    # Ex: remover "--- PAGE X ---" para não quebrar lógica
-    full_text = re.sub(r'--- PAGE \d+ ---', '', full_text)
-
-    # 3. Extração dos Dados da CAPA (Regex)
-    # Procuramos padrões específicos que aparecem no início do arquivo
-    capa_data = {}
+    # 2. LIMPEZA DE CABEÇALHOS DE PÁGINA (RUÍDO)
+    # Remove "--- PAGE X ---" e cabeçalhos repetidos que quebram tabelas
+    all_text = re.sub(r'--- PAGE \d+ ---', '', all_text)
     
-    # Ex: Busca "PROCESSO #28523"
-    match_proc = re.search(r'PROCESSO #(\d+)', full_text)
-    capa_data['Processo Interno'] = match_proc.group(1) if match_proc else "N/A"
+    # 3. EXTRAÇÃO DE DADOS MESTRE (CAPA)
+    # Estes dados são únicos por arquivo
+    master_data = {
+        "Processo": extract_field(r'PROCESSO\s*#?\s*(\d+)', all_text),
+        "Importador": extract_field(r'IMPORTADOR\s*[\r\n]+([^\r\n]+)', all_text),
+        "CNPJ": extract_field(r'CNPJ\s*[\r\n]+([\d\./-]+)', all_text),
+        "Número DUIMP": extract_field(r'Numero\s*[\r\n]+(\d{2}BR\d+)', all_text),
+        "Data Registro": extract_field(r'Data Registro\s*[\r\n]+(\d{2}/\d{2}/\d{4})', all_text),
+        "Via Transporte": extract_field(r'Via de Transporte\s*[\r\n]+([^\r\n]+)', all_text),
+        "Peso Bruto Total": extract_field(r'Peso Bruto\s*[\r\n]+([\d\.,]+)', all_text, 'currency'),
+        "Peso Líquido Total": extract_field(r'Liquido\s*[\r\n]+([\d\.,]+)', all_text, 'currency'),
+        "Total VMLE": extract_field(r'VALOR DA MERCADORIA NO LOCAL DE EMBARQUE \(VMLE\)\s*[\r\n]+([\d\.,]+)', all_text, 'currency'),
+    }
 
-    # Ex: Busca "IMPORTADOR" e pega a linha de baixo ou lado
-    # Ajuste o regex conforme a variabilidade do layout
-    match_imp = re.search(r'IMPORTADOR\s*[\r\n]+([^\r\n]+)', full_text)
-    capa_data['Importador'] = match_imp.group(1).strip() if match_imp else "N/A"
+    # 4. LOOP DE ITENS (CORE LOGIC)
+    # Dividimos o texto inteiro onde aparece "ITENS DA DUIMP - X"
+    # O regex (?=...) é um lookahead para não consumir o texto do próximo item
+    item_blocks = re.split(r'ITENS DA DUIMP\s*-\s*\d+', all_text)
     
-    match_duimp = re.search(r'Numero\s*[\r\n]+(\d{2}BR\d+)', full_text)
-    capa_data['Número DUIMP'] = match_duimp.group(1) if match_duimp else "N/A"
-
-    # 4. Extração dos ITENS (Loop Principal)
-    # O padrão chave é "ITENS DA DUIMP - X"
-    # Vamos dividir o texto inteiro usando esse marcador
-    # O split vai gerar uma lista onde cada elemento é um bloco de texto de um item
-    blocks = re.split(r'ITENS DA DUIMP\s*-\s*\d+', full_text)
+    parsed_items = []
     
-    # O primeiro bloco (blocks[0]) é a capa, o resto são os itens
-    items_list = []
-    
-    # Iteramos a partir do segundo bloco (índice 1)
-    # Nota: Precisamos recuperar o número do item que foi "comido" pelo split se for importante,
-    # ou geramos um sequencial.
-    
-    for i, block in enumerate(blocks[1:], start=1):
-        item_dict = {}
-        item_dict['Item #'] = i
+    # O primeiro bloco (índice 0) é o cabeçalho geral, pulamos.
+    # Usamos enumerate start=1 para o número do item
+    for idx, block in enumerate(item_blocks[1:], start=1):
+        item = {}
         
-        # Extração de Campos Específicos dentro do bloco do item
+        # --- IDENTIFICAÇÃO DO PRODUTO ---
+        item['Item #'] = idx
+        item['NCM'] = extract_field(r'NCM\s*[\r\n]+([\d\.]+)', block)
+        item['Código Produto'] = extract_field(r'Codigo Produto\s*[\r\n]+(\d+)', block)
         
-        # NCM (Ex: NCM 3926.30.00)
-        m_ncm = re.search(r'NCM\s+(\d{4}\.\d{2}\.\d{2})', block)
-        item_dict['NCM'] = m_ncm.group(1) if m_ncm else ""
+        # Descrição: Pega tudo entre "DENOMINACAO DO PRODUTO" e "CODIGO INTERNO"
+        desc_raw = extract_field(r'DENOMINACAO DO PRODUTO(.*?)CÓDIGO INTERNO', block)
+        item['Descrição'] = desc_raw.replace('\n', ' ').strip()[:200] # Limita a 200 chars
         
-        # Descrição (Pegamos um trecho, pois pode ser grande)
-        # Tentativa de pegar texto logo após "Denominação" ou similar
-        # Aqui simplificamos pegando linhas próximas ao NCM
-        
-        # Valor Aduaneiro (Base para impostos)
-        # Procura "Valor Aduaneiro" seguido de um número
-        m_vlr = re.search(r'Valor Aduaneiro\s+([\d\.]+,\d{2})', block)
-        vlr_aduaneiro = m_vlr.group(1) if m_vlr else "0,00"
-        item_dict['Vlr Aduaneiro'] = clean_currency(vlr_aduaneiro)
-        
-        # Imposto de Importação (II) - Valor Devido
-        # Procura por "II" ... "Valor Devido" ... número
-        # Regex flexível para pegar a linha do imposto
-        # Ajuste conforme layout real: as vezes o valor está na mesma linha ou abaixo
-        # Supondo padrão: II <espaços> Base <espaços> Alíquota <espaços> Valor
-        m_ii = re.search(r'II.*?([\d\.]+,\d{2})\s*Valor Devido', block, re.DOTALL)
-        # Se o layout for tabular, o valor pode estar no final da linha que começa com II
-        if not m_ii:
-             # Tenta pegar o último número da linha que contém "II" e "%"
-             m_ii = re.search(r'II\s+.*?(\d{1,3}(?:\.\d{3})*,\d{2})[^\n]*$', block, re.MULTILINE)
-        
-        item_dict['II Devido'] = clean_currency(m_ii.group(1)) if m_ii else 0.0
+        item['Partnumber'] = extract_field(r'Código interno\s*[\r\n]+([^\r\n]+)', block)
+        item['Fabricante'] = extract_field(r'FABRICANTE/PRODUTOR\s*[\r\n]+([^\r\n]+)', block)
+        item['País Origem'] = extract_field(r'Pais Origem\s*[\r\n]+([^\r\n]+)', block)
+        item['Exportador'] = extract_field(r'EXPORTADOR ESTRANGEIRO\s*[\r\n]+([^\r\n]+)', block)
 
-        # PIS e COFINS (Lógica similar)
-        m_pis = re.search(r'PIS\s+.*?(\d{1,3}(?:\.\d{3})*,\d{2})[^\n]*$', block, re.MULTILINE)
-        item_dict['PIS Devido'] = clean_currency(m_pis.group(1)) if m_pis else 0.0
+        # --- DADOS QUANTITATIVOS ---
+        # Busca "Qtde Unid. Comercial" seguido de número
+        item['Qtd Comercial'] = extract_field(r'Qtde Unid\. Comercial\s*[\r\n]+([\d\.,]+)', block, 'currency')
+        item['Unid Comercial'] = extract_field(r'Unidade Comercial\s*[\r\n]+([A-Z]+)', block)
+        item['Peso Líquido'] = extract_field(r'Peso Líquido \(KG\)\s*[\r\n]+([\d\.,]+)', block, 'currency')
         
-        m_cofins = re.search(r'COFINS\s+.*?(\d{1,3}(?:\.\d{3})*,\d{2})[^\n]*$', block, re.MULTILINE)
-        item_dict['COFINS Devido'] = clean_currency(m_cofins.group(1)) if m_cofins else 0.0
+        # --- VALORES E LOGÍSTICA ---
+        item['INCOTERM'] = extract_field(r'Condição de Venda\s*[\r\n]+([A-Z]+)', block)
+        item['Vlr Unitário'] = extract_field(r'Valor Unit Cond Venda\s*[\r\n]+([\d\.,]+)', block, 'currency')
+        item['VMLE (Item)'] = extract_field(r'VIr Cond Venda \(R\$\)\s*[\r\n]+([\d\.,]+)', block, 'currency')
+        item['Frete Rateado'] = extract_field(r'Frete Internac\. \(R\$\)\s*[\r\n]+([\d\.,]+)', block, 'currency')
+        item['Seguro Rateado'] = extract_field(r'Seguro Internac\. \(R\$\)\s*[\r\n]+([\d\.,]+)', block, 'currency')
+        item['Vlr Aduaneiro'] = extract_field(r'Local Aduaneiro \(R\$\)\s*[\r\n]+([\d\.,]+)', block, 'currency')
+
+        # --- TRIBUTOS (REGEX ESPECÍFICO PARA CADA IMPOSTO NO BLOCO) ---
+        # A lógica aqui é encontrar o sub-bloco do imposto e pegar o valor "A Recolher" ou "Devido"
         
-        items_list.append(item_dict)
+        # II (Imposto Importação)
+        # Procura texto entre "II" e "IPI" (ou fim do bloco se for o último)
+        ii_block_match = re.search(r'II(.*?)IPI', block, re.DOTALL)
+        ii_text = ii_block_match.group(1) if ii_block_match else block
+        item['II Base'] = extract_field(r'Base de Cálculo \(R\$\)\s*[\r\n]+([\d\.,]+)', ii_text, 'currency')
+        item['II Alíquota'] = extract_field(r'% Alíquota\s*[\r\n]+([\d\.,]+)', ii_text, 'currency')
+        item['II Valor'] = extract_field(r'Valor A Recolher \(R\$\)\s*[\r\n]+([\d\.,]+)', ii_text, 'currency')
+        if item['II Valor'] == 0: # Tenta "Valor Devido" se "A Recolher" for zero
+             item['II Valor'] = extract_field(r'Valor Devido \(R\$\)\s*[\r\n]+([\d\.,]+)', ii_text, 'currency')
 
-    df_items = pd.DataFrame(items_list)
-    return capa_data, df_items
+        # IPI
+        ipi_block_match = re.search(r'IPI(.*?)PIS', block, re.DOTALL)
+        ipi_text = ipi_block_match.group(1) if ipi_block_match else ""
+        item['IPI Base'] = extract_field(r'Base de Cálculo \(R\$\)\s*[\r\n]+([\d\.,]+)', ipi_text, 'currency')
+        item['IPI Alíquota'] = extract_field(r'% Alíquota\s*[\r\n]+([\d\.,]+)', ipi_text, 'currency')
+        item['IPI Valor'] = extract_field(r'Valor A Recolher \(R\$\)\s*[\r\n]+([\d\.,]+)', ipi_text, 'currency')
 
-# --- INTERFACE GRÁFICA (FRONTEND) ---
+        # PIS
+        pis_block_match = re.search(r'PIS(.*?)COFINS', block, re.DOTALL)
+        pis_text = pis_block_match.group(1) if pis_block_match else ""
+        item['PIS Valor'] = extract_field(r'Valor A Recolher \(R\$\)\s*[\r\n]+([\d\.,]+)', pis_text, 'currency')
 
-st.title("📊 Extrator de DUIMPs - Análise Fiscal")
-st.markdown("""
-<style>
-    .big-font { font-size:18px !important; }
-</style>
-<div class='big-font'>
-    Ferramenta profissional para extração de dados do PDF padrão de Desembaraço Aduaneiro.
-    Faça upload do arquivo para visualizar o Resumo e o Detalhamento por Item.
-</div>
-""", unsafe_allow_html=True)
+        # COFINS
+        cofins_block_match = re.search(r'COFINS(.*?)ICMS', block, re.DOTALL)
+        cofins_text = cofins_block_match.group(1) if cofins_block_match else ""
+        item['COFINS Valor'] = extract_field(r'Valor A Recolher \(R\$\)\s*[\r\n]+([\d\.,]+)', cofins_text, 'currency')
 
-uploaded_file = st.file_uploader("Arraste seu PDF aqui (Layout Padrão)", type="pdf")
+        # ICMS (Geralmente no final do bloco do item)
+        item['ICMS Regime'] = extract_field(r'Regime de Tributacao\s*([^\r\n]+)', block)
 
-if uploaded_file is not None:
-    with st.spinner('Lendo e processando o PDF...'):
+        parsed_items.append(item)
+
+    return master_data, pd.DataFrame(parsed_items)
+
+# --- INTERFACE VISUAL (FRONTEND) ---
+
+st.title("📊 Extrator DUIMP Pro (Análise Fiscal)")
+st.markdown("Filtre, analise e exporte dados de Conferência Aduaneira.")
+
+uploaded_file = st.file_uploader("Upload do PDF da DUIMP", type="pdf")
+
+if uploaded_file:
+    with st.spinner("Processando Inteligência Fiscal..."):
         try:
-            # Processamento
-            header_info, df_resultado = extract_data_from_pdf(uploaded_file)
+            # PROCESSAMENTO
+            header, df = process_pdf(uploaded_file)
             
-            # --- SEÇÃO 1: CABEÇALHO ---
-            st.divider()
-            st.subheader("📁 Dados do Processo (Capa)")
-            
-            # Layout em Colunas para ficar bonito (Card-like metrics)
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Processo Interno", header_info.get('Processo Interno', '-'))
-            col2.metric("Número DUIMP", header_info.get('Número DUIMP', '-'))
-            col3.metric("Importador", header_info.get('Importador', '-')[:20] + "...") # Trunca se for longo
+            # --- DASHBOARD KPI ---
+            st.subheader("1. Visão Geral do Processo")
+            kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+            kpi1.metric("Importador", header.get("Importador")[:15]+"...")
+            kpi2.metric("Processo", header.get("Processo"))
+            kpi3.metric("DUIMP", header.get("Número DUIMP"))
+            kpi4.metric("Itens", len(df))
 
-            # --- SEÇÃO 2: TABELA DE ITENS ---
-            st.divider()
-            st.subheader(f"📦 Detalhamento dos Itens ({len(df_resultado)} encontrados)")
+            kpi5, kpi6, kpi7, kpi8 = st.columns(4)
+            total_aduana = df['Vlr Aduaneiro'].sum()
+            total_tributos = df['II Valor'].sum() + df['IPI Valor'].sum() + df['PIS Valor'].sum() + df['COFINS Valor'].sum()
             
-            # Formatação do DataFrame para exibição (R$)
+            kpi5.metric("Valor Aduaneiro Total", f"R$ {total_aduana:,.2f}")
+            kpi6.metric("Total Tributos Federais", f"R$ {total_tributos:,.2f}")
+            kpi7.metric("Peso Líquido Total", f"{df['Peso Líquido'].sum():,.2f} kg")
+            kpi8.metric("Via", header.get("Via Transporte"))
+
+            # --- TABELA DETALHADA ---
+            st.divider()
+            st.subheader("2. Detalhamento por Item (Auditoria)")
+            
+            # Filtros laterais
+            with st.sidebar:
+                st.header("Filtros")
+                selected_ncm = st.multiselect("Filtrar NCM", df['NCM'].unique())
+                if selected_ncm:
+                    df_view = df[df['NCM'].isin(selected_ncm)]
+                else:
+                    df_view = df
+
             st.dataframe(
-                df_resultado,
-                column_config={
-                    "Vlr Aduaneiro": st.column_config.NumberColumn("Vlr Aduaneiro (R$)", format="R$ %.2f"),
-                    "II Devido": st.column_config.NumberColumn("II (R$)", format="R$ %.2f"),
-                    "PIS Devido": st.column_config.NumberColumn("PIS (R$)", format="R$ %.2f"),
-                    "COFINS Devido": st.column_config.NumberColumn("COFINS (R$)", format="R$ %.2f"),
-                },
+                df_view,
                 use_container_width=True,
-                hide_index=True
+                column_config={
+                    "Item #": st.column_config.NumberColumn("Item", width="small"),
+                    "Descrição": st.column_config.TextColumn("Descrição Produto", width="large"),
+                    "Vlr Aduaneiro": st.column_config.NumberColumn("Vlr Aduaneiro", format="R$ %.2f"),
+                    "II Valor": st.column_config.NumberColumn("II", format="R$ %.2f"),
+                    "IPI Valor": st.column_config.NumberColumn("IPI", format="R$ %.2f"),
+                    "PIS Valor": st.column_config.NumberColumn("PIS", format="R$ %.2f"),
+                    "COFINS Valor": st.column_config.NumberColumn("COFINS", format="R$ %.2f"),
+                }
             )
 
-            # --- SEÇÃO 3: DOWNLOAD ---
+            # --- EXPORTAÇÃO ---
             st.divider()
-            col_d1, col_d2 = st.columns([1, 4])
-            
-            # Botão para baixar CSV
-            csv = df_resultado.to_csv(index=False, sep=';', decimal=',')
-            col_d1.download_button(
-                label="💾 Baixar Excel/CSV",
-                data=csv,
-                file_name=f"duimp_{header_info.get('Processo Interno')}.csv",
-                mime='text/csv',
-            )
-            
-            # Análise Rápida (Totalizadores)
-            total_aduaneiro = df_resultado['Vlr Aduaneiro'].sum()
-            total_impostos = df_resultado['II Devido'].sum() + df_resultado['PIS Devido'].sum() + df_resultado['COFINS Devido'].sum()
-            
-            st.info(f"💰 **Total Aduaneiro Processado:** R$ {total_aduaneiro:,.2f} | **Total Impostos (Estimado):** R$ {total_impostos:,.2f}")
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.subheader("3. Exportação")
+                # Converter para CSV com ; e vírgula decimal (Excel PT-BR)
+                csv = df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig')
+                st.download_button(
+                    label="💾 Baixar Relatório Completo (CSV)",
+                    data=csv,
+                    file_name=f"DUIMP_{header.get('Processo')}.csv",
+                    mime="text/csv"
+                )
 
         except Exception as e:
-            st.error(f"Erro ao processar o arquivo: {e}")
-            st.warning("Verifique se o PDF segue o layout padrão esperado.")
-
-else:
-    st.info("Aguardando upload do arquivo...")
-
-# Rodapé profissional
-st.markdown("---")
-st.caption("Desenvolvido para automação fiscal via Python & Streamlit.")
+            st.error(f"Erro Crítico: {str(e)}")
+            st.warning("Dica: Verifique se o PDF não é uma imagem escaneada.")
