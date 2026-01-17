@@ -1,247 +1,468 @@
 import streamlit as st
-import pandas as pd
-import pdfplumber
+import fitz  # PyMuPDF (Alta performance para PDFs grandes)
+from lxml import etree
 import re
-import xml.etree.ElementTree as ET
-from xml.dom import minidom
-import time
 import io
-import chardet
-import traceback
-from datetime import datetime
-from io import BytesIO
+import time
 from typing import List, Dict, Any
 
-# --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(
-    page_title="Häfele | Data Hub Pro",
-    page_icon="📦",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+# --- CONFIGURAÇÃO E ESTILO (Mantendo a identidade Häfele) ---
+st.set_page_config(page_title="Häfele | DUIMP to SAP Converter", page_icon="📦", layout="wide")
 
-# --- CSS PROFISSIONAL UNIFICADO ---
-def apply_ui_style():
+def apply_custom_ui():
     st.markdown("""
     <style>
-        /* Fundo e Fonte Principal */
-        .stApp { background-color: #f8fafc; color: #1e293b; font-family: 'Inter', sans-serif; }
-        
-        /* Cabeçalho Häfele Style */
-        .header-box {
+        .main { background-color: #f8fafc; }
+        .stApp { font-family: 'Inter', sans-serif; }
+        .header-container {
             background: #ffffff;
             padding: 2rem;
-            border-radius: 12px;
-            border-left: 10px solid #0054a6;
+            border-radius: 15px;
+            border-left: 8px solid #d50000; /* Vermelho Häfele ajustado */
             box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
             margin-bottom: 2rem;
-            text-align: left;
         }
-        .hafele-logo { max-width: 180px; margin-bottom: 1rem; }
-        
-        /* Containers de Conteúdo */
-        .content-card {
+        .hafele-logo { max-width: 200px; margin-bottom: 1rem; }
+        .stat-card {
             background: white;
-            padding: 2rem;
+            padding: 1.5rem;
             border-radius: 10px;
-            border: 1px solid #e2e8f0;
-            margin-bottom: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            text-align: center;
         }
-
-        /* Botões Enterprise */
-        .stButton > button {
-            background-color: #2563eb !important;
-            color: white !important;
-            border-radius: 6px !important;
-            padding: 0.6rem 2rem !important;
-            font-weight: 500 !important;
-            border: none !important;
-            transition: 0.3s;
-        }
-        .stButton > button:hover { background-color: #1d4ed8 !important; transform: translateY(-1px); }
-
-        /* Estilização de métricas */
-        [data-testid="stMetricValue"] { font-size: 1.8rem !important; color: #0054a6; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- CLASSES E LOGICA DE PROCESSAMENTO ---
+# --- FUNÇÕES AUXILIARES (REGRA SAP) ---
+def fmt_sap(value, length=15):
+    """Formata valores para padrão SAP: Sem pontuação, zeros à esquerda."""
+    if not value: return "0" * length
+    digits = re.sub(r'[^\d]', '', str(value))
+    return digits.zfill(length)
 
-class DataEngine:
-    """Motor de processamento central para TXT, CTe e DUIMP"""
+def clean_text(text):
+    if not text: return ""
+    return " ".join(text.split())
 
-    # --- MÉTODO 1: TXT CLEANER ---
-    @staticmethod
-    def clean_txt(content, patterns_to_remove):
-        substitutions = {
-            "IMPOSTO IMPORTACAO": "IMP IMPORT",
-            "TAXA SICOMEX": "TX SISCOMEX",
-            "FRETE INTERNACIONAL": "FRET INTER",
-            "SEGURO INTERNACIONAL": "SEG INTERN"
+def extract_regex(pattern, text, default=""):
+    match = re.search(pattern, text, re.IGNORECASE)
+    if match: return match.group(1).strip()
+    return default
+
+# --- ENGINE DE PROCESSAMENTO (CORE) ---
+class DuimpSapEngine:
+    """Processador otimizado para extração de PDF DUIMP e conversão para XML SAP."""
+    
+    def __init__(self):
+        pass
+
+    def extract_data_from_pdf(self, pdf_bytes):
+        """Lê o PDF (suporta 500+ pgs) e estrutura os dados."""
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        full_text = ""
+        
+        # Leitura linear otimizada (C++)
+        for page in doc:
+            full_text += page.get_text("text", sort=True) + "\n"
+            
+        data = {
+            "header": {},
+            "adicoes": [],
+            "totais": {}
         }
-        enc = chardet.detect(content[:10000])['encoding'] or 'latin-1'
-        text = content.decode(enc)
-        
-        lines = text.splitlines()
-        processed = []
-        for line in lines:
-            if not any(p in line for p in patterns_to_remove):
-                temp = line
-                for k, v in substitutions.items():
-                    temp = temp.replace(k, v)
-                processed.append(temp)
-        return "\n".join(processed), len(lines)
 
-    # --- MÉTODO 2: DUIMP CONVERTER (LAYOUT HAFELE) ---
-    @staticmethod
-    def parse_duimp_pdf(pdf_file):
-        text = ""
-        with pdfplumber.open(pdf_file) as pdf:
-            for page in pdf.pages:
-                text += page.extract_text() or ""
+        # 1. Extração Cabeçalho
+        data['header']['numero'] = extract_regex(r"DUIMP\s*[:]\s*([\d\.\/-]+)", full_text).replace('.', '').replace('/', '').replace('-', '')
+        data['header']['importador'] = extract_regex(r"Importador\s*[:]\s*(.+?)\n", full_text)
+        data['header']['peso_bruto'] = extract_regex(r"Peso Bruto Total\s*[:]\s*([\d,\.]+)", full_text)
+        data['header']['peso_liq'] = extract_regex(r"Peso Líquido Total\s*[:]\s*([\d,\.]+)", full_text)
+
+        # 2. Loop de Adições (Detecta múltiplos itens)
+        split_pattern = r"(?:Adição|Item)\s*[:nNº°]*\s*(\d{3})"
+        blocks = re.split(split_pattern, full_text)
         
-        data = {"header": {}, "itens": []}
-        data["header"]["processo"] = re.search(r"PROCESSO\s*#?(\d+)", text, re.I).group(1) if re.search(r"PROCESSO\s*#?(\d+)", text, re.I) else "N/A"
-        data["header"]["duimp"] = re.search(r"Numero\s*[:\n]*\s*([\dBR]+)", text, re.I).group(1) if re.search(r"Numero\s*[:\n]*\s*([\dBR]+)", text, re.I) else "N/A"
+        if len(blocks) > 1:
+            # Pula o cabeçalho (índice 0) e pega pares (Número, Conteúdo)
+            for i in range(1, len(blocks), 2):
+                adi_num = blocks[i]
+                content = blocks[i+1]
+                
+                adi = {
+                    "numero": adi_num,
+                    "ncm": extract_regex(r"NCM\s*[:]\s*([\d\.]+)", content).replace('.', ''),
+                    "valor_aduan": extract_regex(r"Valor Aduaneiro\s*[:]\s*([\d,\.]+)", content),
+                    "incoterm": extract_regex(r"Incoterm\s*[:]\s*([A-Z]{3})", content),
+                    "peso_liq": extract_regex(r"Peso Líquido\s*[:]\s*([\d,\.]+)", content),
+                    "qtd_estat": extract_regex(r"Quantidade Estatística\s*[:]\s*([\d,\.]+)", content),
+                    "fornecedor": extract_regex(r"Exportador|Fornecedor\s*[:]\s*(.+?)\n", content),
+                    "descricao": extract_regex(r"Descrição da Mercadoria\s*[:]\s*(.+?)(?:\n|$)", content),
+                    
+                    # Impostos do Item
+                    "val_ii": extract_regex(r"II.*?Valor a Recolher\s*[:]\s*([\d,\.]+)", content),
+                    "val_ipi": extract_regex(r"IPI.*?Valor a Recolher\s*[:]\s*([\d,\.]+)", content),
+                    "val_pis": extract_regex(r"PIS.*?Valor a Recolher\s*[:]\s*([\d,\.]+)", content),
+                    "val_cofins": extract_regex(r"COFINS.*?Valor a Recolher\s*[:]\s*([\d,\.]+)", content),
+                    "frete_item": extract_regex(r"Frete\s*[:]\s*([\d,\.]+)", content),
+                    "seguro_item": extract_regex(r"Seguro\s*[:]\s*([\d,\.]+)", content),
+                }
+                data['adicoes'].append(adi)
         
-        parts = re.split(r"ITENS DA DUIMP\s*[-–]?\s*(\d+)", text)
-        if len(parts) > 1:
-            for i in range(1, len(parts), 2):
-                num, block = parts[i], parts[i+1]
-                # Limpeza PartNumber
-                raw_pn = re.search(r"PARTNUMBER\)\s*(.*?)\s*(?:PAIS|FABRICANTE|CONDICAO)", block, re.S).group(1) if re.search(r"PARTNUMBER\)\s*(.*?)\s*(?:PAIS|FABRICANTE|CONDICAO)", block, re.S) else ""
-                pn = re.sub(r'(C[ÓO]DIGO|INTERNO|PARTNUMBER|\(|\))', '', raw_pn, flags=re.I).strip().lstrip("- ").strip()
-                
-                raw_desc = re.search(r"DENOMINACAO DO PRODUTO\s+(.*?)\s+C[ÓO]DIGO", block, re.S).group(1) if re.search(r"DENOMINACAO DO PRODUTO\s+(.*?)\s+C[ÓO]DIGO", block, re.S) else ""
-                
-                data["itens"].append({
-                    "seq": num,
-                    "descricao": f"{pn} - {re.sub(r'\s+', ' ', raw_desc).strip()}" if pn else raw_desc,
-                    "ncm": re.search(r"NCM\s*[:\n]*\s*([\d\.]+)", block).group(1).replace(".", "") if re.search(r"NCM\s*[:\n]*\s*([\d\.]+)", block) else "00000000",
-                    "peso": re.sub(r'[^\d,]', '', re.search(r"Peso Líquido \(KG\)\s*[:\n]*\s*([\d\.,]+)", block).group(1) if re.search(r"Peso Líquido \(KG\)\s*[:\n]*\s*([\d\.,]+)", block) else "0").replace(',', ''),
-                    "qtd": re.sub(r'[^\d,]', '', re.search(r"Qtde Unid\. Comercial\s*[:\n]*\s*([\d\.,]+)", block).group(1) if re.search(r"Qtde Unid\. Comercial\s*[:\n]*\s*([\d\.,]+)", block) else "0").replace(',', ''),
-                    "v_unit": re.sub(r'[^\d,]', '', re.search(r"Valor Unit Cond Venda\s*[:\n]*\s*([\d\.,]+)", block).group(1) if re.search(r"Valor Unit Cond Venda\s*[:\n]*\s*([\d\.,]+)", block) else "0").replace(',', '')
-                })
+        # 3. Totais Rodapé
+        data['totais']['frete_total'] = extract_regex(r"Total Frete\s*\(R\$\)\s*[:]\s*([\d,\.]+)", full_text)
+        data['totais']['seguro_total'] = extract_regex(r"Total Seguro\s*\(R\$\)\s*[:]\s*([\d,\.]+)", full_text)
+
         return data
 
-    @staticmethod
-    def build_duimp_xml(data):
-        root = ET.Element("ListaDeclaracoes")
-        duimp = ET.SubElement(root, "duimp")
-        for item in data["itens"]:
-            ad = ET.SubElement(duimp, "adicao")
-            acr = ET.SubElement(ad, "acrescimo")
-            ET.SubElement(acr, "codigoAcrescimo").text = "17"
-            ET.SubElement(acr, "denominacao").text = "OUTROS ACRESCIMOS AO VALOR ADUANEIRO"
-            ET.SubElement(acr, "moedaNegociadaCodigo").text = "978"
-            ET.SubElement(acr, "valorReais").text = "000000000106601"
-            ET.SubElement(ad, "dadosMercadoriaCodigoNcm").text = item["ncm"]
-            ET.SubElement(ad, "dadosMercadoriaPesoLiquido").text = item["peso"].zfill(15)
-            merc = ET.SubElement(ad, "mercadoria")
-            ET.SubElement(merc, "descricaoMercadoria").text = item["descricao"]
-            ET.SubElement(merc, "numeroSequencialItem").text = item["seq"].zfill(2)
-            ET.SubElement(merc, "quantidade").text = item["qtd"].zfill(14)
-            ET.SubElement(merc, "valorUnitario").text = item["v_unit"].zfill(20)
-            ET.SubElement(ad, "numeroDUIMP").text = data["header"]["duimp"].replace("25BR", "")[:10]
-        ET.SubElement(duimp, "importadorNome").text = "HAFELE BRASIL LTDA"
-        return root
+    def generate_xml(self, data):
+        """Constrói a árvore XML estrita exigida pelo SAP."""
+        root = etree.Element("ListaDeclaracoes")
+        duimp = etree.SubElement(root, "duimp")
 
-    # --- MÉTODO 3: CTE MASSIVE PROCESSOR (UP TO 1M) ---
-    @staticmethod
-    def process_cte_massive(files):
-        data_list = []
-        ns = {'cte': 'http://www.portalfiscal.inf.br/cte'}
-        progress_bar = st.progress(0)
-        status = st.empty()
-        total = len(files)
-        
-        for idx, file in enumerate(files):
-            try:
-                root = ET.fromstring(file.read())
-                def find_t(path):
-                    found = root.find(f'.//{{{ns["cte"]}}}{path}')
-                    if found is None: found = root.find(f'.//{path}')
-                    return found.text if found is not None else ""
-                
-                # Busca de peso inteligente
-                peso_val, tipo_p = 0.0, "N/A"
-                for infQ in root.findall(f'.//{{{ns["cte"]}}}infQ') or root.findall('.//infQ'):
-                    tpMed = infQ.find(f'{{{ns["cte"]}}}tpMed') or infQ.find('tpMed')
-                    qCarga = infQ.find(f'{{{ns["cte"]}}}qCarga') or infQ.find('qCarga')
-                    if tpMed is not None and qCarga is not None:
-                        if any(x in tpMed.text.upper() for x in ['PESO BRUTO', 'PESO BASE', 'PESO']):
-                            peso_val = float(qCarga.text or 0)
-                            tipo_p = tpMed.text.upper()
-                            break
-
-                data_list.append({
-                    "nCT": find_t('nCT'),
-                    "Emissao": find_t('dhEmi')[:10],
-                    "Emitente": find_t('emit/xNome')[:40],
-                    "Destinatario": find_t('dest/xNome')[:40],
-                    "Peso_KG": peso_val,
-                    "Tipo_Peso": tipo_p,
-                    "Valor": float(find_t('vTPrest') or 0),
-                    "Chave": find_t('infNFe/chave')
-                })
-                
-                if (idx + 1) % 500 == 0 or (idx + 1) == total:
-                    progress_bar.progress((idx + 1) / total)
-                    status.text(f"Processando: {idx+1}/{total}")
-            except: continue
+        # --- BLOCO ADIÇÕES (Mandatório ser o primeiro) ---
+        for item in data['adicoes']:
+            adicao = etree.SubElement(duimp, "adicao")
             
-        return pd.DataFrame(data_list)
+            # Acrescimo
+            acr = etree.SubElement(adicao, "acrescimo")
+            etree.SubElement(acr, "codigoAcrescimo").text = "17"
+            etree.SubElement(acr, "denominacao").text = "OUTROS ACRESCIMOS"
+            etree.SubElement(acr, "moedaNegociadaCodigo").text = "978"
+            etree.SubElement(acr, "moedaNegociadaNome").text = "EURO"
+            etree.SubElement(acr, "valorMoedaNegociada").text = fmt_sap("0")
+            etree.SubElement(acr, "valorReais").text = fmt_sap("0")
 
-# --- APLICAÇÃO ---
+            # Impostos
+            etree.SubElement(adicao, "cideValorAliquotaEspecifica").text = fmt_sap("0", 11)
+            etree.SubElement(adicao, "cideValorDevido").text = fmt_sap("0")
+            etree.SubElement(adicao, "cideValorRecolher").text = fmt_sap("0")
+            etree.SubElement(adicao, "codigoRelacaoCompradorVendedor").text = "3"
+            etree.SubElement(adicao, "codigoVinculoCompradorVendedor").text = "1"
 
+            # COFINS
+            etree.SubElement(adicao, "cofinsAliquotaAdValorem").text = "00965"
+            etree.SubElement(adicao, "cofinsAliquotaEspecificaQuantidadeUnidade").text = fmt_sap("0", 9)
+            etree.SubElement(adicao, "cofinsAliquotaEspecificaValor").text = fmt_sap("0", 10)
+            etree.SubElement(adicao, "cofinsAliquotaReduzida").text = "00000"
+            etree.SubElement(adicao, "cofinsAliquotaValorDevido").text = fmt_sap(item['val_cofins'])
+            etree.SubElement(adicao, "cofinsAliquotaValorRecolher").text = fmt_sap(item['val_cofins'])
+
+            # Venda
+            etree.SubElement(adicao, "condicaoVendaIncoterm").text = item['incoterm'] or "FCA"
+            etree.SubElement(adicao, "condicaoVendaLocal").text = "LOCAL"
+            etree.SubElement(adicao, "condicaoVendaMetodoValoracaoCodigo").text = "01"
+            etree.SubElement(adicao, "condicaoVendaMetodoValoracaoNome").text = "METODO 1"
+            etree.SubElement(adicao, "condicaoVendaMoedaCodigo").text = "978"
+            etree.SubElement(adicao, "condicaoVendaMoedaNome").text = "EURO"
+            etree.SubElement(adicao, "condicaoVendaValorMoeda").text = fmt_sap("0")
+            etree.SubElement(adicao, "condicaoVendaValorReais").text = fmt_sap(item['valor_aduan'])
+
+            # Carga Item
+            etree.SubElement(adicao, "dadosCargaPaisProcedenciaCodigo").text = "000"
+            etree.SubElement(adicao, "dadosCargaUrfEntradaCodigo").text = "0000000"
+            etree.SubElement(adicao, "dadosCargaViaTransporteCodigo").text = "01"
+            etree.SubElement(adicao, "dadosCargaViaTransporteNome").text = "MARITIMA"
+
+            # Mercadoria
+            etree.SubElement(adicao, "dadosMercadoriaAplicacao").text = "REVENDA"
+            etree.SubElement(adicao, "dadosMercadoriaCodigoNaladiNCCA").text = "0000000"
+            etree.SubElement(adicao, "dadosMercadoriaCodigoNaladiSH").text = "00000000"
+            etree.SubElement(adicao, "dadosMercadoriaCodigoNcm").text = item['ncm']
+            etree.SubElement(adicao, "dadosMercadoriaCondicao").text = "NOVA"
+            etree.SubElement(adicao, "dadosMercadoriaDescricaoTipoCertificado").text = "Sem Certificado"
+            etree.SubElement(adicao, "dadosMercadoriaIndicadorTipoCertificado").text = "1"
+            etree.SubElement(adicao, "dadosMercadoriaMedidaEstatisticaQuantidade").text = fmt_sap(item['qtd_estat'], 14)
+            etree.SubElement(adicao, "dadosMercadoriaMedidaEstatisticaUnidade").text = "UNIDADE"
+            etree.SubElement(adicao, "dadosMercadoriaNomeNcm").text = "GENERICO"
+            etree.SubElement(adicao, "dadosMercadoriaPesoLiquido").text = fmt_sap(item['peso_liq'])
+
+            # DCR (placeholder)
+            etree.SubElement(adicao, "dcrCoeficienteReducao").text = "00000"
+            etree.SubElement(adicao, "dcrIdentificacao").text = "00000000"
+            etree.SubElement(adicao, "dcrValorDevido").text = fmt_sap("0")
+            etree.SubElement(adicao, "dcrValorDolar").text = fmt_sap("0")
+            etree.SubElement(adicao, "dcrValorReal").text = fmt_sap("0")
+            etree.SubElement(adicao, "dcrValorRecolher").text = fmt_sap("0")
+
+            # Fornecedor
+            etree.SubElement(adicao, "fornecedorCidade").text = "CIDADE"
+            etree.SubElement(adicao, "fornecedorLogradouro").text = "RUA"
+            etree.SubElement(adicao, "fornecedorNome").text = clean_text(item['fornecedor'])[:60]
+            etree.SubElement(adicao, "fornecedorNumero").text = "00"
+
+            # Frete Item
+            etree.SubElement(adicao, "freteMoedaNegociadaCodigo").text = "978"
+            etree.SubElement(adicao, "freteMoedaNegociadaNome").text = "EURO"
+            etree.SubElement(adicao, "freteValorMoedaNegociada").text = fmt_sap("0")
+            etree.SubElement(adicao, "freteValorReais").text = fmt_sap(item['frete_item'])
+
+            # II
+            etree.SubElement(adicao, "iiAcordoTarifarioTipoCodigo").text = "0"
+            etree.SubElement(adicao, "iiAliquotaAcordo").text = "00000"
+            etree.SubElement(adicao, "iiAliquotaAdValorem").text = "01800"
+            etree.SubElement(adicao, "iiAliquotaPercentualReducao").text = "00000"
+            etree.SubElement(adicao, "iiAliquotaReduzida").text = "00000"
+            etree.SubElement(adicao, "iiAliquotaValorCalculado").text = fmt_sap(item['val_ii'])
+            etree.SubElement(adicao, "iiAliquotaValorDevido").text = fmt_sap(item['val_ii'])
+            etree.SubElement(adicao, "iiAliquotaValorRecolher").text = fmt_sap(item['val_ii'])
+            etree.SubElement(adicao, "iiAliquotaValorReduzido").text = fmt_sap("0")
+            etree.SubElement(adicao, "iiBaseCalculo").text = fmt_sap(item['valor_aduan'])
+            etree.SubElement(adicao, "iiFundamentoLegalCodigo").text = "00"
+            etree.SubElement(adicao, "iiMotivoAdmissaoTemporariaCodigo").text = "00"
+            etree.SubElement(adicao, "iiRegimeTributacaoCodigo").text = "1"
+            etree.SubElement(adicao, "iiRegimeTributacaoNome").text = "RECOLHIMENTO INTEGRAL"
+
+            # IPI
+            etree.SubElement(adicao, "ipiAliquotaAdValorem").text = "00000"
+            etree.SubElement(adicao, "ipiAliquotaEspecificaCapacidadeRecipciente").text = "00000"
+            etree.SubElement(adicao, "ipiAliquotaEspecificaQuantidadeUnidadeMedida").text = "000000000"
+            etree.SubElement(adicao, "ipiAliquotaEspecificaTipoRecipienteCodigo").text = "00"
+            etree.SubElement(adicao, "ipiAliquotaEspecificaValorUnidadeMedida").text = "0000000000"
+            etree.SubElement(adicao, "ipiAliquotaNotaComplementarTIPI").text = "00"
+            etree.SubElement(adicao, "ipiAliquotaReduzida").text = "00000"
+            etree.SubElement(adicao, "ipiAliquotaValorDevido").text = fmt_sap(item['val_ipi'])
+            etree.SubElement(adicao, "ipiAliquotaValorRecolher").text = fmt_sap(item['val_ipi'])
+            etree.SubElement(adicao, "ipiRegimeTributacaoCodigo").text = "4"
+            etree.SubElement(adicao, "ipiRegimeTributacaoNome").text = "SEM BENEFICIO"
+
+            # Detalhes
+            merc = etree.SubElement(adicao, "mercadoria")
+            etree.SubElement(merc, "descricaoMercadoria").text = clean_text(item['descricao'])[:100]
+            etree.SubElement(merc, "numeroSequencialItem").text = "01"
+            etree.SubElement(merc, "quantidade").text = fmt_sap(item['qtd_estat'], 14)
+            etree.SubElement(merc, "unidadeMedida").text = "PECA"
+            etree.SubElement(merc, "valorUnitario").text = fmt_sap("0", 20)
+
+            # IDs
+            etree.SubElement(adicao, "numeroAdicao").text = item['numero']
+            etree.SubElement(adicao, "numeroDUIMP").text = data['header'].get('numero')
+            etree.SubElement(adicao, "numeroLI").text = "0000000000"
+            etree.SubElement(adicao, "paisAquisicaoMercadoriaCodigo").text = "386"
+            etree.SubElement(adicao, "paisAquisicaoMercadoriaNome").text = "ITALIA"
+            etree.SubElement(adicao, "paisOrigemMercadoriaCodigo").text = "386"
+            etree.SubElement(adicao, "paisOrigemMercadoriaNome").text = "ITALIA"
+
+            # PIS
+            etree.SubElement(adicao, "pisCofinsBaseCalculoAliquotaICMS").text = "00000"
+            etree.SubElement(adicao, "pisCofinsBaseCalculoFundamentoLegalCodigo").text = "00"
+            etree.SubElement(adicao, "pisCofinsBaseCalculoPercentualReducao").text = "00000"
+            etree.SubElement(adicao, "pisCofinsBaseCalculoValor").text = fmt_sap(item['valor_aduan'])
+            etree.SubElement(adicao, "pisCofinsFundamentoLegalReducaoCodigo").text = "00"
+            etree.SubElement(adicao, "pisCofinsRegimeTributacaoCodigo").text = "1"
+            etree.SubElement(adicao, "pisCofinsRegimeTributacaoNome").text = "RECOLHIMENTO INTEGRAL"
+            etree.SubElement(adicao, "pisPasepAliquotaAdValorem").text = "00210"
+            etree.SubElement(adicao, "pisPasepAliquotaEspecificaQuantidadeUnidade").text = "000000000"
+            etree.SubElement(adicao, "pisPasepAliquotaEspecificaValor").text = "0000000000"
+            etree.SubElement(adicao, "pisPasepAliquotaReduzida").text = "00000"
+            etree.SubElement(adicao, "pisPasepAliquotaValorDevido").text = fmt_sap(item['val_pis'])
+            etree.SubElement(adicao, "pisPasepAliquotaValorRecolher").text = fmt_sap(item['val_pis'])
+
+            # ICMS
+            etree.SubElement(adicao, "icmsBaseCalculoValor").text = fmt_sap("0")
+            etree.SubElement(adicao, "icmsBaseCalculoAliquota").text = "01800"
+            etree.SubElement(adicao, "icmsBaseCalculoValorImposto").text = fmt_sap("0")
+            etree.SubElement(adicao, "icmsBaseCalculoValorDiferido").text = fmt_sap("0")
+
+            # CBS/IBS (Reforma Tributária - placeholders)
+            etree.SubElement(adicao, "cbsIbsCst").text = "000"
+            etree.SubElement(adicao, "cbsIbsClasstrib").text = "000001"
+            etree.SubElement(adicao, "cbsBaseCalculoValor").text = fmt_sap("0")
+            etree.SubElement(adicao, "cbsBaseCalculoAliquota").text = "00090"
+            etree.SubElement(adicao, "cbsBaseCalculoAliquotaReducao").text = "00000"
+            etree.SubElement(adicao, "cbsBaseCalculoValorImposto").text = fmt_sap("0")
+            etree.SubElement(adicao, "ibsBaseCalculoValor").text = fmt_sap("0")
+            etree.SubElement(adicao, "ibsBaseCalculoAliquota").text = "00010"
+            etree.SubElement(adicao, "ibsBaseCalculoAliquotaReducao").text = "00000"
+            etree.SubElement(adicao, "ibsBaseCalculoValorImposto").text = fmt_sap("0")
+
+            # Final Adição
+            etree.SubElement(adicao, "relacaoCompradorVendedor").text = "Fabricante é desconhecido"
+            etree.SubElement(adicao, "seguroMoedaNegociadaCodigo").text = "220"
+            etree.SubElement(adicao, "seguroMoedaNegociadaNome").text = "DOLAR"
+            etree.SubElement(adicao, "seguroValorMoedaNegociada").text = fmt_sap("0")
+            etree.SubElement(adicao, "seguroValorReais").text = fmt_sap(item['seguro_item'])
+            etree.SubElement(adicao, "sequencialRetificacao").text = "00"
+            etree.SubElement(adicao, "valorMultaARecolher").text = fmt_sap("0")
+            etree.SubElement(adicao, "valorMultaARecolherAjustado").text = fmt_sap("0")
+            etree.SubElement(adicao, "valorReaisFreteInternacional").text = fmt_sap(item['frete_item'])
+            etree.SubElement(adicao, "valorReaisSeguroInternacional").text = fmt_sap(item['seguro_item'])
+            etree.SubElement(adicao, "valorTotalCondicaoVenda").text = fmt_sap("0")
+            etree.SubElement(adicao, "vinculoCompradorVendedor").text = "Não há vinculação"
+
+        # --- DADOS GERAIS (HEADER) ---
+        arm = etree.SubElement(duimp, "armazem")
+        etree.SubElement(arm, "nomeArmazem").text = "TCP"
+        
+        etree.SubElement(duimp, "armazenamentoRecintoAduaneiroCodigo").text = "9801303"
+        etree.SubElement(duimp, "armazenamentoRecintoAduaneiroNome").text = "TCP"
+        etree.SubElement(duimp, "armazenamentoSetor").text = "002"
+        etree.SubElement(duimp, "canalSelecaoParametrizada").text = "001"
+        etree.SubElement(duimp, "caracterizacaoOperacaoCodigoTipo").text = "1"
+        etree.SubElement(duimp, "caracterizacaoOperacaoDescricaoTipo").text = "Importação Própria"
+        etree.SubElement(duimp, "cargaDataChegada").text = "20251120"
+        etree.SubElement(duimp, "cargaNumeroAgente").text = "N/I"
+        etree.SubElement(duimp, "cargaPaisProcedenciaCodigo").text = "386"
+        etree.SubElement(duimp, "cargaPaisProcedenciaNome").text = "ITALIA"
+        etree.SubElement(duimp, "cargaPesoBruto").text = fmt_sap(data['header'].get('peso_bruto'))
+        etree.SubElement(duimp, "cargaPesoLiquido").text = fmt_sap(data['header'].get('peso_liq'))
+        etree.SubElement(duimp, "cargaUrfEntradaCodigo").text = "0917800"
+        etree.SubElement(duimp, "cargaUrfEntradaNome").text = "PORTO DE PARANAGUA"
+        
+        # Conhecimento (Fixos de Exemplo)
+        etree.SubElement(duimp, "conhecimentoCargaEmbarqueData").text = "20251025"
+        etree.SubElement(duimp, "conhecimentoCargaEmbarqueLocal").text = "GENOVA"
+        etree.SubElement(duimp, "conhecimentoCargaId").text = "CEMERCANTE"
+        etree.SubElement(duimp, "conhecimentoCargaIdMaster").text = "MASTER"
+        etree.SubElement(duimp, "conhecimentoCargaTipoCodigo").text = "12"
+        etree.SubElement(duimp, "conhecimentoCargaTipoNome").text = "HBL"
+        etree.SubElement(duimp, "conhecimentoCargaUtilizacao").text = "1"
+        etree.SubElement(duimp, "conhecimentoCargaUtilizacaoNome").text = "Total"
+        etree.SubElement(duimp, "dataDesembaraco").text = "20251124"
+        etree.SubElement(duimp, "dataRegistro").text = "20251124"
+        etree.SubElement(duimp, "documentoChegadaCargaCodigoTipo").text = "1"
+        etree.SubElement(duimp, "documentoChegadaCargaNome").text = "Manifesto"
+        etree.SubElement(duimp, "documentoChegadaCargaNumero").text = "1625502058594"
+
+        # Embalagem
+        emb = etree.SubElement(duimp, "embalagem")
+        etree.SubElement(emb, "codigoTipoEmbalagem").text = "60"
+        etree.SubElement(emb, "nomeEmbalagem").text = "PALLETS"
+        etree.SubElement(emb, "quantidadeVolume").text = "00002"
+
+        # Totais Globais
+        etree.SubElement(duimp, "freteCollect").text = fmt_sap("0")
+        etree.SubElement(duimp, "freteEmTerritorioNacional").text = fmt_sap("0")
+        etree.SubElement(duimp, "freteMoedaNegociadaCodigo").text = "978"
+        etree.SubElement(duimp, "freteMoedaNegociadaNome").text = "EURO"
+        etree.SubElement(duimp, "fretePrepaid").text = fmt_sap("0")
+        etree.SubElement(duimp, "freteTotalDolares").text = fmt_sap("0")
+        etree.SubElement(duimp, "freteTotalMoeda").text = fmt_sap("0")
+        etree.SubElement(duimp, "freteTotalReais").text = fmt_sap(data['totais'].get('frete_total'))
+
+        # Importador
+        etree.SubElement(duimp, "importadorCodigoTipo").text = "1"
+        etree.SubElement(duimp, "importadorCpfRepresentanteLegal").text = "00000000000"
+        etree.SubElement(duimp, "importadorEnderecoBairro").text = "BAIRRO"
+        etree.SubElement(duimp, "importadorEnderecoCep").text = "00000000"
+        etree.SubElement(duimp, "importadorEnderecoComplemento").text = "COMPL"
+        etree.SubElement(duimp, "importadorEnderecoLogradouro").text = "RUA"
+        etree.SubElement(duimp, "importadorEnderecoMunicipio").text = "CIDADE"
+        etree.SubElement(duimp, "importadorEnderecoNumero").text = "00"
+        etree.SubElement(duimp, "importadorEnderecoUf").text = "UF"
+        etree.SubElement(duimp, "importadorNome").text = clean_text(data['header'].get('importador'))
+        etree.SubElement(duimp, "importadorNomeRepresentanteLegal").text = "REPRESENTANTE"
+        etree.SubElement(duimp, "importadorNumero").text = "00000000000000"
+        etree.SubElement(duimp, "importadorNumeroTelefone").text = "0000000000"
+        etree.SubElement(duimp, "informacaoComplementar").text = "INFO COMPLEMENTAR"
+
+        # Rodapé
+        etree.SubElement(duimp, "localDescargaTotalDolares").text = fmt_sap("0")
+        etree.SubElement(duimp, "localDescargaTotalReais").text = fmt_sap("0")
+        etree.SubElement(duimp, "localEmbarqueTotalDolares").text = fmt_sap("0")
+        etree.SubElement(duimp, "localEmbarqueTotalReais").text = fmt_sap("0")
+        etree.SubElement(duimp, "modalidadeDespachoCodigo").text = "1"
+        etree.SubElement(duimp, "modalidadeDespachoNome").text = "Normal"
+        etree.SubElement(duimp, "numeroDUIMP").text = data['header'].get('numero')
+        etree.SubElement(duimp, "operacaoFundap").text = "N"
+
+        # Pagamento (Genérico, necessário ajustar se houver dados)
+        pag = etree.SubElement(duimp, "pagamento")
+        etree.SubElement(pag, "agenciaPagamento").text = "0000"
+        etree.SubElement(pag, "bancoPagamento").text = "000"
+        etree.SubElement(pag, "codigoReceita").text = "0000"
+        etree.SubElement(pag, "codigoTipoPagamento").text = "1"
+        etree.SubElement(pag, "contaPagamento").text = "000000"
+        etree.SubElement(pag, "dataPagamento").text = "20251124"
+        etree.SubElement(pag, "nomeTipoPagamento").text = "Débito"
+        etree.SubElement(pag, "numeroRetificacao").text = "00"
+        etree.SubElement(pag, "valorJurosEncargos").text = fmt_sap("0", 9)
+        etree.SubElement(pag, "valorMulta").text = fmt_sap("0", 9)
+        etree.SubElement(pag, "valorReceita").text = fmt_sap("0")
+
+        etree.SubElement(duimp, "seguroMoedaNegociadaCodigo").text = "220"
+        etree.SubElement(duimp, "seguroMoedaNegociadaNome").text = "DOLAR"
+        etree.SubElement(duimp, "seguroTotalDolares").text = fmt_sap("0")
+        etree.SubElement(duimp, "seguroTotalMoedaNegociada").text = fmt_sap("0")
+        etree.SubElement(duimp, "seguroTotalReais").text = fmt_sap(data['totais'].get('seguro_total'))
+        etree.SubElement(duimp, "sequencialRetificacao").text = "00"
+        etree.SubElement(duimp, "situacaoEntregaCarga").text = "ENTREGA"
+        etree.SubElement(duimp, "tipoDeclaracaoCodigo").text = "01"
+        etree.SubElement(duimp, "tipoDeclaracaoNome").text = "CONSUMO"
+        etree.SubElement(duimp, "totalAdicoes").text = str(len(data['adicoes'])).zfill(3)
+        etree.SubElement(duimp, "urfDespachoCodigo").text = "0917800"
+        etree.SubElement(duimp, "urfDespachoNome").text = "PORTO DE PARANAGUA"
+        etree.SubElement(duimp, "valorTotalMultaARecolherAjustado").text = fmt_sap("0")
+        etree.SubElement(duimp, "viaTransporteCodigo").text = "01"
+        etree.SubElement(duimp, "viaTransporteMultimodal").text = "N"
+        etree.SubElement(duimp, "viaTransporteNome").text = "MARÍTIMA"
+        etree.SubElement(duimp, "viaTransporteNomeTransportador").text = "MAERSK"
+        etree.SubElement(duimp, "viaTransporteNomeVeiculo").text = "MAERSK"
+        etree.SubElement(duimp, "viaTransportePaisTransportadorCodigo").text = "741"
+        etree.SubElement(duimp, "viaTransportePaisTransportadorNome").text = "CINGAPURA"
+
+        return etree.tostring(root, pretty_print=True, encoding="UTF-8", xml_declaration=True)
+
+# --- INTERFACE PRINCIPAL ---
 def main():
-    apply_ui_style()
-    engine = DataEngine()
-
+    apply_custom_ui()
+    
+    # Header Häfele Style
     st.markdown(f"""
-    <div class="header-box">
-        <img src="https://raw.githubusercontent.com/DaniloNs-creator/final/7ea6ab2a610ef8f0c11be3c34f046e7ff2cdfc6a/haefele_logo.png" class="hafele-logo">
-        <h1>Data Management Hub</h1>
-        <p>Unificação de Processos: TXT Cleaner | Massive CT-e | DUIMP Official Layout</p>
+    <div class="header-container">
+        <h1>Sistema Integrado de Processamento DUIMP</h1>
+        <p>Conversor PDF para XML (Layout SAP Estrito)</p>
     </div>
     """, unsafe_allow_html=True)
 
-    tab1, tab2, tab3 = st.tabs(["🚚 Processamento CT-e (Escala)", "📄 Conversor DUIMP PDF/XML", "📝 Limpeza de TXT"])
+    engine = DuimpSapEngine()
+    
+    col_up, col_action = st.columns([1, 1])
+    
+    with col_up:
+        st.subheader("Importação de Documento")
+        uploaded_file = st.file_uploader("Carregue o Extrato DUIMP (PDF)", type="pdf")
 
-    # TAB 1: CT-E MASSIVO
-    with tab1:
-        st.subheader("Processamento de CT-e para Power BI")
-        uploaded_ctes = st.file_uploader("Upload XMLs de CT-e (Suporta Lotes de até 1 milhão)", type="xml", accept_multiple_files=True)
-        if uploaded_ctes and st.button("🚀 Processar CT-es"):
-            df_cte = engine.process_cte_massive(uploaded_ctes)
-            st.success(f"Processado {len(df_cte)} arquivos com sucesso!")
-            st.dataframe(df_cte.head(50), use_container_width=True)
+    if uploaded_file:
+        with col_action:
+            st.write("##") # Espaçamento
+            if st.button("🚀 Processar e Gerar XML"):
+                try:
+                    with st.spinner("Processando páginas do PDF..."):
+                        # 1. Extrair Dados
+                        start_time = time.time()
+                        pdf_bytes = uploaded_file.read()
+                        extracted_data = engine.extract_data_from_pdf(pdf_bytes)
+                        
+                        # 2. Gerar XML
+                        xml_bytes = engine.generate_xml(extracted_data)
+                        
+                        end_time = time.time()
+                        
+                        st.success(f"Sucesso! {len(extracted_data['adicoes'])} adições processadas em {end_time - start_time:.2f}s")
+                        
+                        # Salvar no session state para não perder ao clicar em download
+                        st.session_state['xml_output'] = xml_bytes
+                        st.session_state['duimp_num'] = extracted_data['header'].get('numero', 'SAP')
+                        st.session_state['preview_data'] = extracted_data
+
+                except Exception as e:
+                    st.error(f"Erro Crítico: {e}")
+
+    # Área de Resultados
+    if 'xml_output' in st.session_state:
+        st.markdown("---")
+        c1, c2 = st.columns(2)
+        
+        with c1:
+            st.download_button(
+                label="📥 Baixar XML SAP",
+                data=st.session_state['xml_output'],
+                file_name=f"DUIMP_{st.session_state['duimp_num']}.xml",
+                mime="application/xml"
+            )
             
-            csv = df_cte.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Baixar Base Consolidada (CSV)", csv, "base_cte_consolidada.csv", "text/csv")
-
-    # TAB 2: DUIMP (LAYOUT HAFELE)
-    with tab2:
-        st.subheader("Conversor DUIMP (Layout Oficial)")
-        pdf_duimp = st.file_uploader("Selecione o PDF de Conferência", type="pdf")
-        if pdf_duimp and st.button("🛠️ Gerar XML Häfele"):
-            data_duimp = engine.parse_duimp_pdf(pdf_duimp)
-            xml_res = engine.build_duimp_xml(data_duimp)
-            xml_str = minidom.parseString(ET.tostring(xml_res, 'utf-8')).toprettyxml(indent="    ")
-            
-            st.info(f"Processo: {data_duimp['header']['processo']} | Itens: {len(data_duimp['itens'])}")
-            st.download_button("📥 Baixar XML Oficial", xml_str, f"DUIMP_{data_duimp['header']['processo']}.xml", "text/xml")
-            with st.expander("Prévia da Descrição (Item 1)"):
-                st.code(data_duimp['itens'][0]['descricao'])
-
-    # TAB 3: TXT CLEANER
-    with tab3:
-        st.subheader("Limpeza de Arquivos TXT/Sped")
-        txt_file = st.file_uploader("Selecione o arquivo TXT", type="txt")
-        if txt_file and st.button("🪄 Limpar Linhas"):
-            res_txt, total = engine.clean_txt(txt_file.read(), ["-------", "SPED EFD-ICMS/IPI"])
-            st.success(f"Processado! Linhas originais: {total}")
-            st.download_button("📥 Baixar TXT Limpo", res_txt, f"CLEAN_{txt_file.name}", "text/plain")
+        with c2:
+            with st.expander("🔍 Visualizar Dados Extraídos"):
+                st.json(st.session_state['preview_data'])
 
 if __name__ == "__main__":
     main()
