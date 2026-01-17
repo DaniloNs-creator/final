@@ -8,6 +8,8 @@ st.set_page_config(page_title="Conversor DUIMP 2.0 (Extrato Conferência)", layo
 # ==============================================================================
 # 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO - INTACTO)
 # ==============================================================================
+# A ordem e estrutura destas listas garantem a fidelidade ao XML modelo.
+
 ADICAO_FIELDS_ORDER = [
     {"tag": "acrescimo", "type": "complex", "children": [
         {"tag": "codigoAcrescimo", "default": "17"},
@@ -152,7 +154,6 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "vinculoCompradorVendedor", "default": "Não há vinculação entre comprador e vendedor."}
 ]
 
-# Tags de Rodapé
 FOOTER_TAGS = {
     "armazem": {"tag": "nomeArmazem", "default": "TCP"},
     "armazenamentoRecintoAduaneiroCodigo": "9801303",
@@ -278,16 +279,23 @@ class DataFormatter:
 
     @staticmethod
     def parse_supplier_info(raw_name, raw_addr):
+        # Neste layout, o endereço muitas vezes não vem detalhado (Rua, Num).
+        # Extraímos o que é possível (Nome e País) e deixamos o resto vazio/padrão
+        # para não quebrar a estrutura do XML.
         data = {
             "fornecedorNome": "FORNECEDOR PADRAO",
-            "fornecedorLogradouro": "ENDERECO PADRAO",
-            "fornecedorNumero": "S/N",
+            "fornecedorLogradouro": "",
+            "fornecedorNumero": "",
             "fornecedorCidade": "EXTERIOR"
         }
         
-        # Lógica simplificada para quando o PDF tem o fornecedor em campo único ou global
         if raw_name:
-            data["fornecedorNome"] = raw_name.strip()[:60]
+            # Ex: "HAFELE SE & CO KG PAIS: DE ALEMANHA"
+            parts = raw_name.split("PAIS:")
+            data["fornecedorNome"] = parts[0].strip()[:60]
+            if len(parts) > 1:
+                # Tenta extrair o país/cidade
+                data["fornecedorCidade"] = parts[1].split("-")[0].strip()[:30]
             
         return data
 
@@ -303,7 +311,7 @@ class PDFParserV2:
         self.items = []
 
     def preprocess(self):
-        """Lê todas as páginas concatenadas."""
+        """Lê o PDF completo."""
         raw_text = []
         for page in self.doc:
             raw_text.append(page.get_text("text"))
@@ -312,85 +320,95 @@ class PDFParserV2:
     def extract_header(self):
         txt = self.full_text
         
-        # Padrões específicos do Extrato de Conferência
-        # Busca "Numero" geralmente associado à DUIMP na seção de Identificação
+        # Regex específicos para o layout "Extrato de Conferência"
+        
+        # DUIMP (Procura por "Numero" e pega o valor na linha seguinte ou mesma linha)
         duimp_match = re.search(r"Numero\s*\n\s*([\w\d]+)", txt, re.IGNORECASE)
         if not duimp_match:
-             # Tenta formato alternativo caso a quebra de linha seja diferente
              duimp_match = re.search(r"Numero\s*[:]\s*([\w\d]+)", txt, re.IGNORECASE)
         self.header["numeroDUIMP"] = duimp_match.group(1) if duimp_match else ""
 
         # Importador
-        imp_match = re.search(r"IMPORTADOR\s*\n\s*(.+)", txt, re.IGNORECASE)
+        imp_match = re.search(r"IMPORTADOR\s*\n\s*\"?(.+?)\"?(?=\n)", txt, re.IGNORECASE)
         self.header["importadorNome"] = imp_match.group(1).strip() if imp_match else ""
         
-        cnpj_match = re.search(r"CNPJ\s*\n\s*([\d./-]+)", txt, re.IGNORECASE)
+        cnpj_match = re.search(r"CNPJ\s*\n\s*\"?([\d./-]+)\"?", txt, re.IGNORECASE)
         self.header["cnpj"] = cnpj_match.group(1) if cnpj_match else ""
 
-        # Pesos e Informações Complementares (geralmente no final)
-        # O parser varre o texto todo procurando essas chaves
+        # Pesos (Geralmente no final, nas informações complementares)
         peso_b_match = re.search(r"PESO BRUTO KG\s*[:]?\s*([\d.,]+)", txt, re.IGNORECASE)
         self.header["pesoBruto"] = peso_b_match.group(1) if peso_b_match else "0"
         
         peso_l_match = re.search(r"PESO LIQUIDO KG\s*[:]?\s*([\d.,]+)", txt, re.IGNORECASE)
         self.header["pesoLiquido"] = peso_l_match.group(1) if peso_l_match else "0"
         
-        # Fornecedor Global (neste relatório costuma aparecer nas info complementares)
-        forn_match = re.search(r"FORNECEDOR\s*[:]?\s*(.+)", txt, re.IGNORECASE)
+        # Fornecedor Global (Captura genérica se houver no cabeçalho)
+        forn_match = re.search(r"EXPORTADOR ESTRANGEIRO\s*\n\s*(.+?)(?=\n)", txt, re.IGNORECASE)
         self.header["fornecedorGlobal"] = forn_match.group(1).strip() if forn_match else ""
 
     def extract_items(self):
         """
-        Estratégia para Itens no Extrato de Conferência:
-        Geralmente listados em blocos ou linhas.
-        Procura por padrões de NCM e Valores para criar os itens.
+        Extrai itens dividindo o texto pelos marcadores 'ITENS DA DUIMP'.
+        Estratégia: O NCM do Item X geralmente está no bloco do Item X-1 (tabela anterior).
         """
-        # Regex flexível para capturar itens. 
-        # Assume que cada item tem pelo menos um NCM e um Valor visíveis.
-        # Exemplo de linha detectada: "8452.2120 ... 4.644,79"
+        # 1. Extrair todos os NCMs presentes nas tabelas CSV-like
+        # Procura linhas como: "1",,"3926.30.00"
+        ncms = re.findall(r"\"\d+\",,\"([\d\.]+)\"", self.full_text)
+        if not ncms:
+            # Tenta formato alternativo sem aspas/vírgulas se o PDF for diferente
+            ncms = re.findall(r"(\d{4}\.\d{2}\.\d{2})", self.full_text)
+
+        # 2. Dividir em blocos de itens
+        chunks = re.split(r"ITENS DA DUIMP", self.full_text)
         
-        # Divide o texto em blocos baseados em palavras chaves de item se possível
-        # Se não, varre linha a linha procurando NCMs
+        # O primeiro chunk é cabeçalho. Os seguintes são itens.
+        # chunks[1] = Item 1 Details, chunks[2] = Item 2 Details...
         
-        lines = self.full_text.split('\n')
-        current_item = {}
-        
-        item_counter = 1
-        
-        for i, line in enumerate(lines):
-            # Tenta detectar inicio de item ou NCM
-            # Padrão NCM: 8 dígitos, as vezes com ponto
-            ncm_match = re.search(r"(\d{4}[.]\d{2}\d{2})", line)
-            
-            if ncm_match:
-                # Achou um potencial item
-                current_item = {
-                    "numeroAdicao": str(item_counter).zfill(3),
-                    "ncm": ncm_match.group(1),
-                    "descricao": "DESCRIÇÃO GENÉRICA (ITEM " + str(item_counter) + ")", # Default se não achar
-                    "quantidade": "1",
-                    "valorTotal": "0",
-                    "unidade": "UN",
+        if len(chunks) > 1:
+            for i in range(1, len(chunks)):
+                content = chunks[i]
+                
+                # Associa NCM pelo índice (Item 1 usa o 1º NCM encontrado, etc)
+                # Proteção de índice
+                ncm_val = ncms[i-1] if (i-1) < len(ncms) else "00000000"
+                
+                item = {
+                    "numeroAdicao": str(i).zfill(3),
+                    "ncm": ncm_val,
                     "fornecedor_raw": self.header.get("fornecedorGlobal", "")
                 }
+
+                # Extração de Campos Específicos dentro do bloco do item
                 
-                # Tenta achar valor na mesma linha ou próximas (Valor monetário)
-                # Procura valor com virgula decimal grande
-                val_match = re.search(r"([\d]{1,3}(?:[.]\d{3})*,\d{2})", line)
-                if val_match:
-                    current_item["valorTotal"] = val_match.group(1)
+                # Descrição
+                desc_match = re.search(r"DENOMINACAO DO PRODUTO\s*\n\s*(.+?)(?=\n\s*DESCRICAO DO PRODUTO|CÓDIGO INTERNO)", content, re.DOTALL | re.IGNORECASE)
+                item["descricao"] = desc_match.group(1).strip() if desc_match else "DESCRIÇÃO NÃO ENCONTRADA"
+
+                # Quantidade Estatística
+                qtd_match = re.search(r"Qtde Unid. Estatística\s*\n\s*\"?([\d.,]+)", content, re.IGNORECASE)
+                item["quantidade"] = qtd_match.group(1) if qtd_match else "0"
+
+                # Unidade
+                unid_match = re.search(r"Unidad Estatística\s*\n\s*\"?(.+?)\"", content, re.IGNORECASE)
+                item["unidade"] = unid_match.group(1) if unid_match else "UN"
+
+                # Peso Líquido
+                peso_match = re.search(r"Peso Líquido \(KG\)\s*\n\s*\"?([\d.,]+)", content, re.IGNORECASE)
+                item["pesoLiq"] = peso_match.group(1) if peso_match else "0"
+
+                # Valor Total (Condição de Venda)
+                val_match = re.search(r"Valor Tot. Cond Venda\s*\n\s*\"?([\d.,]+)", content, re.IGNORECASE)
+                item["valorTotal"] = val_match.group(1) if val_match else "0"
                 
-                # Tenta pegar descrição na linha anterior ou mesma linha
-                if i > 0:
-                    prev_line = lines[i-1].strip()
-                    if len(prev_line) > 5: # Evita pegar linhas vazias ou curtas demais
-                        current_item["descricao"] = prev_line
-                
-                self.items.append(current_item)
-                item_counter += 1
+                # Fornecedor Específico do Item (se houver)
+                forn_item_match = re.search(r"EXPORTADOR ESTRANGEIRO\s*\n\s*(.+?)(?=\n)", content, re.IGNORECASE)
+                if forn_item_match:
+                    item["fornecedor_raw"] = forn_item_match.group(1).strip()
+
+                self.items.append(item)
 
 # ==============================================================================
-# 4. XML BUILDER
+# 4. XML BUILDER (REUTILIZADO E INTACTO)
 # ==============================================================================
 
 class XMLBuilder:
@@ -412,7 +430,7 @@ class XMLBuilder:
             icms_base_valor = base_total_reais 
             cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
             
-            # Fornecedor (Usa o global extraido do header se o item não tiver especifico)
+            # Fornecedor
             supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"), "")
 
             # Mapa de Valores
@@ -422,8 +440,8 @@ class XMLBuilder:
                 "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
                 "dadosMercadoriaMedidaEstatisticaQuantidade": DataFormatter.format_number(it.get("quantidade"), 14),
                 "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "").upper(),
-                "dadosMercadoriaPesoLiquido": DataFormatter.format_number(it.get("pesoLiq", "0"), 15),
-                "condicaoVendaMoedaNome": "DOLAR DOS EUA", # Default comum neste relatório ou extrair se possível
+                "dadosMercadoriaPesoLiquido": DataFormatter.format_number(it.get("pesoLiq"), 15),
+                "condicaoVendaMoedaNome": "DOLAR DOS EUA", # Default comum ou extrair se possível
                 "condicaoVendaValorMoeda": base_total_reais,
                 "condicaoVendaValorReais": base_total_reais,
                 "paisOrigemMercadoriaNome": "EXTERIOR",
@@ -432,14 +450,14 @@ class XMLBuilder:
                 "descricaoMercadoria": DataFormatter.clean_text(it.get("descricao", "")),
                 "quantidade": DataFormatter.format_number(it.get("quantidade"), 14),
                 "unidadeMedida": it.get("unidade", "").upper(),
-                "valorUnitario": DataFormatter.format_number(it.get("valorTotal"), 20), # Simplificação: Unit = Total se Qtd=1
+                "valorUnitario": DataFormatter.format_number(it.get("valorTotal"), 20), # Simplificação
                 "dadosCargaUrfEntradaCodigo": "0000000",
                 
                 # --- FORNECEDOR ---
-                "fornecedorNome": supplier_data["fornecedorNome"][:60],
-                "fornecedorLogradouro": supplier_data["fornecedorLogradouro"][:60],
-                "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
-                "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
+                "fornecedorNome": supplier_data["fornecedorNome"],
+                "fornecedorLogradouro": supplier_data["fornecedorLogradouro"],
+                "fornecedorNumero": supplier_data["fornecedorNumero"],
+                "fornecedorCidade": supplier_data["fornecedorCidade"],
 
                 # --- TRIBUTOS ---
                 "icmsBaseCalculoValor": icms_base_valor,
