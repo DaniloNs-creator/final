@@ -3,7 +3,7 @@ import fitz  # PyMuPDF
 import re
 from lxml import etree
 
-st.set_page_config(page_title="Conversor DUIMP (Fornecedor Corrigido)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP 2.0 (Extrato Conferência)", layout="wide")
 
 # ==============================================================================
 # 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO - INTACTO)
@@ -205,7 +205,7 @@ FOOTER_TAGS = {
     "importadorNomeRepresentanteLegal": "REPRESENTANTE",
     "importadorNumero": "",
     "importadorNumeroTelefone": "0000000000",
-    "informacaoComplementar": "Informações extraídas do Extrato DUIMP.",
+    "informacaoComplementar": "Informações extraídas do Extrato Conferência.",
     "localDescargaTotalDolares": "000000000000000",
     "localDescargaTotalReais": "000000000000000",
     "localEmbarqueTotalDolares": "000000000000000",
@@ -278,65 +278,24 @@ class DataFormatter:
 
     @staticmethod
     def parse_supplier_info(raw_name, raw_addr):
-        """
-        Analisa as strings brutas do Fornecedor para extrair Nome, Logradouro, Número e Cidade.
-        Retorna dicionário.
-        """
         data = {
-            "fornecedorNome": "",
-            "fornecedorLogradouro": "",
+            "fornecedorNome": "FORNECEDOR PADRAO",
+            "fornecedorLogradouro": "ENDERECO PADRAO",
             "fornecedorNumero": "S/N",
-            "fornecedorCidade": ""
+            "fornecedorCidade": "EXTERIOR"
         }
-
-        # 1. Limpar Nome (Remove Código: "CODIGO-NOME")
+        
+        # Lógica simplificada para quando o PDF tem o fornecedor em campo único ou global
         if raw_name:
-            # Pega tudo após o primeiro hífen se existir, senão pega tudo
-            parts = raw_name.split('-', 1)
-            data["fornecedorNome"] = parts[-1].strip() if len(parts) > 1 else raw_name.strip()
-
-        # 2. Analisar Endereço
-        # Formato comum PDF: "RUA X, 123-CIDADE" ou "RUA Y-CIDADE-NUM"
-        if raw_addr:
-            clean_addr = DataFormatter.clean_text(raw_addr)
+            data["fornecedorNome"] = raw_name.strip()[:60]
             
-            # Tenta separar cidade pelo último traço (comum em NCMs/Endereços de importação)
-            parts_dash = clean_addr.rsplit('-', 1)
-            
-            if len(parts_dash) > 1:
-                # Assume que a última parte é a cidade (ou pais/cidade)
-                data["fornecedorCidade"] = parts_dash[1].strip()
-                street_part = parts_dash[0].strip()
-            else:
-                data["fornecedorCidade"] = "EXTERIOR"
-                street_part = clean_addr
-
-            # Tenta separar Logradouro e Número
-            # Procura por vírgula seguida de números
-            comma_split = street_part.rsplit(',', 1)
-            if len(comma_split) > 1:
-                # "Rua X, 123"
-                data["fornecedorLogradouro"] = comma_split[0].strip()
-                # Tenta limpar o número
-                num_match = re.search(r'\d+', comma_split[1])
-                if num_match:
-                    data["fornecedorNumero"] = num_match.group(0)
-            else:
-                # Se não tem vírgula, tenta achar numero no fim da string
-                num_match = re.search(r'(\d+)$', street_part)
-                if num_match:
-                    data["fornecedorNumero"] = num_match.group(1)
-                    data["fornecedorLogradouro"] = street_part[:num_match.start()].strip()
-                else:
-                    data["fornecedorLogradouro"] = street_part
-
         return data
 
 # ==============================================================================
-# 3. PARSER
+# 3. PARSER V2 (Extrato Conferência)
 # ==============================================================================
 
-class PDFParser:
+class PDFParserV2:
     def __init__(self, file_stream):
         self.doc = fitz.open(stream=file_stream, filetype="pdf")
         self.full_text = ""
@@ -344,63 +303,91 @@ class PDFParser:
         self.items = []
 
     def preprocess(self):
-        clean_lines = []
+        """Lê todas as páginas concatenadas."""
+        raw_text = []
         for page in self.doc:
-            text = page.get_text("text")
-            lines = text.split('\n')
-            for line in lines:
-                l_strip = line.strip()
-                if "Extrato da DUIMP" in l_strip: continue
-                if "Data, hora e responsável" in l_strip: continue
-                if re.match(r'^\d+\s*/\s*\d+$', l_strip): continue
-                clean_lines.append(line)
-        self.full_text = "\n".join(clean_lines)
+            raw_text.append(page.get_text("text"))
+        self.full_text = "\n".join(raw_text)
 
     def extract_header(self):
         txt = self.full_text
-        self.header["numeroDUIMP"] = self._regex(r"Extrato da Duimp\s+([\w\-\/]+)", txt)
-        self.header["cnpj"] = self._regex(r"CNPJ do importador:\s*([\d\.\/\-]+)", txt)
-        self.header["nomeImportador"] = self._regex(r"Nome do importador:\s*\n?(.+)", txt)
-        self.header["pesoBruto"] = self._regex(r"Peso Bruto \(kg\):\s*([\d\.,]+)", txt)
-        self.header["pesoLiquido"] = self._regex(r"Peso Liquido \(kg\):\s*([\d\.,]+)", txt)
-        self.header["urf"] = self._regex(r"Unidade de despacho:\s*([\d]+)", txt)
-        self.header["paisProcedencia"] = self._regex(r"País de Procedência:\s*\n?(.+)", txt)
+        
+        # Padrões específicos do Extrato de Conferência
+        # Busca "Numero" geralmente associado à DUIMP na seção de Identificação
+        duimp_match = re.search(r"Numero\s*\n\s*([\w\d]+)", txt, re.IGNORECASE)
+        if not duimp_match:
+             # Tenta formato alternativo caso a quebra de linha seja diferente
+             duimp_match = re.search(r"Numero\s*[:]\s*([\w\d]+)", txt, re.IGNORECASE)
+        self.header["numeroDUIMP"] = duimp_match.group(1) if duimp_match else ""
+
+        # Importador
+        imp_match = re.search(r"IMPORTADOR\s*\n\s*(.+)", txt, re.IGNORECASE)
+        self.header["importadorNome"] = imp_match.group(1).strip() if imp_match else ""
+        
+        cnpj_match = re.search(r"CNPJ\s*\n\s*([\d./-]+)", txt, re.IGNORECASE)
+        self.header["cnpj"] = cnpj_match.group(1) if cnpj_match else ""
+
+        # Pesos e Informações Complementares (geralmente no final)
+        # O parser varre o texto todo procurando essas chaves
+        peso_b_match = re.search(r"PESO BRUTO KG\s*[:]?\s*([\d.,]+)", txt, re.IGNORECASE)
+        self.header["pesoBruto"] = peso_b_match.group(1) if peso_b_match else "0"
+        
+        peso_l_match = re.search(r"PESO LIQUIDO KG\s*[:]?\s*([\d.,]+)", txt, re.IGNORECASE)
+        self.header["pesoLiquido"] = peso_l_match.group(1) if peso_l_match else "0"
+        
+        # Fornecedor Global (neste relatório costuma aparecer nas info complementares)
+        forn_match = re.search(r"FORNECEDOR\s*[:]?\s*(.+)", txt, re.IGNORECASE)
+        self.header["fornecedorGlobal"] = forn_match.group(1).strip() if forn_match else ""
 
     def extract_items(self):
-        chunks = re.split(r"Item\s+(\d{5})", self.full_text)
-        if len(chunks) > 1:
-            for i in range(1, len(chunks), 2):
-                num = chunks[i]
-                content = chunks[i+1]
-                item = {"numeroAdicao": num}
+        """
+        Estratégia para Itens no Extrato de Conferência:
+        Geralmente listados em blocos ou linhas.
+        Procura por padrões de NCM e Valores para criar os itens.
+        """
+        # Regex flexível para capturar itens. 
+        # Assume que cada item tem pelo menos um NCM e um Valor visíveis.
+        # Exemplo de linha detectada: "8452.2120 ... 4.644,79"
+        
+        # Divide o texto em blocos baseados em palavras chaves de item se possível
+        # Se não, varre linha a linha procurando NCMs
+        
+        lines = self.full_text.split('\n')
+        current_item = {}
+        
+        item_counter = 1
+        
+        for i, line in enumerate(lines):
+            # Tenta detectar inicio de item ou NCM
+            # Padrão NCM: 8 dígitos, as vezes com ponto
+            ncm_match = re.search(r"(\d{4}[.]\d{2}\d{2})", line)
+            
+            if ncm_match:
+                # Achou um potencial item
+                current_item = {
+                    "numeroAdicao": str(item_counter).zfill(3),
+                    "ncm": ncm_match.group(1),
+                    "descricao": "DESCRIÇÃO GENÉRICA (ITEM " + str(item_counter) + ")", # Default se não achar
+                    "quantidade": "1",
+                    "valorTotal": "0",
+                    "unidade": "UN",
+                    "fornecedor_raw": self.header.get("fornecedorGlobal", "")
+                }
                 
-                item["ncm"] = self._regex(r"NCM:\s*([\d\.]+)", content)
-                item["paisOrigem"] = self._regex(r"País de origem:\s*\n?(.+)", content)
-                item["quantidade"] = self._regex(r"Quantidade na unidade estatística:\s*([\d\.,]+)", content)
-                item["unidade"] = self._regex(r"Unidade estatística:\s*(.+)", content)
-                item["pesoLiq"] = self._regex(r"Peso líquido \(kg\):\s*([\d\.,]+)", content)
-                item["valorUnit"] = self._regex(r"Valor unitário na condição de venda:\s*([\d\.,]+)", content)
-                item["valorTotal"] = self._regex(r"Valor total na condição de venda:\s*([\d\.,]+)", content)
-                item["moeda"] = self._regex(r"Moeda negociada:\s*(.+)", content)
+                # Tenta achar valor na mesma linha ou próximas (Valor monetário)
+                # Procura valor com virgula decimal grande
+                val_match = re.search(r"([\d]{1,3}(?:[.]\d{3})*,\d{2})", line)
+                if val_match:
+                    current_item["valorTotal"] = val_match.group(1)
                 
-                # --- NOVAS CAPTURAS (FORNECEDOR) ---
-                # Código do Exportador
-                exp_match = re.search(r"Código do Exportador Estrangeiro:\s*(.+?)(?=\n\s*(?:Endereço|Dados))", content, re.DOTALL)
-                item["fornecedor_raw"] = exp_match.group(1).strip() if exp_match else ""
+                # Tenta pegar descrição na linha anterior ou mesma linha
+                if i > 0:
+                    prev_line = lines[i-1].strip()
+                    if len(prev_line) > 5: # Evita pegar linhas vazias ou curtas demais
+                        current_item["descricao"] = prev_line
                 
-                # Endereço
-                addr_match = re.search(r"Endereço:\s*(.+?)(?=\n\s*(?:Dados da Mercadoria|Aplicação))", content, re.DOTALL)
-                item["endereco_raw"] = addr_match.group(1).strip() if addr_match else ""
-                # -----------------------------------
-
-                desc_match = re.search(r"Detalhamento do Produto:\s*(.+?)(?=\n\s*(?:Número de Identificação|Versão|Código de Class|Descrição complementar))", content, re.DOTALL)
-                item["descricao"] = desc_match.group(1).strip() if desc_match else ""
-                
-                self.items.append(item)
-
-    def _regex(self, pattern, text):
-        match = re.search(pattern, text)
-        return match.group(1).strip() if match else ""
+                self.items.append(current_item)
+                item_counter += 1
 
 # ==============================================================================
 # 4. XML BUILDER
@@ -414,7 +401,8 @@ class XMLBuilder:
 
     def build(self):
         h = self.p.header
-        duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
+        # Limpeza do numero DUIMP
+        duimp_fmt = re.sub(r'[^a-zA-Z0-9]', '', h.get("numeroDUIMP", ""))
 
         for it in self.p.items:
             adicao = etree.SubElement(self.duimp, "adicao")
@@ -424,8 +412,8 @@ class XMLBuilder:
             icms_base_valor = base_total_reais 
             cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
             
-            # Processa dados do fornecedor
-            supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"), it.get("endereco_raw"))
+            # Fornecedor (Usa o global extraido do header se o item não tiver especifico)
+            supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"), "")
 
             # Mapa de Valores
             extracted_map = {
@@ -434,21 +422,21 @@ class XMLBuilder:
                 "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
                 "dadosMercadoriaMedidaEstatisticaQuantidade": DataFormatter.format_number(it.get("quantidade"), 14),
                 "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "").upper(),
-                "dadosMercadoriaPesoLiquido": DataFormatter.format_number(it.get("pesoLiq"), 15),
-                "condicaoVendaMoedaNome": it.get("moeda", "").upper(),
+                "dadosMercadoriaPesoLiquido": DataFormatter.format_number(it.get("pesoLiq", "0"), 15),
+                "condicaoVendaMoedaNome": "DOLAR DOS EUA", # Default comum neste relatório ou extrair se possível
                 "condicaoVendaValorMoeda": base_total_reais,
                 "condicaoVendaValorReais": base_total_reais,
-                "paisOrigemMercadoriaNome": it.get("paisOrigem", "").upper(),
-                "paisAquisicaoMercadoriaNome": it.get("paisOrigem", "").upper(),
+                "paisOrigemMercadoriaNome": "EXTERIOR",
+                "paisAquisicaoMercadoriaNome": "EXTERIOR",
                 "valorTotalCondicaoVenda": DataFormatter.format_number(it.get("valorTotal"), 11),
                 "descricaoMercadoria": DataFormatter.clean_text(it.get("descricao", "")),
                 "quantidade": DataFormatter.format_number(it.get("quantidade"), 14),
                 "unidadeMedida": it.get("unidade", "").upper(),
-                "valorUnitario": DataFormatter.format_number(it.get("valorUnit"), 20),
-                "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800"),
+                "valorUnitario": DataFormatter.format_number(it.get("valorTotal"), 20), # Simplificação: Unit = Total se Qtd=1
+                "dadosCargaUrfEntradaCodigo": "0000000",
                 
-                # --- FORNECEDOR (PREENCHIDO) ---
-                "fornecedorNome": supplier_data["fornecedorNome"][:60], # Limite XML comum
+                # --- FORNECEDOR ---
+                "fornecedorNome": supplier_data["fornecedorNome"][:60],
                 "fornecedorLogradouro": supplier_data["fornecedorLogradouro"][:60],
                 "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
                 "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
@@ -465,7 +453,7 @@ class XMLBuilder:
                 "ibsBaseCalculoValorImposto": ibs_imposto
             }
 
-            # Preenchimento XML (Layout Rígido)
+            # Preenchimento XML
             for field in ADICAO_FIELDS_ORDER:
                 tag_name = field["tag"]
                 if field.get("type") == "complex":
@@ -481,11 +469,10 @@ class XMLBuilder:
         # Rodapé
         footer_map = {
             "numeroDUIMP": duimp_fmt,
-            "importadorNome": h.get("nomeImportador", ""),
+            "importadorNome": h.get("importadorNome", ""),
             "importadorNumero": DataFormatter.format_number(h.get("cnpj"), 14),
             "cargaPesoBruto": DataFormatter.format_number(h.get("pesoBruto"), 15),
             "cargaPesoLiquido": DataFormatter.format_number(h.get("pesoLiquido"), 15),
-            "cargaPaisProcedenciaNome": h.get("paisProcedencia", "").upper(),
             "totalAdicoes": str(len(self.p.items)).zfill(3)
         }
 
@@ -504,17 +491,19 @@ class XMLBuilder:
         return etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=True)
 
 # ==============================================================================
-# 5. APP
+# 5. APP V2
 # ==============================================================================
 
-st.title("Conversor DUIMP (Fornecedor + Cálculos)")
+st.title("Conversor DUIMP V2.0 (Novo Layout)")
+st.markdown("Processa PDFs do tipo 'Extrato de Conferência' e gera XML com layout obrigatório.")
 
-file = st.file_uploader("Upload PDF", type="pdf")
+file = st.file_uploader("Upload PDF (Extrato Conferência)", type="pdf")
 
 if file:
     if st.button("Gerar XML"):
         try:
-            p = PDFParser(file.read())
+            # Usa o Parser V2
+            p = PDFParserV2(file.read())
             p.preprocess()
             p.extract_header()
             p.extract_items()
@@ -522,10 +511,10 @@ if file:
             b = XMLBuilder(p)
             xml = b.build()
             
-            numero_duimp = p.header.get("numeroDUIMP", "00000000000").replace("/", "-")
+            numero_duimp = p.header.get("numeroDUIMP", "000000").replace("/", "-")
             nome_arquivo = f"DUIMP_{numero_duimp}.xml"
 
-            st.success(f"Sucesso! {len(p.items)} itens processados.")
+            st.success(f"V2.0 Sucesso! {len(p.items)} itens encontrados.")
             st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
             
         except Exception as e:
