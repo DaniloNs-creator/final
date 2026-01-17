@@ -3,12 +3,11 @@ import fitz  # PyMuPDF
 import re
 from lxml import etree
 
-st.set_page_config(page_title="Conversor DUIMP V7 (Enterprise)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP V8 (Industrial)", layout="wide")
 
 # ==============================================================================
 # 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO - INTACTO)
 # ==============================================================================
-# Esta lista garante que o XML tenha EXATAMENTE a estrutura solicitada.
 ADICAO_FIELDS_ORDER = [
     {"tag": "acrescimo", "type": "complex", "children": [
         {"tag": "codigoAcrescimo", "default": "17"},
@@ -23,11 +22,11 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "cideValorRecolher", "default": "000000000000000"},
     {"tag": "codigoRelacaoCompradorVendedor", "default": "3"},
     {"tag": "codigoVinculoCompradorVendedor", "default": "1"},
-    {"tag": "cofinsAliquotaAdValorem", "default": "00965"}, # Preenchido via Scanner
+    {"tag": "cofinsAliquotaAdValorem", "default": "00000"}, # SCANNER
     {"tag": "cofinsAliquotaEspecificaQuantidadeUnidade", "default": "000000000"},
     {"tag": "cofinsAliquotaEspecificaValor", "default": "0000000000"},
     {"tag": "cofinsAliquotaReduzida", "default": "00000"},
-    {"tag": "cofinsAliquotaValorDevido", "default": "000000000000000"}, # Preenchido via Scanner
+    {"tag": "cofinsAliquotaValorDevido", "default": "000000000000000"}, # SCANNER
     {"tag": "cofinsAliquotaValorRecolher", "default": "000000000000000"},
     {"tag": "condicaoVendaIncoterm", "default": "FCA"},
     {"tag": "condicaoVendaLocal", "default": ""},
@@ -75,11 +74,11 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "freteValorReais", "default": "000000000000000"},
     {"tag": "iiAcordoTarifarioTipoCodigo", "default": "0"},
     {"tag": "iiAliquotaAcordo", "default": "00000"},
-    {"tag": "iiAliquotaAdValorem", "default": "00000"}, # Scanner
+    {"tag": "iiAliquotaAdValorem", "default": "00000"}, # SCANNER
     {"tag": "iiAliquotaPercentualReducao", "default": "00000"},
     {"tag": "iiAliquotaReduzida", "default": "00000"},
     {"tag": "iiAliquotaValorCalculado", "default": "000000000000000"},
-    {"tag": "iiAliquotaValorDevido", "default": "000000000000000"}, # Scanner
+    {"tag": "iiAliquotaValorDevido", "default": "000000000000000"}, # SCANNER
     {"tag": "iiAliquotaValorRecolher", "default": "000000000000000"},
     {"tag": "iiAliquotaValorReduzido", "default": "000000000000000"},
     {"tag": "iiBaseCalculo", "default": "000000000000000"},
@@ -87,14 +86,14 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "iiMotivoAdmissaoTemporariaCodigo", "default": "00"},
     {"tag": "iiRegimeTributacaoCodigo", "default": "1"},
     {"tag": "iiRegimeTributacaoNome", "default": "RECOLHIMENTO INTEGRAL"},
-    {"tag": "ipiAliquotaAdValorem", "default": "00000"}, # Scanner
+    {"tag": "ipiAliquotaAdValorem", "default": "00000"}, # SCANNER
     {"tag": "ipiAliquotaEspecificaCapacidadeRecipciente", "default": "00000"},
     {"tag": "ipiAliquotaEspecificaQuantidadeUnidadeMedida", "default": "000000000"},
     {"tag": "ipiAliquotaEspecificaTipoRecipienteCodigo", "default": "00"},
     {"tag": "ipiAliquotaEspecificaValorUnidadeMedida", "default": "0000000000"},
     {"tag": "ipiAliquotaNotaComplementarTIPI", "default": "00"},
     {"tag": "ipiAliquotaReduzida", "default": "00000"},
-    {"tag": "ipiAliquotaValorDevido", "default": "000000000000000"}, # Scanner
+    {"tag": "ipiAliquotaValorDevido", "default": "000000000000000"}, # SCANNER
     {"tag": "ipiAliquotaValorRecolher", "default": "000000000000000"},
     {"tag": "ipiRegimeTributacaoCodigo", "default": "4"},
     {"tag": "ipiRegimeTributacaoNome", "default": "SEM BENEFICIO"},
@@ -119,11 +118,11 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "pisCofinsFundamentoLegalReducaoCodigo", "default": "00"},
     {"tag": "pisCofinsRegimeTributacaoCodigo", "default": "1"},
     {"tag": "pisCofinsRegimeTributacaoNome", "default": "RECOLHIMENTO INTEGRAL"},
-    {"tag": "pisPasepAliquotaAdValorem", "default": "00000"}, # Scanner
+    {"tag": "pisPasepAliquotaAdValorem", "default": "00000"}, # SCANNER
     {"tag": "pisPasepAliquotaEspecificaQuantidadeUnidade", "default": "000000000"},
     {"tag": "pisPasepAliquotaEspecificaValor", "default": "0000000000"},
     {"tag": "pisPasepAliquotaReduzida", "default": "00000"},
-    {"tag": "pisPasepAliquotaValorDevido", "default": "000000000000000"}, # Scanner
+    {"tag": "pisPasepAliquotaValorDevido", "default": "000000000000000"}, # SCANNER
     {"tag": "pisPasepAliquotaValorRecolher", "default": "000000000000000"},
     {"tag": "icmsBaseCalculoValor", "default": "000000000000000"},
     {"tag": "icmsBaseCalculoAliquota", "default": "00000"},
@@ -251,13 +250,11 @@ class DataFormatter:
     @staticmethod
     def format_number(value, length=15):
         if not value: return "0" * length
-        # Remove chars não numéricos
         clean = re.sub(r'\D', '', value)
         return clean.zfill(length)
     
     @staticmethod
     def format_rate_xml(value):
-        # 18,00 -> 01800; 9,65 -> 00965
         if not value: return "00000"
         val_clean = value.replace(",", ".").strip()
         try:
@@ -277,14 +274,9 @@ class DataFormatter:
         try:
             base_int = int(base_xml_string)
             base_float = base_int / 100.0
-            
             cbs_val = base_float * 0.009
-            cbs_str = str(int(round(cbs_val * 100))).zfill(14)
-            
             ibs_val = base_float * 0.001
-            ibs_str = str(int(round(ibs_val * 100))).zfill(14)
-            
-            return cbs_str, ibs_str
+            return str(int(round(cbs_val * 100))).zfill(14), str(int(round(ibs_val * 100))).zfill(14)
         except:
             return "0".zfill(14), "0".zfill(14)
 
@@ -292,7 +284,6 @@ class DataFormatter:
     def parse_supplier_info(raw_name):
         data = {"fornecedorNome": "FORNECEDOR PADRAO", "fornecedorLogradouro": "", "fornecedorNumero": "", "fornecedorCidade": "EXTERIOR"}
         if raw_name:
-            # Tenta pegar antes de "PAIS:" se houver
             parts = raw_name.split("PAIS:")
             data["fornecedorNome"] = parts[0].strip()[:60]
             if len(parts) > 1:
@@ -300,10 +291,10 @@ class DataFormatter:
         return data
 
 # ==============================================================================
-# 3. PARSER V7 (STEAMROLLER)
+# 3. PARSER V8 (INDUSTRIAL STREAM)
 # ==============================================================================
 
-class PDFParserV7:
+class PDFParserV8:
     def __init__(self, file_stream):
         self.doc = fitz.open(stream=file_stream, filetype="pdf")
         self.full_text = ""
@@ -312,49 +303,46 @@ class PDFParserV7:
 
     def preprocess(self):
         """
-        Concatena TODAS as páginas em um único texto, limpando cabeçalhos
-        para evitar que itens quebrem no meio.
+        Concatena todas as páginas e remove lixo para evitar quebra de itens.
         """
         raw_text_parts = []
-        
-        # Padrões para remover (cabeçalhos de página)
         garbage_patterns = [
             r"Extrato de conferencia hafele Duimp",
             r"Data, hora e responsável",
             r"Versão \d+",
-            r"--- PAGE \d+ ---"
+            r"--- PAGE \d+ ---",
+            r"^\s*\d+\s*$" # Paginação
         ]
 
-        for page in self.doc:
-            # Extração física (sort=True) para manter tabelas alinhadas
+        # Barra de progresso para PDF gigante (450 páginas)
+        progress_bar = st.progress(0)
+        total_pages = len(self.doc)
+
+        for i, page in enumerate(self.doc):
+            # Leitura física (sort=True) é essencial para tabelas
             text = page.get_text("text", sort=True)
             lines = text.split('\n')
             clean_lines = []
             
             for line in lines:
                 is_garbage = False
-                # Remove paginação solta (ex: " 5 ")
-                if re.match(r'^\s*\d+\s*$', line): 
-                    is_garbage = True
-                
-                # Remove padrões de texto
-                if not is_garbage:
-                    for pat in garbage_patterns:
-                        if re.search(pat, line, re.IGNORECASE):
-                            is_garbage = True
-                            break
-                
+                for pat in garbage_patterns:
+                    if re.search(pat, line, re.IGNORECASE):
+                        is_garbage = True
+                        break
                 if not is_garbage:
                     clean_lines.append(line)
             
             raw_text_parts.append("\n".join(clean_lines))
             
-        # Junta tudo
+            if i % 20 == 0:
+                progress_bar.progress((i + 1) / total_pages)
+        
+        progress_bar.progress(100)
         self.full_text = "\n\n".join(raw_text_parts)
 
     def extract_header(self):
         txt = self.full_text
-        
         duimp_match = re.search(r"Numero\s*[:\n]?\s*([\w\d]+)", txt, re.IGNORECASE)
         self.header["numeroDUIMP"] = duimp_match.group(1) if duimp_match else "00000000000"
 
@@ -375,7 +363,8 @@ class PDFParserV7:
 
     def _scan_for_taxes(self, block_text):
         """
-        Escaneia o bloco de texto procurando padrões de impostos.
+        Escaneia tributos buscando pela palavra chave e pegando os números à frente.
+        Ordena os números para deduzir qual é alíquota e qual é valor.
         """
         taxes = {
             "ii_rate": "00000", "ii_val": "0"*15,
@@ -394,59 +383,64 @@ class PDFParserV7:
         }
 
         for tax_label, (k_rate, k_val) in tax_map.items():
-            # Encontra a posição do label do imposto
             idx = block_text.find(tax_label)
             if idx != -1:
-                # Pega um pedaço do texto à frente (ex: 200 chars)
-                snippet = block_text[idx:idx+200]
-                # Acha numeros: 1.000,00 ou 10,00
-                nums = re.findall(r"([\d]{1,3}(?:[.]\d{3})*,\d{2,4})", snippet)
+                # Pega 300 caracteres à frente para garantir captura
+                snippet = block_text[idx:idx+300]
+                # Regex para encontrar numeros (1.000,00 ou 1,00)
+                nums = re.findall(r"(\d{1,3}(?:[.]\d{3})*,\d{2,4})", snippet)
                 
-                if len(nums) >= 2:
-                    candidates = []
-                    for n in nums:
-                        try:
-                            # Converte para float para ordenar
-                            val = float(n.replace('.', '').replace(',', '.'))
+                candidates = []
+                for n in nums:
+                    try:
+                        val = float(n.replace('.', '').replace(',', '.'))
+                        # Filtra zeros
+                        if val > 0:
                             candidates.append((val, n))
-                        except: pass
+                    except: pass
+                
+                if len(candidates) >= 2:
+                    # Ordena: Menor = Aliquota, Maior = Valor (geralmente)
+                    candidates.sort(key=lambda x: x[0])
                     
-                    if candidates:
-                        # Ordena: Menor = Aliquota, Maior = Valor
-                        candidates.sort(key=lambda x: x[0])
-                        
-                        rate = candidates[0][1] # Menor
-                        # Se houver 3 (Base, Rate, Val), Val é o médio ou menor que a base.
-                        # Se 2 (Rate, Val), Val é o maior.
-                        # Heurística simples: Pega o segundo menor como valor
-                        val = candidates[1][1] if len(candidates) >= 2 else candidates[0][1]
-                        
-                        taxes[k_rate] = rate
-                        taxes[k_val] = val
+                    # Heurística: Alíquota é o menor valor (ex: 1.65, 9.65).
+                    # Se houver 3 valores (Base, Rate, Value), o Rate é o menor. 
+                    # O valor do imposto é geralmente menor que a Base.
+                    # Pega o primeiro como Taxa.
+                    rate = candidates[0][1]
+                    
+                    # Para o valor, tentamos pegar o segundo menor (Value), assumindo que o maior é a Base.
+                    val = candidates[1][1] if len(candidates) >= 2 else candidates[0][1]
+                    
+                    taxes[k_rate] = rate
+                    taxes[k_val] = val
 
         return taxes
 
     def extract_items(self):
-        # Localiza índices de início de item de forma absoluta no texto UNIFICADO
-        # Regex procura "Nº Adição" seguido de um numero
-        # Isso garante que pegamos TODOS os itens
+        # Localiza índices de início de item.
+        # Usa regex com Lookahead para não consumir o texto, permitindo split exato.
+        # Mas 're.split' pode ser pesado em texto gigante.
+        # Vamos usar 'finditer' para localizar posições e fatiar (slice) o texto.
+        
+        # Padrão: "Nº Adição" (case insensitive)
         matches = list(re.finditer(r"Nº\s*Adição\s*[:\n]?\s*(\d+)", self.full_text, re.IGNORECASE))
         
         if not matches:
-            st.error("ERRO: Padrão 'Nº Adição' não encontrado. Verifique se o PDF está correto.")
+            st.error("ERRO CRÍTICO: Não foi possível segmentar os itens. Verifique o padrão 'Nº Adição'.")
             return
+
+        st.info(f"Processando {len(matches)} itens encontrados no texto unificado...")
 
         for i in range(len(matches)):
             start = matches[i].start()
-            # O item vai até o próximo item ou até o fim do texto
             end = matches[i+1].start() if i + 1 < len(matches) else len(self.full_text)
             
-            # Recorta o bloco de texto exato deste item
             block = self.full_text[start:end]
             
             item = {}
             
-            # Identificadores
+            # Identificação
             adi_grp = matches[i].group(1)
             item["numeroAdicao"] = adi_grp.zfill(3)
             
@@ -458,31 +452,34 @@ class PDFParserV7:
             desc_match = re.search(r"DENOMINACAO DO PRODUTO\s*[:\n]?\s*(.+?)(?=\n)", block, re.IGNORECASE)
             item["descricao"] = desc_match.group(1).strip() if desc_match else f"ITEM {item['numeroAdicao']}"
             
-            # Valores e Quantidades
+            # Quantidade
             qtd_match = re.search(r"Qtde Unid\. Estatística\s*[:\n]?\s*([\d.,]+)", block, re.IGNORECASE)
             item["quantidade"] = qtd_match.group(1) if qtd_match else "0"
             
+            # Unidade
             unid_match = re.search(r"Unidad Estatística\s*[:\n]?\s*([A-Z]+)", block, re.IGNORECASE)
             item["unidade"] = unid_match.group(1) if unid_match else "UN"
             
+            # Peso
             peso_match = re.search(r"Peso Líquido \(KG\)\s*[:\n]?\s*([\d.,]+)", block, re.IGNORECASE)
             item["pesoLiq"] = peso_match.group(1) if peso_match else "0"
             
+            # Valor Total
             val_match = re.search(r"Valor Tot\. Cond Venda\s*[:\n]?\s*([\d.,]+)", block, re.IGNORECASE)
             item["valorTotal"] = val_match.group(1) if val_match else "0"
             
-            # Fornecedor Específico
+            # Fornecedor
             forn_spec = re.search(r"EXPORTADOR ESTRANGEIRO\s*[:\n]?\s*(.+?)(?=\n)", block, re.IGNORECASE)
             item["fornecedor_raw"] = forn_spec.group(1).strip() if forn_spec else self.header.get("fornecedorGlobal", "")
             
-            # IMPOSTOS (Scanner V7)
+            # Scanner Fiscal
             tax_data = self._scan_for_taxes(block)
             item.update(tax_data)
             
             self.items.append(item)
 
 # ==============================================================================
-# 4. XML BUILDER
+# 4. XML BUILDER (MANTIDO)
 # ==============================================================================
 
 class XMLBuilder:
@@ -503,7 +500,6 @@ class XMLBuilder:
             cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
             supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"))
 
-            # Mapeamento Final
             extracted_map = {
                 "numeroAdicao": it["numeroAdicao"],
                 "numeroDUIMP": duimp_fmt,
@@ -523,27 +519,24 @@ class XMLBuilder:
                 "valorUnitario": DataFormatter.format_number(it.get("valorTotal"), 20),
                 "dadosCargaUrfEntradaCodigo": "0000000",
                 
-                "fornecedorNome": supplier_data["fornecedorNome"][:60],
-                "fornecedorLogradouro": supplier_data["fornecedorLogradouro"][:60],
-                "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
-                "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
+                "fornecedorNome": supplier_data["fornecedorNome"],
+                "fornecedorLogradouro": supplier_data["fornecedorLogradouro"],
+                "fornecedorNumero": supplier_data["fornecedorNumero"],
+                "fornecedorCidade": supplier_data["fornecedorCidade"],
 
-                # TRIBUTOS EXTRAÍDOS (FORMATADOS)
+                # TRIBUTOS REAIS
                 "iiAliquotaAdValorem": DataFormatter.format_rate_xml(it["ii_rate"]),
                 "iiAliquotaValorDevido": DataFormatter.format_number(it["ii_val"], 15),
-                
                 "ipiAliquotaAdValorem": DataFormatter.format_rate_xml(it["ipi_rate"]),
                 "ipiAliquotaValorDevido": DataFormatter.format_number(it["ipi_val"], 15),
-                
                 "pisPasepAliquotaAdValorem": DataFormatter.format_rate_xml(it["pis_rate"]),
                 "pisPasepAliquotaValorDevido": DataFormatter.format_number(it["pis_val"], 15),
                 "pisPasepAliquotaValorRecolher": DataFormatter.format_number(it["pis_val"], 15),
-                
                 "cofinsAliquotaAdValorem": DataFormatter.format_rate_xml(it["cofins_rate"]),
                 "cofinsAliquotaValorDevido": DataFormatter.format_number(it["cofins_val"], 15),
                 "cofinsAliquotaValorRecolher": DataFormatter.format_number(it["cofins_val"], 15),
 
-                # TRIBUTOS CALCULADOS (CBS/IBS)
+                # CBS/IBS CALCULADOS
                 "icmsBaseCalculoValor": icms_base_valor,
                 "icmsBaseCalculoAliquota": "01800",
                 "cbsIbsClasstrib": "000001",
@@ -594,28 +587,31 @@ class XMLBuilder:
 # 5. APP
 # ==============================================================================
 
-st.title("Conversor DUIMP V7.0 (Enterprise)")
+st.title("Conversor DUIMP V8.0 (Industrial)")
 st.markdown("Processamento de fluxo contínuo para alta volumetria e extração fiscal precisa.")
 
-file = st.file_uploader("Upload PDF", type="pdf")
+file = st.file_uploader("Upload PDF (Extrato Conferência)", type="pdf")
 
 if file:
     if st.button("Gerar XML"):
         try:
-            with st.spinner("Processando..."):
-                p = PDFParserV7(file.read())
+            with st.spinner("Lendo todas as páginas e unificando itens..."):
+                p = PDFParserV8(file.read())
                 p.preprocess()
                 p.extract_header()
                 p.extract_items()
                 
-                b = XMLBuilder(p)
-                xml = b.build()
-                
-                numero_duimp = p.header.get("numeroDUIMP", "000000").replace("/", "-")
-                nome_arquivo = f"DUIMP_{numero_duimp}.xml"
+                if len(p.items) == 0:
+                    st.error("Nenhum item encontrado. O PDF pode estar em formato de imagem ou protegido.")
+                else:
+                    b = XMLBuilder(p)
+                    xml = b.build()
+                    
+                    numero_duimp = p.header.get("numeroDUIMP", "000000").replace("/", "-")
+                    nome_arquivo = f"DUIMP_{numero_duimp}.xml"
 
-                st.success(f"Processamento Concluído! Encontrados {len(p.items)} itens.")
-                st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
+                    st.success(f"Sucesso Total! Processados {len(p.items)} itens com impostos.")
+                    st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
             
         except Exception as e:
             st.error(f"Erro Crítico: {e}")
