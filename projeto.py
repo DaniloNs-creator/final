@@ -6,7 +6,7 @@ from xml.dom import minidom
 import time
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Häfele | DUIMP Converter V24 (Full Layout)", page_icon="📦", layout="wide")
+st.set_page_config(page_title="Häfele | DUIMP Converter V25 (Golden Header)", page_icon="📦", layout="wide")
 
 # ==============================================================================
 # 0. UI SETUP
@@ -31,7 +31,7 @@ def apply_custom_ui():
     """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 1. ESTRUTURA XML OBRIGATÓRIA - ITENS (ADICAO)
+# 1. ESTRUTURA XML OBRIGATÓRIA (LAYOUT RÍGIDO)
 # ==============================================================================
 ADICAO_FIELDS_ORDER = [
     {"tag": "acrescimo", "type": "complex", "children": [
@@ -47,12 +47,12 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "cideValorRecolher", "default": "000000000000000"},
     {"tag": "codigoRelacaoCompradorVendedor", "default": "3"},
     {"tag": "codigoVinculoCompradorVendedor", "default": "1"},
-    {"tag": "cofinsAliquotaAdValorem", "default": "00000"},
+    {"tag": "cofinsAliquotaAdValorem", "default": "00000"}, # EXTRAÍDO
     {"tag": "cofinsAliquotaEspecificaQuantidadeUnidade", "default": "000000000"},
     {"tag": "cofinsAliquotaEspecificaValor", "default": "0000000000"},
     {"tag": "cofinsAliquotaReduzida", "default": "00000"},
-    {"tag": "cofinsAliquotaValorDevido", "default": "000000000000000"},
-    {"tag": "cofinsAliquotaValorRecolher", "default": "000000000000000"},
+    {"tag": "cofinsAliquotaValorDevido", "default": "000000000000000"}, # EXTRAÍDO
+    {"tag": "cofinsAliquotaValorRecolher", "default": "000000000000000"}, # EXTRAÍDO
     {"tag": "condicaoVendaIncoterm", "default": "FCA"},
     {"tag": "condicaoVendaLocal", "default": ""},
     {"tag": "condicaoVendaMetodoValoracaoCodigo", "default": "01"},
@@ -99,11 +99,11 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "freteValorReais", "default": "000000000000000"},
     {"tag": "iiAcordoTarifarioTipoCodigo", "default": "0"},
     {"tag": "iiAliquotaAcordo", "default": "00000"},
-    {"tag": "iiAliquotaAdValorem", "default": "00000"},
+    {"tag": "iiAliquotaAdValorem", "default": "00000"}, # EXTRAÍDO
     {"tag": "iiAliquotaPercentualReducao", "default": "00000"},
     {"tag": "iiAliquotaReduzida", "default": "00000"},
     {"tag": "iiAliquotaValorCalculado", "default": "000000000000000"},
-    {"tag": "iiAliquotaValorDevido", "default": "000000000000000"},
+    {"tag": "iiAliquotaValorDevido", "default": "000000000000000"}, # EXTRAÍDO
     {"tag": "iiAliquotaValorRecolher", "default": "000000000000000"},
     {"tag": "iiAliquotaValorReduzido", "default": "000000000000000"},
     {"tag": "iiBaseCalculo", "default": "000000000000000"},
@@ -111,14 +111,14 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "iiMotivoAdmissaoTemporariaCodigo", "default": "00"},
     {"tag": "iiRegimeTributacaoCodigo", "default": "1"},
     {"tag": "iiRegimeTributacaoNome", "default": "RECOLHIMENTO INTEGRAL"},
-    {"tag": "ipiAliquotaAdValorem", "default": "00000"},
+    {"tag": "ipiAliquotaAdValorem", "default": "00000"}, # EXTRAÍDO
     {"tag": "ipiAliquotaEspecificaCapacidadeRecipciente", "default": "00000"},
     {"tag": "ipiAliquotaEspecificaQuantidadeUnidadeMedida", "default": "000000000"},
     {"tag": "ipiAliquotaEspecificaTipoRecipienteCodigo", "default": "00"},
     {"tag": "ipiAliquotaEspecificaValorUnidadeMedida", "default": "0000000000"},
     {"tag": "ipiAliquotaNotaComplementarTIPI", "default": "00"},
     {"tag": "ipiAliquotaReduzida", "default": "00000"},
-    {"tag": "ipiAliquotaValorDevido", "default": "000000000000000"},
+    {"tag": "ipiAliquotaValorDevido", "default": "000000000000000"}, # EXTRAÍDO
     {"tag": "ipiAliquotaValorRecolher", "default": "000000000000000"},
     {"tag": "ipiRegimeTributacaoCodigo", "default": "4"},
     {"tag": "ipiRegimeTributacaoNome", "default": "SEM BENEFICIO"},
@@ -143,12 +143,12 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "pisCofinsFundamentoLegalReducaoCodigo", "default": "00"},
     {"tag": "pisCofinsRegimeTributacaoCodigo", "default": "1"},
     {"tag": "pisCofinsRegimeTributacaoNome", "default": "RECOLHIMENTO INTEGRAL"},
-    {"tag": "pisPasepAliquotaAdValorem", "default": "00000"},
+    {"tag": "pisPasepAliquotaAdValorem", "default": "00000"}, # EXTRAÍDO
     {"tag": "pisPasepAliquotaEspecificaQuantidadeUnidade", "default": "000000000"},
     {"tag": "pisPasepAliquotaEspecificaValor", "default": "0000000000"},
     {"tag": "pisPasepAliquotaReduzida", "default": "00000"},
-    {"tag": "pisPasepAliquotaValorDevido", "default": "000000000000000"},
-    {"tag": "pisPasepAliquotaValorRecolher", "default": "000000000000000"},
+    {"tag": "pisPasepAliquotaValorDevido", "default": "000000000000000"}, # EXTRAÍDO
+    {"tag": "pisPasepAliquotaValorRecolher", "default": "000000000000000"}, # EXTRAÍDO
     {"tag": "icmsBaseCalculoValor", "default": "000000000000000"},
     {"tag": "icmsBaseCalculoAliquota", "default": "00000"},
     {"tag": "icmsBaseCalculoValorImposto", "default": "00000000000000"},
@@ -158,11 +158,11 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "cbsBaseCalculoValor", "default": "000000000000000"},
     {"tag": "cbsBaseCalculoAliquota", "default": "00000"},
     {"tag": "cbsBaseCalculoAliquotaReducao", "default": "00000"},
-    {"tag": "cbsBaseCalculoValorImposto", "default": "00000000000000"},
+    {"tag": "cbsBaseCalculoValorImposto", "default": "00000000000000"}, # CALCULADO
     {"tag": "ibsBaseCalculoValor", "default": "000000000000000"},
     {"tag": "ibsBaseCalculoAliquota", "default": "00000"},
     {"tag": "ibsBaseCalculoAliquotaReducao", "default": "00000"},
-    {"tag": "ibsBaseCalculoValorImposto", "default": "00000000000000"},
+    {"tag": "ibsBaseCalculoValorImposto", "default": "00000000000000"}, # CALCULADO
     {"tag": "relacaoCompradorVendedor", "default": "Fabricante é desconhecido"},
     {"tag": "seguroMoedaNegociadaCodigo", "default": "220"},
     {"tag": "seguroMoedaNegociadaNome", "default": "DOLAR DOS EUA"},
@@ -177,7 +177,7 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "vinculoCompradorVendedor", "default": "Não há vinculação entre comprador e vendedor."}
 ]
 
-# --- ESTRUTURA GERAL (RODAPÉ) - ATUALIZADO COM SEUS DADOS ---
+# --- DADOS DO IMPORTADOR COMPLETOS E FIXOS (CONFORME PEDIDO) ---
 FOOTER_TAGS_MAP = {
     "armazem": {"tag": "nomeArmazem", "default": "TCP"},
     "armazenamentoRecintoAduaneiroCodigo": "9801303",
@@ -218,7 +218,7 @@ FOOTER_TAGS_MAP = {
     "freteTotalReais": "000000000000000",
     "icms": [{"tag": "agenciaIcms", "default": "00000"}, {"tag": "codigoTipoRecolhimentoIcms", "default": "3"}, {"tag": "nomeTipoRecolhimentoIcms", "default": "Exoneração do ICMS"}, {"tag": "numeroSequencialIcms", "default": "001"}, {"tag": "ufIcms", "default": "PR"}, {"tag": "valorTotalIcms", "default": "000000000000000"}],
     
-    # --- DADOS DO IMPORTADOR COMPLETOS E FIXOS ---
+    # --- IMPORTADOR FIXO + DADOS SOLICITADOS ---
     "importadorCodigoTipo": "1",
     "importadorCpfRepresentanteLegal": "00000000000",
     "importadorEnderecoBairro": "JARDIM PRIMAVERA",
@@ -228,7 +228,7 @@ FOOTER_TAGS_MAP = {
     "importadorEnderecoMunicipio": "PIRAQUARA",
     "importadorEnderecoNumero": "4459",
     "importadorEnderecoUf": "PR",
-    "importadorNome": "HAFELE BRASIL LTDA", # Fixo conforme pedido
+    "importadorNome": "HAFELE BRASIL LTDA", # FIXO
     "importadorNomeRepresentanteLegal": "PAULO HENRIQUE LEITE FERREIRA",
     "importadorNumero": "02473058000188",
     "importadorNumeroTelefone": "41 30348150",
@@ -401,7 +401,7 @@ class PDFParserPlumber:
                 item = {}
                 item["numeroAdicao"] = num.zfill(3)
                 
-                # --- DESCRIÇÃO & PARTNUMBER (PRECISÃO V24) ---
+                # --- DESCRIÇÃO & PARTNUMBER (PRECISÃO V22) ---
                 raw_desc_match = re.search(r"DENOMINACAO DO PRODUTO\s+(.*?)\s+(?:C[ÓO]DIGO|DETALHAMENTO)", block, re.S | re.I)
                 raw_desc = raw_desc_match.group(1) if raw_desc_match else ""
                 
@@ -433,6 +433,7 @@ class PDFParserPlumber:
                 item["fornecedor_raw"] = forn_spec.group(1).strip() if forn_spec else self.header.get("fornecedorGlobal", "")
 
                 # 4. SCANNER FISCAL (IMPOSTOS)
+                # Garante que cada item tenha seus próprios impostos extraídos do seu bloco
                 item.update(self._scan_taxes(block))
                 
                 self.items.append(item)
@@ -456,6 +457,7 @@ class PDFParserPlumber:
         for tax_label, (k_rate, k_val) in tax_map.items():
             idx = block_text.find(tax_label)
             if idx != -1:
+                # Pega 200 chars à frente do label
                 snippet = block_text[idx:idx+200]
                 nums = re.findall(r"([\d]{1,3}(?:[.]\d{3})*,\d{2,4})", snippet)
                 if len(nums) >= 2:
@@ -466,8 +468,10 @@ class PDFParserPlumber:
                             candidates.append((val, n))
                         except: pass
                     if candidates:
+                        # Ordena: Menor = Alíquota, Maior = Valor (aprox)
                         candidates.sort(key=lambda x: x[0])
                         taxes[k_rate] = candidates[0][1] # Menor = Rate
+                        # Heurística: Pega o segundo menor (o valor do imposto)
                         taxes[k_val] = candidates[1][1] if len(candidates) >= 2 else candidates[0][1]
         return taxes
 
@@ -483,7 +487,7 @@ class XMLBuilder:
 
     def build(self):
         h = self.p.header
-        duimp_fmt = re.sub(r'[^a-zA-Z0-9]', '', h.get("numeroDUIMP", ""))
+        duimp_fmt = re.sub(r'[^a-zA-Z0-9]', '', h.get("duimp", "00000000000"))
 
         for it in self.p.items:
             adicao = etree.SubElement(self.duimp, "adicao")
@@ -551,11 +555,10 @@ class XMLBuilder:
                     val = extracted_map.get(tag_name, field["default"])
                     etree.SubElement(adicao, tag_name).text = val
 
-        # Footer
         footer_map = {
             "numeroDUIMP": duimp_fmt,
-            # Se a extração falhar, usa "HAFELE BRASIL" como fallback
-            "importadorNome": h.get("importadorNome") if h.get("importadorNome") else "HAFELE BRASIL LTDA",
+            # Importador fixo conforme layout solicitado
+            "importadorNome": "HAFELE BRASIL LTDA", 
             "importadorNumero": DataFormatter.format_number(h.get("cnpj"), 14),
             "cargaPesoBruto": DataFormatter.format_number(h.get("pesoBruto"), 15),
             "cargaPesoLiquido": DataFormatter.format_number(h.get("pesoLiquido"), 15),
@@ -571,14 +574,20 @@ class XMLBuilder:
                 parent = etree.SubElement(self.duimp, tag)
                 etree.SubElement(parent, default_val["tag"]).text = default_val["default"]
             else:
+                # Prioriza o mapa se tiver valor fixo, senão pega do footer_map
                 val = footer_map.get(tag, default_val)
+                # Mas se o default_val for uma string fixa (como HAFELE BRASIL LTDA no dicionario original), usamos ele
+                if tag == "importadorNome": val = "HAFELE BRASIL LTDA"
+                
                 etree.SubElement(self.duimp, tag).text = val
 
-        # Formatação XML
+        # Formatação XML Rigorosa (Indentação + Header)
         raw_xml = etree.tostring(self.root, encoding="UTF-8", xml_declaration=True)
         try:
             parsed = minidom.parseString(raw_xml)
-            return parsed.toprettyxml(indent="    ")
+            # Injeta header correto após formatação
+            pretty_xml = parsed.toprettyxml(indent="    ")
+            return re.sub(r'<\?xml.*?\?>', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>', pretty_xml, count=1)
         except:
             return raw_xml
 
