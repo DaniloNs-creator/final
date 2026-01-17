@@ -3,7 +3,7 @@ import fitz  # PyMuPDF
 import re
 from lxml import etree
 
-st.set_page_config(page_title="Conversor DUIMP 4.0 (Blindado)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP V5 (Enterprise)", layout="wide")
 
 # ==============================================================================
 # 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO - INTACTO)
@@ -22,11 +22,11 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "cideValorRecolher", "default": "000000000000000"},
     {"tag": "codigoRelacaoCompradorVendedor", "default": "3"},
     {"tag": "codigoVinculoCompradorVendedor", "default": "1"},
-    {"tag": "cofinsAliquotaAdValorem", "default": "00000"}, # Será preenchido
+    {"tag": "cofinsAliquotaAdValorem", "default": "00000"},
     {"tag": "cofinsAliquotaEspecificaQuantidadeUnidade", "default": "000000000"},
     {"tag": "cofinsAliquotaEspecificaValor", "default": "0000000000"},
     {"tag": "cofinsAliquotaReduzida", "default": "00000"},
-    {"tag": "cofinsAliquotaValorDevido", "default": "000000000000000"}, # Será preenchido
+    {"tag": "cofinsAliquotaValorDevido", "default": "000000000000000"},
     {"tag": "cofinsAliquotaValorRecolher", "default": "000000000000000"},
     {"tag": "condicaoVendaIncoterm", "default": "FCA"},
     {"tag": "condicaoVendaLocal", "default": ""},
@@ -74,11 +74,11 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "freteValorReais", "default": "000000000000000"},
     {"tag": "iiAcordoTarifarioTipoCodigo", "default": "0"},
     {"tag": "iiAliquotaAcordo", "default": "00000"},
-    {"tag": "iiAliquotaAdValorem", "default": "00000"}, # Será preenchido
+    {"tag": "iiAliquotaAdValorem", "default": "00000"},
     {"tag": "iiAliquotaPercentualReducao", "default": "00000"},
     {"tag": "iiAliquotaReduzida", "default": "00000"},
     {"tag": "iiAliquotaValorCalculado", "default": "000000000000000"},
-    {"tag": "iiAliquotaValorDevido", "default": "000000000000000"}, # Será preenchido
+    {"tag": "iiAliquotaValorDevido", "default": "000000000000000"},
     {"tag": "iiAliquotaValorRecolher", "default": "000000000000000"},
     {"tag": "iiAliquotaValorReduzido", "default": "000000000000000"},
     {"tag": "iiBaseCalculo", "default": "000000000000000"},
@@ -86,14 +86,14 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "iiMotivoAdmissaoTemporariaCodigo", "default": "00"},
     {"tag": "iiRegimeTributacaoCodigo", "default": "1"},
     {"tag": "iiRegimeTributacaoNome", "default": "RECOLHIMENTO INTEGRAL"},
-    {"tag": "ipiAliquotaAdValorem", "default": "00000"}, # Será preenchido
+    {"tag": "ipiAliquotaAdValorem", "default": "00000"},
     {"tag": "ipiAliquotaEspecificaCapacidadeRecipciente", "default": "00000"},
     {"tag": "ipiAliquotaEspecificaQuantidadeUnidadeMedida", "default": "000000000"},
     {"tag": "ipiAliquotaEspecificaTipoRecipienteCodigo", "default": "00"},
     {"tag": "ipiAliquotaEspecificaValorUnidadeMedida", "default": "0000000000"},
     {"tag": "ipiAliquotaNotaComplementarTIPI", "default": "00"},
     {"tag": "ipiAliquotaReduzida", "default": "00000"},
-    {"tag": "ipiAliquotaValorDevido", "default": "000000000000000"}, # Será preenchido
+    {"tag": "ipiAliquotaValorDevido", "default": "000000000000000"},
     {"tag": "ipiAliquotaValorRecolher", "default": "000000000000000"},
     {"tag": "ipiRegimeTributacaoCodigo", "default": "4"},
     {"tag": "ipiRegimeTributacaoNome", "default": "SEM BENEFICIO"},
@@ -118,11 +118,11 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "pisCofinsFundamentoLegalReducaoCodigo", "default": "00"},
     {"tag": "pisCofinsRegimeTributacaoCodigo", "default": "1"},
     {"tag": "pisCofinsRegimeTributacaoNome", "default": "RECOLHIMENTO INTEGRAL"},
-    {"tag": "pisPasepAliquotaAdValorem", "default": "00000"}, # Será preenchido
+    {"tag": "pisPasepAliquotaAdValorem", "default": "00000"},
     {"tag": "pisPasepAliquotaEspecificaQuantidadeUnidade", "default": "000000000"},
     {"tag": "pisPasepAliquotaEspecificaValor", "default": "0000000000"},
     {"tag": "pisPasepAliquotaReduzida", "default": "00000"},
-    {"tag": "pisPasepAliquotaValorDevido", "default": "000000000000000"}, # Será preenchido
+    {"tag": "pisPasepAliquotaValorDevido", "default": "000000000000000"},
     {"tag": "pisPasepAliquotaValorRecolher", "default": "000000000000000"},
     {"tag": "icmsBaseCalculoValor", "default": "000000000000000"},
     {"tag": "icmsBaseCalculoAliquota", "default": "00000"},
@@ -244,6 +244,7 @@ class DataFormatter:
     @staticmethod
     def clean_text(text):
         if not text: return ""
+        # Remove quebras de linha e espaços extras
         text = text.replace('\n', ' ').replace('\r', '')
         return re.sub(r'\s+', ' ', text).strip()
 
@@ -256,7 +257,7 @@ class DataFormatter:
     
     @staticmethod
     def format_rate_xml(value):
-        """Formata alíquotas: 9,65 -> 00965; 18 -> 01800"""
+        # 18,00 -> 01800; 9,65 -> 00965
         if not value: return "00000"
         val_clean = value.replace(",", ".").strip()
         try:
@@ -276,10 +277,13 @@ class DataFormatter:
         try:
             base_int = int(base_xml_string)
             base_float = base_int / 100.0
+            
             cbs_val = base_float * 0.009
             cbs_str = str(int(round(cbs_val * 100))).zfill(14)
+            
             ibs_val = base_float * 0.001
             ibs_str = str(int(round(ibs_val * 100))).zfill(14)
+            
             return cbs_str, ibs_str
         except:
             return "0".zfill(14), "0".zfill(14)
@@ -300,10 +304,10 @@ class DataFormatter:
         return data
 
 # ==============================================================================
-# 3. PARSER V4 (CORRIGIDO)
+# 3. PARSER V5 (ENTERPRISE - SCALABLE & ROBUST)
 # ==============================================================================
 
-class PDFParserV4:
+class PDFParserV5:
     def __init__(self, file_stream):
         self.doc = fitz.open(stream=file_stream, filetype="pdf")
         self.full_text = ""
@@ -311,15 +315,24 @@ class PDFParserV4:
         self.items = []
 
     def preprocess(self):
-        raw_text = []
+        # Lê o PDF inteiro para uma única string, permitindo encontrar itens que quebram páginas
+        raw_text_parts = []
         for page in self.doc:
-            raw_text.append(page.get_text("text"))
-        # Limpeza básica de números de página quebrando linhas
-        self.full_text = "\n".join(raw_text)
+            text = page.get_text("text")
+            # Remove linhas de cabeçalho/rodapé que sujam o texto (opcional, mas recomendado)
+            # Removemos linhas que contenham apenas numero de pagina ou titulo repetido
+            lines = text.split('\n')
+            clean_lines = []
+            for line in lines:
+                if "Extrato de Conferência" in line: continue
+                if re.match(r'^\d+\s*$', line.strip()): continue # Número de página solto
+                clean_lines.append(line)
+            raw_text_parts.append("\n".join(clean_lines))
+            
+        self.full_text = "\n".join(raw_text_parts)
 
     def extract_header(self):
         txt = self.full_text
-        # Headers Globais
         duimp_match = re.search(r"Numero\s*[:\n]\s*([\w\d]+)", txt, re.IGNORECASE)
         self.header["numeroDUIMP"] = duimp_match.group(1) if duimp_match else ""
 
@@ -338,81 +351,131 @@ class PDFParserV4:
         forn_match = re.search(r"EXPORTADOR ESTRANGEIRO\s*\n\s*(.+?)(?=\n)", txt, re.IGNORECASE)
         self.header["fornecedorGlobal"] = forn_match.group(1).strip() if forn_match else ""
 
-    def _extract_tax(self, tax_name, text_block):
+    def _extract_tax_flexible(self, tax_name, block_text):
         """
-        Busca alíquota e valor para um tributo específico no bloco de texto.
-        Lógica: Procura o nome do imposto e pega os numeros decimais próximos.
-        Retorna (aliquota_string, valor_string)
+        Busca 'TaxName' e captura os valores numéricos decimais subsequentes.
+        Ex: PIS/PASEP ... 1.000,00 ... 1,65 ... 16,50
+        Lógica: Captura todos os números decimais após o nome do imposto.
+        Menor valor < 100 ou < Total = Alíquota.
+        Maior valor = Valor do Imposto.
         """
-        # Regex procura NomeImposto...Valor1...Valor2
-        # Assume que o menor é aliquota (%) e maior é valor (R$)
-        pattern = re.compile(rf"{tax_name}.*?([\d,]+).*?([\d.,]+)", re.DOTALL | re.IGNORECASE)
-        match = pattern.search(text_block)
+        # Regex busca a palavra chave e depois pega candidatos a números (ex: 1.234,56 ou 10,00)
+        # Limita a busca a uma janela de caracteres para não pegar valores de outro imposto
         
-        if match:
-            v1 = match.group(1).replace('.', '').replace(',', '.')
-            v2 = match.group(2).replace('.', '').replace(',', '.')
+        # Encontra a posição do imposto
+        start_idx = block_text.find(tax_name)
+        if start_idx == -1:
+            # Tenta variações (II, I.I., Imposto Importação)
+            if tax_name == "IMPOSTO DE IMPORTAÇÃO":
+                start_idx = block_text.find("II")
+            if start_idx == -1:
+                return "00000", "0" * 15
+
+        # Pega um pedaço do texto após o nome do imposto (ex: 150 caracteres)
+        sub_text = block_text[start_idx : start_idx+300]
+        
+        # Encontra todos os números no formato X,XX ou X.XXX,XX
+        numbers = re.findall(r"(\d{1,3}(?:[.]\d{3})*,\d{2,4})", sub_text)
+        
+        rate = "0,00"
+        value = "0,00"
+        
+        if len(numbers) >= 2:
+            # Temos candidatos. Precisamos distinguir Alíquota de ValorMonetário.
+            # Convertemos para float para comparar
+            nums_float = []
+            for n in numbers:
+                try:
+                    f = float(n.replace('.', '').replace(',', '.'))
+                    nums_float.append((f, n))
+                except:
+                    pass
             
-            try:
-                f1 = float(v1)
-                f2 = float(v2)
+            # Ordena: Menor costuma ser aliquota (ex: 9.65), Maior é valor (ex: 1000.00)
+            # Mas cuidado com Base de Calculo.
+            # Padrão visual: Base | Alíquota | Valor
+            # Se tiver 3 numeros: Base, Rate, Value.
+            # Se tiver 2 numeros: Rate, Value (ou Base, Value se Rate for 0?)
+            
+            # Vamos assumir que a Alíquota é o MENOR valor diferente de zero encontrado
+            # E o Valor do Imposto é o valor médio ou o valor que parece ser resultado (Base * Rate)
+            
+            nums_float.sort(key=lambda x: x[0])
+            
+            if nums_float:
+                # O menor valor provavelmente é a alíquota (ex: 1.65, 9.00, 18.00)
+                rate = nums_float[0][1]
                 
-                # Heurística: Alíquota geralmente é < 100 (ou < valor total)
-                if f1 < f2:
-                    return match.group(1), match.group(2) # Alq, Val
+                # O valor do imposto. Se tivermos 3 numeros (Base, Rate, Imposto), 
+                # Imposto é geralmente menor que a Base.
+                # Se tivermos Base e Imposto, Imposto < Base.
+                # Vamos pegar o segundo menor como Imposto, se houver 3. 
+                # Se houver 2, o maior é Imposto (assumindo que nao lemos a base, ou Base > Imposto)
+                
+                if len(nums_float) >= 3:
+                    # [Rate, Imposto, Base]
+                    value = nums_float[1][1] 
+                elif len(nums_float) == 2:
+                    # [Rate, Imposto] (Assumindo Imposto > Rate)
+                    value = nums_float[1][1]
                 else:
-                    return match.group(2), match.group(1) # Val, Alq (invertido)
-            except:
-                return "0,00", "0,00"
-                
-        return "0,00", "0,00"
+                    value = nums_float[0][1]
+
+        return rate, value
 
     def extract_items(self):
-        # ESTRATÉGIA CORRETIVA: Split usando Lookahead para não perder o identificador
-        # Divide sempre que encontra "Nº Adição"
-        blocks = re.split(r"(?=Nº Adição\s*\d+)", self.full_text)
+        """
+        Segmenta os itens encontrando os índices de 'Nº Adição'.
+        Extrai o bloco de texto entre o Item N e o Item N+1.
+        """
+        # 1. Localizar todos os inícios de itens
+        # Pattern: Nº Adição [espaço/quebra] Numero [espaço/quebra] Nº do Item
+        pattern = re.compile(r"Nº Adição\s*\n?\s*(\d+)", re.MULTILINE)
         
-        # O primeiro bloco (índice 0) é cabeçalho geral, ignoramos para itens
-        for block in blocks:
-            if "Nº Adição" not in block:
-                continue # Pula blocos que não são itens reais
+        matches = list(pattern.finditer(self.full_text))
+        
+        for i in range(len(matches)):
+            start_pos = matches[i].start()
+            # O fim deste item é o início do próximo, ou o fim do texto
+            end_pos = matches[i+1].start() if i + 1 < len(matches) else len(self.full_text)
+            
+            block = self.full_text[start_pos:end_pos]
             
             item = {}
             
-            # 1. Identificadores Básicos
-            adi_match = re.search(r"Nº Adição\s*(\d+)", block)
+            # Identificação
+            adi_match = re.search(r"Nº Adição\s*\n?\s*(\d+)", block)
             item["numeroAdicao"] = adi_match.group(1).zfill(3) if adi_match else "000"
             
-            # 2. NCM (Procura formato 0000.00.00)
+            # NCM
             ncm_match = re.search(r"(\d{4}\.\d{2}\.\d{2})", block)
             item["ncm"] = ncm_match.group(1) if ncm_match else "00000000"
             
-            # 3. Descrição
+            # Descrição
             desc_match = re.search(r"DENOMINACAO DO PRODUTO\s*\n\s*(.+?)(?=\n)", block, re.IGNORECASE)
             item["descricao"] = desc_match.group(1).strip() if desc_match else "ITEM " + item["numeroAdicao"]
             
-            # 4. Quantidades e Valores
+            # Quantidade
             qtd_match = re.search(r"Qtde Unid. Estatística\s*\n\s*\"?([\d.,]+)", block)
             item["quantidade"] = qtd_match.group(1) if qtd_match else "0"
             
+            # Unidade
             unid_match = re.search(r"Unidad Estatística\s*\n\s*\"?(.+?)\"", block)
             item["unidade"] = unid_match.group(1) if unid_match else "UN"
             
+            # Peso
             peso_match = re.search(r"Peso Líquido \(KG\)\s*\n\s*\"?([\d.,]+)", block)
             item["pesoLiq"] = peso_match.group(1) if peso_match else "0"
             
+            # Valor
             val_match = re.search(r"Valor Tot. Cond Venda\s*\n\s*\"?([\d.,]+)", block)
             item["valorTotal"] = val_match.group(1) if val_match else "0"
             
-            # 5. TRIBUTOS (Extração Fina)
-            # Passamos o bloco inteiro para procurar os impostos dele
-            item["ii_rate"], item["ii_val"] = self._extract_tax("IMPOSTO DE IMPORTAÇÃO", block)
-            if item["ii_rate"] == "0,00": # Tenta sigla curta
-                 item["ii_rate"], item["ii_val"] = self._extract_tax("II", block)
-            
-            item["ipi_rate"], item["ipi_val"] = self._extract_tax("IPI", block)
-            item["pis_rate"], item["pis_val"] = self._extract_tax("PIS/PASEP", block)
-            item["cofins_rate"], item["cofins_val"] = self._extract_tax("COFINS", block)
+            # TRIBUTOS (Scanner Inteligente)
+            item["ii_rate"], item["ii_val"] = self._extract_tax_flexible("IMPOSTO DE IMPORTAÇÃO", block)
+            item["ipi_rate"], item["ipi_val"] = self._extract_tax_flexible("IPI", block)
+            item["pis_rate"], item["pis_val"] = self._extract_tax_flexible("PIS/PASEP", block)
+            item["cofins_rate"], item["cofins_val"] = self._extract_tax_flexible("COFINS", block)
             
             # Fornecedor
             item["fornecedor_raw"] = self.header.get("fornecedorGlobal", "")
@@ -468,7 +531,7 @@ class XMLBuilder:
                 "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
                 "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
 
-                # TRIBUTOS EXTRAÍDOS
+                # TRIBUTOS EXTRAÍDOS (FORMATADOS)
                 "iiAliquotaAdValorem": DataFormatter.format_rate_xml(it.get("ii_rate")),
                 "iiAliquotaValorDevido": DataFormatter.format_number(it.get("ii_val"), 15),
                 
@@ -531,18 +594,18 @@ class XMLBuilder:
         return etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=True)
 
 # ==============================================================================
-# 5. APP V4
+# 5. APP
 # ==============================================================================
 
-st.title("Conversor DUIMP 4.0 (Blindado)")
-st.markdown("Extração robusta de itens e tributos (PIS/COFINS) para Extrato de Conferência.")
+st.title("Conversor DUIMP V5.0 (Enterprise)")
+st.markdown("Processamento de fluxo contínuo para alta volumetria e extração fiscal precisa.")
 
-file = st.file_uploader("Upload PDF (Extrato Conferência)", type="pdf")
+file = st.file_uploader("Upload PDF", type="pdf")
 
 if file:
     if st.button("Gerar XML"):
         try:
-            p = PDFParserV4(file.read())
+            p = PDFParserV5(file.read())
             p.preprocess()
             p.extract_header()
             p.extract_items()
@@ -553,7 +616,7 @@ if file:
             numero_duimp = p.header.get("numeroDUIMP", "000000").replace("/", "-")
             nome_arquivo = f"DUIMP_{numero_duimp}.xml"
 
-            st.success(f"V4.0 Sucesso! {len(p.items)} itens processados com PIS/COFINS.")
+            st.success(f"Sucesso Total! Processados {len(p.items)} itens com impostos.")
             st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
             
         except Exception as e:
