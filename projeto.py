@@ -6,7 +6,7 @@ from xml.dom import minidom
 import time
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Häfele | DUIMP Converter V22 (Restored)", page_icon="📦", layout="wide")
+st.set_page_config(page_title="Häfele | DUIMP Converter V23 (Final)", page_icon="📦", layout="wide")
 
 # ==============================================================================
 # 0. UI SETUP
@@ -225,9 +225,9 @@ FOOTER_TAGS_MAP = {
     "importadorEnderecoMunicipio": "CIDADE",
     "importadorEnderecoNumero": "00",
     "importadorEnderecoUf": "PR",
-    "importadorNome": "", # Preenchido
+    "importadorNome": "", # Preenchido via código
     "importadorNomeRepresentanteLegal": "REPRESENTANTE",
-    "importadorNumero": "", # Preenchido
+    "importadorNumero": "", # Preenchido via código
     "importadorNumeroTelefone": "0000000000",
     "informacaoComplementar": "Informações extraídas do Extrato Conferência.",
     "localDescargaTotalDolares": "000000000000000",
@@ -236,7 +236,7 @@ FOOTER_TAGS_MAP = {
     "localEmbarqueTotalReais": "000000000000000",
     "modalidadeDespachoCodigo": "1",
     "modalidadeDespachoNome": "Normal",
-    "numeroDUIMP": "", # Preenchido
+    "numeroDUIMP": "", # Preenchido via código
     "operacaoFundap": "N",
     "pagamento": [{"tag": "agenciaPagamento", "default": "3715"}, {"tag": "bancoPagamento", "default": "341"}, {"tag": "codigoReceita", "default": "0086"}, {"tag": "valorReceita", "default": "000000000000000"}],
     "seguroMoedaNegociadaCodigo": "220",
@@ -248,7 +248,7 @@ FOOTER_TAGS_MAP = {
     "situacaoEntregaCarga": "ENTREGA CONDICIONADA",
     "tipoDeclaracaoCodigo": "01",
     "tipoDeclaracaoNome": "CONSUMO",
-    "totalAdicoes": "000", # Preenchido
+    "totalAdicoes": "000", # Preenchido via código
     "urfDespachoCodigo": "0917800",
     "urfDespachoNome": "PORTO DE PARANAGUA",
     "valorTotalMultaARecolherAjustado": "000000000000000",
@@ -270,6 +270,11 @@ class DataFormatter:
     def clean_text(text):
         if not text: return ""
         return re.sub(r'\s+', ' ', text.replace('\n', ' ')).strip()
+
+    @staticmethod
+    def clean_val(val):
+        if not val: return "0"
+        return re.sub(r'[^\d,]', '', str(val)).replace(',', '')
 
     @staticmethod
     def format_number(value, length=15):
@@ -363,13 +368,12 @@ class PDFParserPlumber:
         duimp_match = re.search(r"Numero\s*[:\n]*\s*([\dBR]+)", self.full_text, re.I)
         self.header["duimp"] = duimp_match.group(1) if duimp_match else "00000000000"
         
-        # MELHORIA: Regex mais flexível para Importador
-        imp_match = re.search(r"IMPORTADOR\s*[:\n]*\s*\"?([^\"]+)", self.full_text, re.IGNORECASE)
-        if not imp_match:
-             imp_match = re.search(r"IMPORTADOR\s*\n\s*(.+)", self.full_text, re.IGNORECASE)
-        self.header["importadorNome"] = imp_match.group(1).strip() if imp_match else ""
+        # CORREÇÃO: Captura Robusta do Importador
+        # Tenta pegar a string que está após IMPORTADOR, ignorando pontuação
+        imp_match = re.search(r"IMPORTADOR\s*[:\n,]*\s*\"?([A-Z\s\.]+)(?:\n|\"|CNPJ)", self.full_text, re.IGNORECASE)
+        self.header["importadorNome"] = imp_match.group(1).strip() if imp_match else "HAFELE BRASIL"
         
-        cnpj_match = re.search(r"CNPJ\s*\n\s*([\d./-]+)", self.full_text, re.IGNORECASE)
+        cnpj_match = re.search(r"CNPJ\s*[:\n]*\s*([\d./-]+)", self.full_text, re.IGNORECASE)
         self.header["cnpj"] = cnpj_match.group(1) if cnpj_match else ""
         
         peso_b_match = re.search(r"PESO BRUTO KG\s*[:]?\s*([\d.,]+)", self.full_text, re.IGNORECASE)
@@ -395,7 +399,7 @@ class PDFParserPlumber:
                 item = {}
                 item["numeroAdicao"] = num.zfill(3)
                 
-                # --- DESCRIÇÃO & PARTNUMBER (PRECISÃO V21) ---
+                # --- DESCRIÇÃO & PARTNUMBER (PRECISÃO V22) ---
                 raw_desc_match = re.search(r"DENOMINACAO DO PRODUTO\s+(.*?)\s+(?:C[ÓO]DIGO|DETALHAMENTO)", block, re.S | re.I)
                 raw_desc = raw_desc_match.group(1) if raw_desc_match else ""
                 
@@ -481,7 +485,7 @@ class XMLBuilder:
 
     def build(self):
         h = self.p.header
-        duimp_fmt = re.sub(r'[^a-zA-Z0-9]', '', h.get("numeroDUIMP", ""))
+        duimp_fmt = re.sub(r'[^a-zA-Z0-9]', '', h.get("duimp", "00000000000"))
 
         for it in self.p.items:
             adicao = etree.SubElement(self.duimp, "adicao")
@@ -549,7 +553,6 @@ class XMLBuilder:
                     val = extracted_map.get(tag_name, field["default"])
                     etree.SubElement(adicao, tag_name).text = val
 
-        # Footer (CORRIGIDO: Importador e Dados Gerais)
         footer_map = {
             "numeroDUIMP": duimp_fmt,
             "importadorNome": h.get("importadorNome", ""),
@@ -571,7 +574,7 @@ class XMLBuilder:
                 val = footer_map.get(tag, default_val)
                 etree.SubElement(self.duimp, tag).text = val
 
-        # Formatação XML Rigorosa (Indentação)
+        # Retorna string formatada (PRETTY PRINT COM INDENTAÇÃO)
         raw_xml = etree.tostring(self.root, encoding="UTF-8", xml_declaration=True)
         try:
             parsed = minidom.parseString(raw_xml)
@@ -606,7 +609,7 @@ def main():
                         b = XMLBuilder(p)
                         xml = b.build()
                         
-                        duimp_clean = p.header.get("numeroDUIMP", "000").replace("/", "-")
+                        duimp_clean = p.header.get("duimp", "000").replace("/", "-")
                         fname = f"DUIMP_{duimp_clean}.xml"
                         
                         st.success(f"SUCESSO! {len(p.items)} itens processados com tributos.")
