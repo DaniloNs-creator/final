@@ -6,7 +6,7 @@ from xml.dom import minidom
 import time
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Häfele | DUIMP Converter V26", page_icon="📦", layout="wide")
+st.set_page_config(page_title="Häfele | DUIMP Converter V25 (Golden Header)", page_icon="📦", layout="wide")
 
 # ==============================================================================
 # 0. UI SETUP
@@ -31,26 +31,7 @@ def apply_custom_ui():
     """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 1. DADOS FIXOS DO IMPORTADOR (SOLICITADO)
-# ==============================================================================
-IMPORTADOR_DATA = {
-    "importadorNome": "HAFELE BRASIL LTDA",
-    "importadorNomeRepresentanteLegal": "PAULO HENRIQUE LEITE FERREIRA",
-    "importadorNumero": "02473058000188",
-    "importadorNumeroTelefone": "41 30348150",
-    "importadorEnderecoBairro": "JARDIM PRIMAVERA",
-    "importadorEnderecoCep": "83302000",
-    "importadorEnderecoComplemento": "CONJ: 6 E 7;",
-    "importadorEnderecoLogradouro": "JOAO LEOPOLDO JACOMEL",
-    "importadorEnderecoMunicipio": "PIRAQUARA",
-    "importadorEnderecoNumero": "4459",
-    "importadorEnderecoUf": "PR",
-    "importadorCodigoTipo": "1",
-    "importadorCpfRepresentanteLegal": "00000000000"
-}
-
-# ==============================================================================
-# 2. ESTRUTURA XML OBRIGATÓRIA (ADICAO)
+# 1. ESTRUTURA XML OBRIGATÓRIA (LAYOUT RÍGIDO)
 # ==============================================================================
 ADICAO_FIELDS_ORDER = [
     {"tag": "acrescimo", "type": "complex", "children": [
@@ -196,7 +177,7 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "vinculoCompradorVendedor", "default": "Não há vinculação entre comprador e vendedor."}
 ]
 
-# --- ESTRUTURA DE RODAPÉ (COM DADOS FIXOS DO IMPORTADOR) ---
+# --- DADOS DO IMPORTADOR COMPLETOS E FIXOS (CONFORME PEDIDO) ---
 FOOTER_TAGS_MAP = {
     "armazem": {"tag": "nomeArmazem", "default": "TCP"},
     "armazenamentoRecintoAduaneiroCodigo": "9801303",
@@ -236,6 +217,23 @@ FOOTER_TAGS_MAP = {
     "freteTotalMoeda": "000000000000000",
     "freteTotalReais": "000000000000000",
     "icms": [{"tag": "agenciaIcms", "default": "00000"}, {"tag": "codigoTipoRecolhimentoIcms", "default": "3"}, {"tag": "nomeTipoRecolhimentoIcms", "default": "Exoneração do ICMS"}, {"tag": "numeroSequencialIcms", "default": "001"}, {"tag": "ufIcms", "default": "PR"}, {"tag": "valorTotalIcms", "default": "000000000000000"}],
+    
+    # --- IMPORTADOR FIXO + DADOS SOLICITADOS ---
+    "importadorCodigoTipo": "1",
+    "importadorCpfRepresentanteLegal": "00000000000",
+    "importadorEnderecoBairro": "JARDIM PRIMAVERA",
+    "importadorEnderecoCep": "83302000",
+    "importadorEnderecoComplemento": "CONJ: 6 E 7;",
+    "importadorEnderecoLogradouro": "JOAO LEOPOLDO JACOMEL",
+    "importadorEnderecoMunicipio": "PIRAQUARA",
+    "importadorEnderecoNumero": "4459",
+    "importadorEnderecoUf": "PR",
+    "importadorNome": "HAFELE BRASIL LTDA", # FIXO
+    "importadorNomeRepresentanteLegal": "PAULO HENRIQUE LEITE FERREIRA",
+    "importadorNumero": "02473058000188",
+    "importadorNumeroTelefone": "41 30348150",
+    # ---------------------------------------------
+
     "informacaoComplementar": "Informações extraídas do Extrato Conferência.",
     "localDescargaTotalDolares": "000000000000000",
     "localDescargaTotalReais": "000000000000000",
@@ -243,7 +241,7 @@ FOOTER_TAGS_MAP = {
     "localEmbarqueTotalReais": "000000000000000",
     "modalidadeDespachoCodigo": "1",
     "modalidadeDespachoNome": "Normal",
-    "numeroDUIMP": "", 
+    "numeroDUIMP": "", # Preenchido via código
     "operacaoFundap": "N",
     "pagamento": [{"tag": "agenciaPagamento", "default": "3715"}, {"tag": "bancoPagamento", "default": "341"}, {"tag": "codigoReceita", "default": "0086"}, {"tag": "valorReceita", "default": "000000000000000"}],
     "seguroMoedaNegociadaCodigo": "220",
@@ -255,7 +253,7 @@ FOOTER_TAGS_MAP = {
     "situacaoEntregaCarga": "ENTREGA CONDICIONADA",
     "tipoDeclaracaoCodigo": "01",
     "tipoDeclaracaoNome": "CONSUMO",
-    "totalAdicoes": "000",
+    "totalAdicoes": "000", # Preenchido via código
     "urfDespachoCodigo": "0917800",
     "urfDespachoNome": "PORTO DE PARANAGUA",
     "valorTotalMultaARecolherAjustado": "000000000000000",
@@ -310,9 +308,14 @@ class DataFormatter:
         try:
             base_int = int(base_xml_string)
             base_float = base_int / 100.0
+            
             cbs_val = base_float * 0.009
+            cbs_str = str(int(round(cbs_val * 100))).zfill(14)
+            
             ibs_val = base_float * 0.001
-            return str(int(round(cbs_val * 100))).zfill(14), str(int(round(ibs_val * 100))).zfill(14)
+            ibs_str = str(int(round(ibs_val * 100))).zfill(14)
+            
+            return cbs_str, ibs_str
         except:
             return "0".zfill(14), "0".zfill(14)
 
@@ -337,7 +340,7 @@ class DataFormatter:
         return data
 
 # ==============================================================================
-# 3. EXTRAÇÃO (PDFPLUMBER + STITCHING)
+# 3. EXTRAÇÃO (PDFPLUMBER + STITCHING + SCANNER)
 # ==============================================================================
 
 class PDFParserPlumber:
@@ -348,50 +351,33 @@ class PDFParserPlumber:
         self.items = []
 
     def extract_all(self):
-        # 1. Leitura Completa
+        # 1. Leitura Completa (pdfplumber)
         with pdfplumber.open(self.file_stream) as pdf:
             text_parts = []
             total = len(pdf.pages)
             prog = st.progress(0)
             
-            # Limpeza de cabeçalhos repetitivos para "costura"
-            garbage = [
-                r"Extrato de conferencia hafele Duimp",
-                r"Data, hora e responsável",
-                r"Versão \d+",
-                r"--- PAGE \d+ ---",
-                r"^\s*\d+\s*$",
-                r"^\s*\/ \d+\s*$"
-            ]
-
             for i, page in enumerate(pdf.pages):
                 extracted = page.extract_text()
                 if extracted:
-                    lines = extracted.split('\n')
-                    clean_lines = []
-                    for line in lines:
-                        is_garbage = False
-                        for pat in garbage:
-                            if re.search(pat, line, re.IGNORECASE):
-                                is_garbage = True
-                                break
-                        if not is_garbage:
-                            clean_lines.append(line)
-                    text_parts.append("\n".join(clean_lines))
-                
+                    text_parts.append(extracted)
                 if i % 10 == 0:
                     prog.progress((i+1)/total)
             prog.progress(100)
             
+        # Concatena tudo num texto único (Stitching)
         self.full_text = "\n".join(text_parts)
         
-        # 2. Cabeçalho Geral
+        # 2. Cabeçalho Global
+        self.header["processo"] = re.search(r"PROCESSO\s*#?(\d+)", self.full_text, re.I).group(1) if re.search(r"PROCESSO\s*#?(\d+)", self.full_text, re.I) else "N/A"
         duimp_match = re.search(r"Numero\s*[:\n]*\s*([\dBR]+)", self.full_text, re.I)
         self.header["duimp"] = duimp_match.group(1) if duimp_match else "00000000000"
         
+        # CNPJ
         cnpj_match = re.search(r"CNPJ\s*[:\n]*\s*([\d./-]+)", self.full_text, re.IGNORECASE)
         self.header["cnpj"] = cnpj_match.group(1) if cnpj_match else ""
         
+        # Pesos
         peso_b_match = re.search(r"PESO BRUTO KG\s*[:]?\s*([\d.,]+)", self.full_text, re.IGNORECASE)
         self.header["pesoBruto"] = peso_b_match.group(1) if peso_b_match else "0"
         peso_l_match = re.search(r"PESO LIQUIDO KG\s*[:]?\s*([\d.,]+)", self.full_text, re.IGNORECASE)
@@ -400,21 +386,22 @@ class PDFParserPlumber:
         forn_match = re.search(r"EXPORTADOR ESTRANGEIRO\s*[:\n]?\s*(.+?)(?=\n)", self.full_text, re.IGNORECASE)
         self.header["fornecedorGlobal"] = forn_match.group(1).strip() if forn_match else ""
 
-        # 3. Extração de Itens (Split Robusto)
-        # Primeiro, dividimos por "ITENS DA DUIMP" ou "Nº Adição" para isolar os blocos
-        parts = re.split(r"Nº\s*Adição\s*[:\n]?\s*(\d+)", self.full_text, flags=re.IGNORECASE)
-        
+        # 3. Extração de Itens (Split Inteligente)
+        parts = re.split(r"ITENS DA DUIMP\s*[-–]?\s*(\d+)", self.full_text)
+        if len(parts) <= 1:
+             parts = re.split(r"Nº Adição\s*[:\n]?\s*(\d+)", self.full_text)
+
         if len(parts) > 1:
             for i in range(1, len(parts), 2):
                 if i+1 >= len(parts): break
                 
                 num = parts[i]
-                block = parts[i+1] # BLOCO ISOLADO DO ITEM (CONTÉM TUDO DESTE ITEM)
+                block = parts[i+1] # BLOCO ISOLADO DO ITEM
                 
                 item = {}
                 item["numeroAdicao"] = num.zfill(3)
                 
-                # --- DESCRIÇÃO & PARTNUMBER ---
+                # --- DESCRIÇÃO & PARTNUMBER (PRECISÃO V22) ---
                 raw_desc_match = re.search(r"DENOMINACAO DO PRODUTO\s+(.*?)\s+(?:C[ÓO]DIGO|DETALHAMENTO)", block, re.S | re.I)
                 raw_desc = raw_desc_match.group(1) if raw_desc_match else ""
                 
@@ -426,7 +413,6 @@ class PDFParserPlumber:
                 item["descricao"] = f"{pn} - {clean_desc}" if pn else clean_desc
                 if not item["descricao"]: item["descricao"] = f"ITEM {num}"
                 
-                # Dados
                 ncm_match = re.search(r"NCM\s*[:\n]*\s*([\d\.]+)", block)
                 item["ncm"] = ncm_match.group(1).replace(".", "") if ncm_match else "00000000"
                 
@@ -446,7 +432,8 @@ class PDFParserPlumber:
                 forn_spec = re.search(r"EXPORTADOR ESTRANGEIRO\s*[:\n]?\s*(.+?)(?=\n)", block, re.IGNORECASE)
                 item["fornecedor_raw"] = forn_spec.group(1).strip() if forn_spec else self.header.get("fornecedorGlobal", "")
 
-                # 4. SCANNER FISCAL (IMPOSTOS POR ITEM)
+                # 4. SCANNER FISCAL (IMPOSTOS)
+                # Garante que cada item tenha seus próprios impostos extraídos do seu bloco
                 item.update(self._scan_taxes(block))
                 
                 self.items.append(item)
@@ -481,8 +468,10 @@ class PDFParserPlumber:
                             candidates.append((val, n))
                         except: pass
                     if candidates:
+                        # Ordena: Menor = Alíquota, Maior = Valor (aprox)
                         candidates.sort(key=lambda x: x[0])
                         taxes[k_rate] = candidates[0][1] # Menor = Rate
+                        # Heurística: Pega o segundo menor (o valor do imposto)
                         taxes[k_val] = candidates[1][1] if len(candidates) >= 2 else candidates[0][1]
         return taxes
 
@@ -566,9 +555,15 @@ class XMLBuilder:
                     val = extracted_map.get(tag_name, field["default"])
                     etree.SubElement(adicao, tag_name).text = val
 
-        # Footer
-        for k, v in IMPORTADOR_DATA.items():
-            etree.SubElement(self.duimp, k).text = v
+        footer_map = {
+            "numeroDUIMP": duimp_fmt,
+            # Importador fixo conforme layout solicitado
+            "importadorNome": "HAFELE BRASIL LTDA", 
+            "importadorNumero": DataFormatter.format_number(h.get("cnpj"), 14),
+            "cargaPesoBruto": DataFormatter.format_number(h.get("pesoBruto"), 15),
+            "cargaPesoLiquido": DataFormatter.format_number(h.get("pesoLiquido"), 15),
+            "totalAdicoes": str(len(self.p.items)).zfill(3)
+        }
 
         for tag, default_val in FOOTER_TAGS_MAP.items():
             if isinstance(default_val, list):
@@ -579,40 +574,22 @@ class XMLBuilder:
                 parent = etree.SubElement(self.duimp, tag)
                 etree.SubElement(parent, default_val["tag"]).text = default_val["default"]
             else:
-                if tag not in IMPORTADOR_DATA: # Evita duplicar
-                    etree.SubElement(self.duimp, tag).text = default_val
+                # Prioriza o mapa se tiver valor fixo, senão pega do footer_map
+                val = footer_map.get(tag, default_val)
+                # Mas se o default_val for uma string fixa (como HAFELE BRASIL LTDA no dicionario original), usamos ele
+                if tag == "importadorNome": val = "HAFELE BRASIL LTDA"
+                
+                etree.SubElement(self.duimp, tag).text = val
 
-        # Adiciona dados variáveis de footer
-        etree.SubElement(self.duimp, "numeroDUIMP").text = duimp_fmt
-        etree.SubElement(self.duimp, "cargaPesoBruto").text = DataFormatter.format_number(h.get("pesoBruto"), 15)
-        etree.SubElement(self.duimp, "cargaPesoLiquido").text = DataFormatter.format_number(h.get("pesoLiquido"), 15)
-        etree.SubElement(self.duimp, "totalAdicoes").text = str(len(self.p.items)).zfill(3)
-
-        # Formatação XML
+        # Formatação XML Rigorosa (Indentação + Header)
         raw_xml = etree.tostring(self.root, encoding="UTF-8", xml_declaration=True)
         try:
             parsed = minidom.parseString(raw_xml)
+            # Injeta header correto após formatação
             pretty_xml = parsed.toprettyxml(indent="    ")
             return re.sub(r'<\?xml.*?\?>', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>', pretty_xml, count=1)
         except:
             return raw_xml
-
-# --- DADOS FIXOS DO IMPORTADOR ---
-IMPORTADOR_DATA = {
-    "importadorNome": "HAFELE BRASIL LTDA",
-    "importadorNomeRepresentanteLegal": "PAULO HENRIQUE LEITE FERREIRA",
-    "importadorNumero": "02473058000188",
-    "importadorNumeroTelefone": "41 30348150",
-    "importadorEnderecoBairro": "JARDIM PRIMAVERA",
-    "importadorEnderecoCep": "83302000",
-    "importadorEnderecoComplemento": "CONJ: 6 E 7;",
-    "importadorEnderecoLogradouro": "JOAO LEOPOLDO JACOMEL",
-    "importadorEnderecoMunicipio": "PIRAQUARA",
-    "importadorEnderecoNumero": "4459",
-    "importadorEnderecoUf": "PR",
-    "importadorCodigoTipo": "1",
-    "importadorCpfRepresentanteLegal": "00000000000"
-}
 
 # ==============================================================================
 # 5. APP PRINCIPAL
