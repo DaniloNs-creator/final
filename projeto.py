@@ -3,7 +3,7 @@ import fitz  # PyMuPDF
 import re
 from lxml import etree
 
-st.set_page_config(page_title="Conversor DUIMP 6.0 (High Performance)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP V7 (Multi-Page Fix)", layout="wide")
 
 # ==============================================================================
 # 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO - INTACTO)
@@ -250,6 +250,7 @@ class DataFormatter:
     def format_number(value, length=15):
         if not value: return "0" * length
         clean = re.sub(r'\D', '', value)
+        if not clean: return "0" * length
         return clean.zfill(length)
     
     @staticmethod
@@ -290,10 +291,10 @@ class DataFormatter:
         return data
 
 # ==============================================================================
-# 3. PARSER V6 (PHYSICAL LAYOUT)
+# 3. PARSER V7 (STEAMROLLER - LÊ TUDO COMO FLUXO ÚNICO)
 # ==============================================================================
 
-class PDFParserV6:
+class PDFParserV7:
     def __init__(self, file_stream):
         self.doc = fitz.open(stream=file_stream, filetype="pdf")
         self.full_text = ""
@@ -302,15 +303,40 @@ class PDFParserV6:
 
     def preprocess(self):
         """
-        Usa extração com 'sort=True' para garantir que tabelas sejam lidas
-        na ordem lógica visual, evitando embaralhamento de colunas.
+        Concatena TODAS as páginas em um único texto, removendo cabeçalhos repetidos
+        para evitar que itens quebrados entre páginas sejam cortados.
         """
         raw_text_parts = []
+        
+        # Strings de "sujeira" que aparecem no topo/rodapé de CADA página
+        garbage_patterns = [
+            r"Extrato de conferencia hafele Duimp",
+            r"Data, hora e responsável",
+            r"^\s*\d+\s*$", # Número de página isolado
+            r"^\s*\/ \d+\s*$", # Paginação "/ 9"
+            r"Versão \d+",
+            r"--- PAGE \d+ ---"
+        ]
+
         for page in self.doc:
-            # sort=True é CRUCIAL para tabelas complexas como a deste PDF
-            text = page.get_text("text", sort=True)
-            raw_text_parts.append(text)
-        self.full_text = "\n".join(raw_text_parts)
+            # sort=True organiza layout colunar
+            text = page.get_text("text", sort=True) 
+            lines = text.split('\n')
+            clean_lines = []
+            
+            for line in lines:
+                is_garbage = False
+                for pat in garbage_patterns:
+                    if re.search(pat, line, re.IGNORECASE):
+                        is_garbage = True
+                        break
+                if not is_garbage:
+                    clean_lines.append(line)
+            
+            raw_text_parts.append("\n".join(clean_lines))
+            
+        # Junta tudo com quebras de linha duplas para segurança
+        self.full_text = "\n\n".join(raw_text_parts)
 
     def extract_header(self):
         txt = self.full_text
@@ -323,7 +349,6 @@ class PDFParserV6:
         cnpj_match = re.search(r"CNPJ\s*[:\n]?\s*([\d./-]+)", txt, re.IGNORECASE)
         self.header["cnpj"] = cnpj_match.group(1) if cnpj_match else ""
 
-        # Pesos geralmente estão no rodapé ou cabeçalho final
         peso_b_match = re.search(r"PESO BRUTO KG\s*[:\n]?\s*([\d.,]+)", txt, re.IGNORECASE)
         self.header["pesoBruto"] = peso_b_match.group(1) if peso_b_match else "0"
         
@@ -336,7 +361,6 @@ class PDFParserV6:
     def _scan_for_taxes(self, block_text):
         """
         Escaneia o bloco de texto procurando padrões de impostos.
-        Retorna dicionário com taxas e valores.
         """
         taxes = {
             "ii_rate": "00000", "ii_val": "0"*15,
@@ -345,7 +369,6 @@ class PDFParserV6:
             "cofins_rate": "00000", "cofins_val": "0"*15
         }
         
-        # Mapeamento Sigla -> Chave do Dict
         tax_map = {
             "II": ("ii_rate", "ii_val"),
             "IMPOSTO DE IMPORTAÇÃO": ("ii_rate", "ii_val"),
@@ -356,24 +379,14 @@ class PDFParserV6:
         }
 
         for tax_label, (k_rate, k_val) in tax_map.items():
-            # Regex procura: LabelDoImposto ... Numero ... Numero
-            # Ex: PIS 1.000,00 1,65 16,50 (Base, Aliq, Valor)
-            # Ou: PIS 1,65 16,50 (Aliq, Valor)
-            # Limita a busca para não pegar o documento todo
-            
-            # Localiza a posição do imposto
+            # Procura Label ... Valor ... Valor
             idx = block_text.find(tax_label)
             if idx != -1:
-                # Pega os próximos 100 caracteres
-                snippet = block_text[idx:idx+100]
-                # Encontra numeros decimais
+                # Janela de busca maior para garantir que pegue os valores mesmo distantes
+                snippet = block_text[idx:idx+200]
                 nums = re.findall(r"([\d]{1,3}(?:[.]\d{3})*,\d{2,4})", snippet)
                 
-                # Se achou numeros
                 if len(nums) >= 2:
-                    # Lógica Heurística:
-                    # O menor valor percentual é a Alíquota. O maior é o Valor.
-                    # Convertemos para float para comparar
                     candidates = []
                     for n in nums:
                         try:
@@ -383,11 +396,9 @@ class PDFParserV6:
                     
                     if candidates:
                         candidates.sort(key=lambda x: x[0])
-                        # Menor = Aliquota (ex: 1.65), Maior/Meio = Valor (ex: 16.50)
-                        # Se houver 3 (Base, Rate, Val), Rate é o menor. Val é o médio.
-                        
+                        # Assumimos: Menor = Alíquota, Maior/Médio = Valor Imposto
                         rate = candidates[0][1]
-                        val = candidates[1][1] if len(candidates) == 2 else candidates[1][1] # Se 3, pega o do meio
+                        val = candidates[1][1] if len(candidates) == 2 else candidates[1][1]
                         
                         taxes[k_rate] = rate
                         taxes[k_val] = val
@@ -395,19 +406,18 @@ class PDFParserV6:
         return taxes
 
     def extract_items(self):
-        # Localiza índices de início de item de forma absoluta
-        # O padrão é "Nº Adição" seguido de números
+        # Localiza índices de início de item de forma absoluta no texto UNIFICADO
         matches = list(re.finditer(r"Nº\s*Adição\s*\n?\s*(\d+)", self.full_text, re.IGNORECASE))
         
         if not matches:
-            st.error("Nenhum item encontrado. Verifique se o PDF é um 'Extrato de Conferência'.")
-            return
+            # Fallback: Tenta achar "Item" apenas se não achar "Nº Adição"
+            matches = list(re.finditer(r"Item\s+(\d+)", self.full_text, re.IGNORECASE))
 
         for i in range(len(matches)):
             start = matches[i].start()
             end = matches[i+1].start() if i + 1 < len(matches) else len(self.full_text)
             
-            # Bloco de texto do item isolado
+            # Bloco de texto do item isolado (pode ser gigante, atravessando páginas)
             block = self.full_text[start:end]
             
             item = {}
@@ -416,13 +426,13 @@ class PDFParserV6:
             adi_grp = matches[i].group(1)
             item["numeroAdicao"] = adi_grp.zfill(3)
             
-            # NCM (formato XXXX.XX.XX)
+            # NCM
             ncm_match = re.search(r"(\d{4}\.\d{2}\.\d{2})", block)
             item["ncm"] = ncm_match.group(1) if ncm_match else "00000000"
             
-            # Descrição
+            # Descrição (Busca genérica por texto em caixa alta ou label)
             desc_match = re.search(r"DENOMINACAO DO PRODUTO\s*[:\n]?\s*(.+?)(?=\n)", block, re.IGNORECASE)
-            item["descricao"] = desc_match.group(1).strip() if desc_match else f"ITEM {item['numeroAdicao']}"
+            item["descricao"] = desc_match.group(1).strip() if desc_match else f"ITEM {item['numeroAdicao']} - DESCRIÇÃO NÃO EXTRAÍDA"
             
             # Valores e Qtd
             qtd_match = re.search(r"Qtde Unid\. Estatística\s*[:\n]?\s*([\d.,]+)", block, re.IGNORECASE)
@@ -437,13 +447,13 @@ class PDFParserV6:
             val_match = re.search(r"Valor Tot\. Cond Venda\s*[:\n]?\s*([\d.,]+)", block, re.IGNORECASE)
             item["valorTotal"] = val_match.group(1) if val_match else "0"
             
-            # Fornecedor Específico
+            # Fornecedor
             forn_spec = re.search(r"EXPORTADOR ESTRANGEIRO\s*[:\n]?\s*(.+?)(?=\n)", block, re.IGNORECASE)
             item["fornecedor_raw"] = forn_spec.group(1).strip() if forn_spec else self.header.get("fornecedorGlobal", "")
             
-            # IMPOSTOS (Scanner)
+            # IMPOSTOS (Scanner V7)
             tax_data = self._scan_for_taxes(block)
-            item.update(tax_data) # Mescla os impostos encontrados no item
+            item.update(tax_data)
             
             self.items.append(item)
 
@@ -465,7 +475,6 @@ class XMLBuilder:
             adicao = etree.SubElement(self.duimp, "adicao")
             
             base_total_reais = DataFormatter.format_number(it.get("valorTotal"), 15)
-            # Base ICMS = Valor Mercadoria (Fallback comum)
             icms_base_valor = base_total_reais 
             cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
             supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"))
@@ -561,16 +570,16 @@ class XMLBuilder:
 # 5. APP
 # ==============================================================================
 
-st.title("Conversor DUIMP 6.0 (Enterprise)")
-st.markdown("Motor V6: Leitura física (Sort) e Busca Absoluta de Itens.")
+st.title("Conversor DUIMP V7.0 (Enterprise)")
+st.markdown("Processamento de fluxo contínuo para alta volumetria e extração fiscal precisa.")
 
 file = st.file_uploader("Upload PDF", type="pdf")
 
 if file:
     if st.button("Gerar XML"):
         try:
-            with st.spinner("Processando..."):
-                p = PDFParserV6(file.read())
+            with st.spinner("Lendo todas as páginas e unificando itens..."):
+                p = PDFParserV7(file.read())
                 p.preprocess()
                 p.extract_header()
                 p.extract_items()
@@ -581,7 +590,7 @@ if file:
                 numero_duimp = p.header.get("numeroDUIMP", "000000").replace("/", "-")
                 nome_arquivo = f"DUIMP_{numero_duimp}.xml"
 
-                st.success(f"Processamento Concluído! Encontrados {len(p.items)} itens.")
+                st.success(f"Sucesso Total! Processados {len(p.items)} itens com impostos.")
                 st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
             
         except Exception as e:
