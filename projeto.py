@@ -3,7 +3,7 @@ import fitz  # PyMuPDF
 import re
 from lxml import etree
 
-st.set_page_config(page_title="Conversor DUIMP V5 (Enterprise)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP 6.0 (High Performance)", layout="wide")
 
 # ==============================================================================
 # 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO - INTACTO)
@@ -244,20 +244,16 @@ class DataFormatter:
     @staticmethod
     def clean_text(text):
         if not text: return ""
-        # Remove quebras de linha e espaços extras
-        text = text.replace('\n', ' ').replace('\r', '')
-        return re.sub(r'\s+', ' ', text).strip()
+        return re.sub(r'\s+', ' ', text.replace('\n', ' ')).strip()
 
     @staticmethod
     def format_number(value, length=15):
         if not value: return "0" * length
         clean = re.sub(r'\D', '', value)
-        if not clean: return "0" * length
         return clean.zfill(length)
     
     @staticmethod
     def format_rate_xml(value):
-        # 18,00 -> 01800; 9,65 -> 00965
         if not value: return "00000"
         val_clean = value.replace(",", ".").strip()
         try:
@@ -277,25 +273,15 @@ class DataFormatter:
         try:
             base_int = int(base_xml_string)
             base_float = base_int / 100.0
-            
             cbs_val = base_float * 0.009
-            cbs_str = str(int(round(cbs_val * 100))).zfill(14)
-            
             ibs_val = base_float * 0.001
-            ibs_str = str(int(round(ibs_val * 100))).zfill(14)
-            
-            return cbs_str, ibs_str
+            return str(int(round(cbs_val * 100))).zfill(14), str(int(round(ibs_val * 100))).zfill(14)
         except:
             return "0".zfill(14), "0".zfill(14)
 
     @staticmethod
-    def parse_supplier_info(raw_name, raw_addr):
-        data = {
-            "fornecedorNome": "FORNECEDOR PADRAO",
-            "fornecedorLogradouro": "",
-            "fornecedorNumero": "",
-            "fornecedorCidade": "EXTERIOR"
-        }
+    def parse_supplier_info(raw_name):
+        data = {"fornecedorNome": "FORNECEDOR PADRAO", "fornecedorLogradouro": "", "fornecedorNumero": "", "fornecedorCidade": "EXTERIOR"}
         if raw_name:
             parts = raw_name.split("PAIS:")
             data["fornecedorNome"] = parts[0].strip()[:60]
@@ -304,10 +290,10 @@ class DataFormatter:
         return data
 
 # ==============================================================================
-# 3. PARSER V5 (ENTERPRISE - SCALABLE & ROBUST)
+# 3. PARSER V6 (PHYSICAL LAYOUT)
 # ==============================================================================
 
-class PDFParserV5:
+class PDFParserV6:
     def __init__(self, file_stream):
         self.doc = fitz.open(stream=file_stream, filetype="pdf")
         self.full_text = ""
@@ -315,174 +301,150 @@ class PDFParserV5:
         self.items = []
 
     def preprocess(self):
-        # Lê o PDF inteiro para uma única string, permitindo encontrar itens que quebram páginas
+        """
+        Usa extração com 'sort=True' para garantir que tabelas sejam lidas
+        na ordem lógica visual, evitando embaralhamento de colunas.
+        """
         raw_text_parts = []
         for page in self.doc:
-            text = page.get_text("text")
-            # Remove linhas de cabeçalho/rodapé que sujam o texto (opcional, mas recomendado)
-            # Removemos linhas que contenham apenas numero de pagina ou titulo repetido
-            lines = text.split('\n')
-            clean_lines = []
-            for line in lines:
-                if "Extrato de Conferência" in line: continue
-                if re.match(r'^\d+\s*$', line.strip()): continue # Número de página solto
-                clean_lines.append(line)
-            raw_text_parts.append("\n".join(clean_lines))
-            
+            # sort=True é CRUCIAL para tabelas complexas como a deste PDF
+            text = page.get_text("text", sort=True)
+            raw_text_parts.append(text)
         self.full_text = "\n".join(raw_text_parts)
 
     def extract_header(self):
         txt = self.full_text
-        duimp_match = re.search(r"Numero\s*[:\n]\s*([\w\d]+)", txt, re.IGNORECASE)
-        self.header["numeroDUIMP"] = duimp_match.group(1) if duimp_match else ""
+        duimp_match = re.search(r"Numero\s*[:\n]?\s*([\w\d]+)", txt, re.IGNORECASE)
+        self.header["numeroDUIMP"] = duimp_match.group(1) if duimp_match else "00000000000"
 
-        imp_match = re.search(r"IMPORTADOR\s*\n\s*\"?(.+?)\"?(?=\n)", txt, re.IGNORECASE)
+        imp_match = re.search(r"IMPORTADOR\s*[:\n]?\s*(.+)", txt, re.IGNORECASE)
         self.header["importadorNome"] = imp_match.group(1).strip() if imp_match else ""
         
-        cnpj_match = re.search(r"CNPJ\s*\n\s*\"?([\d./-]+)\"?", txt, re.IGNORECASE)
+        cnpj_match = re.search(r"CNPJ\s*[:\n]?\s*([\d./-]+)", txt, re.IGNORECASE)
         self.header["cnpj"] = cnpj_match.group(1) if cnpj_match else ""
 
-        peso_b_match = re.search(r"PESO BRUTO KG\s*[:]?\s*([\d.,]+)", txt, re.IGNORECASE)
+        # Pesos geralmente estão no rodapé ou cabeçalho final
+        peso_b_match = re.search(r"PESO BRUTO KG\s*[:\n]?\s*([\d.,]+)", txt, re.IGNORECASE)
         self.header["pesoBruto"] = peso_b_match.group(1) if peso_b_match else "0"
         
-        peso_l_match = re.search(r"PESO LIQUIDO KG\s*[:]?\s*([\d.,]+)", txt, re.IGNORECASE)
+        peso_l_match = re.search(r"PESO LIQUIDO KG\s*[:\n]?\s*([\d.,]+)", txt, re.IGNORECASE)
         self.header["pesoLiquido"] = peso_l_match.group(1) if peso_l_match else "0"
         
-        forn_match = re.search(r"EXPORTADOR ESTRANGEIRO\s*\n\s*(.+?)(?=\n)", txt, re.IGNORECASE)
+        forn_match = re.search(r"EXPORTADOR ESTRANGEIRO\s*[:\n]?\s*(.+?)(?=\n)", txt, re.IGNORECASE)
         self.header["fornecedorGlobal"] = forn_match.group(1).strip() if forn_match else ""
 
-    def _extract_tax_flexible(self, tax_name, block_text):
+    def _scan_for_taxes(self, block_text):
         """
-        Busca 'TaxName' e captura os valores numéricos decimais subsequentes.
-        Ex: PIS/PASEP ... 1.000,00 ... 1,65 ... 16,50
-        Lógica: Captura todos os números decimais após o nome do imposto.
-        Menor valor < 100 ou < Total = Alíquota.
-        Maior valor = Valor do Imposto.
+        Escaneia o bloco de texto procurando padrões de impostos.
+        Retorna dicionário com taxas e valores.
         """
-        # Regex busca a palavra chave e depois pega candidatos a números (ex: 1.234,56 ou 10,00)
-        # Limita a busca a uma janela de caracteres para não pegar valores de outro imposto
+        taxes = {
+            "ii_rate": "00000", "ii_val": "0"*15,
+            "ipi_rate": "00000", "ipi_val": "0"*15,
+            "pis_rate": "00000", "pis_val": "0"*15,
+            "cofins_rate": "00000", "cofins_val": "0"*15
+        }
         
-        # Encontra a posição do imposto
-        start_idx = block_text.find(tax_name)
-        if start_idx == -1:
-            # Tenta variações (II, I.I., Imposto Importação)
-            if tax_name == "IMPOSTO DE IMPORTAÇÃO":
-                start_idx = block_text.find("II")
-            if start_idx == -1:
-                return "00000", "0" * 15
+        # Mapeamento Sigla -> Chave do Dict
+        tax_map = {
+            "II": ("ii_rate", "ii_val"),
+            "IMPOSTO DE IMPORTAÇÃO": ("ii_rate", "ii_val"),
+            "IPI": ("ipi_rate", "ipi_val"),
+            "PIS": ("pis_rate", "pis_val"),
+            "PIS/PASEP": ("pis_rate", "pis_val"),
+            "COFINS": ("cofins_rate", "cofins_val")
+        }
 
-        # Pega um pedaço do texto após o nome do imposto (ex: 150 caracteres)
-        sub_text = block_text[start_idx : start_idx+300]
-        
-        # Encontra todos os números no formato X,XX ou X.XXX,XX
-        numbers = re.findall(r"(\d{1,3}(?:[.]\d{3})*,\d{2,4})", sub_text)
-        
-        rate = "0,00"
-        value = "0,00"
-        
-        if len(numbers) >= 2:
-            # Temos candidatos. Precisamos distinguir Alíquota de ValorMonetário.
-            # Convertemos para float para comparar
-            nums_float = []
-            for n in numbers:
-                try:
-                    f = float(n.replace('.', '').replace(',', '.'))
-                    nums_float.append((f, n))
-                except:
-                    pass
+        for tax_label, (k_rate, k_val) in tax_map.items():
+            # Regex procura: LabelDoImposto ... Numero ... Numero
+            # Ex: PIS 1.000,00 1,65 16,50 (Base, Aliq, Valor)
+            # Ou: PIS 1,65 16,50 (Aliq, Valor)
+            # Limita a busca para não pegar o documento todo
             
-            # Ordena: Menor costuma ser aliquota (ex: 9.65), Maior é valor (ex: 1000.00)
-            # Mas cuidado com Base de Calculo.
-            # Padrão visual: Base | Alíquota | Valor
-            # Se tiver 3 numeros: Base, Rate, Value.
-            # Se tiver 2 numeros: Rate, Value (ou Base, Value se Rate for 0?)
-            
-            # Vamos assumir que a Alíquota é o MENOR valor diferente de zero encontrado
-            # E o Valor do Imposto é o valor médio ou o valor que parece ser resultado (Base * Rate)
-            
-            nums_float.sort(key=lambda x: x[0])
-            
-            if nums_float:
-                # O menor valor provavelmente é a alíquota (ex: 1.65, 9.00, 18.00)
-                rate = nums_float[0][1]
+            # Localiza a posição do imposto
+            idx = block_text.find(tax_label)
+            if idx != -1:
+                # Pega os próximos 100 caracteres
+                snippet = block_text[idx:idx+100]
+                # Encontra numeros decimais
+                nums = re.findall(r"([\d]{1,3}(?:[.]\d{3})*,\d{2,4})", snippet)
                 
-                # O valor do imposto. Se tivermos 3 numeros (Base, Rate, Imposto), 
-                # Imposto é geralmente menor que a Base.
-                # Se tivermos Base e Imposto, Imposto < Base.
-                # Vamos pegar o segundo menor como Imposto, se houver 3. 
-                # Se houver 2, o maior é Imposto (assumindo que nao lemos a base, ou Base > Imposto)
-                
-                if len(nums_float) >= 3:
-                    # [Rate, Imposto, Base]
-                    value = nums_float[1][1] 
-                elif len(nums_float) == 2:
-                    # [Rate, Imposto] (Assumindo Imposto > Rate)
-                    value = nums_float[1][1]
-                else:
-                    value = nums_float[0][1]
+                # Se achou numeros
+                if len(nums) >= 2:
+                    # Lógica Heurística:
+                    # O menor valor percentual é a Alíquota. O maior é o Valor.
+                    # Convertemos para float para comparar
+                    candidates = []
+                    for n in nums:
+                        try:
+                            val = float(n.replace('.', '').replace(',', '.'))
+                            candidates.append((val, n))
+                        except: pass
+                    
+                    if candidates:
+                        candidates.sort(key=lambda x: x[0])
+                        # Menor = Aliquota (ex: 1.65), Maior/Meio = Valor (ex: 16.50)
+                        # Se houver 3 (Base, Rate, Val), Rate é o menor. Val é o médio.
+                        
+                        rate = candidates[0][1]
+                        val = candidates[1][1] if len(candidates) == 2 else candidates[1][1] # Se 3, pega o do meio
+                        
+                        taxes[k_rate] = rate
+                        taxes[k_val] = val
 
-        return rate, value
+        return taxes
 
     def extract_items(self):
-        """
-        Segmenta os itens encontrando os índices de 'Nº Adição'.
-        Extrai o bloco de texto entre o Item N e o Item N+1.
-        """
-        # 1. Localizar todos os inícios de itens
-        # Pattern: Nº Adição [espaço/quebra] Numero [espaço/quebra] Nº do Item
-        pattern = re.compile(r"Nº Adição\s*\n?\s*(\d+)", re.MULTILINE)
+        # Localiza índices de início de item de forma absoluta
+        # O padrão é "Nº Adição" seguido de números
+        matches = list(re.finditer(r"Nº\s*Adição\s*\n?\s*(\d+)", self.full_text, re.IGNORECASE))
         
-        matches = list(pattern.finditer(self.full_text))
-        
+        if not matches:
+            st.error("Nenhum item encontrado. Verifique se o PDF é um 'Extrato de Conferência'.")
+            return
+
         for i in range(len(matches)):
-            start_pos = matches[i].start()
-            # O fim deste item é o início do próximo, ou o fim do texto
-            end_pos = matches[i+1].start() if i + 1 < len(matches) else len(self.full_text)
+            start = matches[i].start()
+            end = matches[i+1].start() if i + 1 < len(matches) else len(self.full_text)
             
-            block = self.full_text[start_pos:end_pos]
+            # Bloco de texto do item isolado
+            block = self.full_text[start:end]
             
             item = {}
             
-            # Identificação
-            adi_match = re.search(r"Nº Adição\s*\n?\s*(\d+)", block)
-            item["numeroAdicao"] = adi_match.group(1).zfill(3) if adi_match else "000"
+            # Identificadores
+            adi_grp = matches[i].group(1)
+            item["numeroAdicao"] = adi_grp.zfill(3)
             
-            # NCM
+            # NCM (formato XXXX.XX.XX)
             ncm_match = re.search(r"(\d{4}\.\d{2}\.\d{2})", block)
             item["ncm"] = ncm_match.group(1) if ncm_match else "00000000"
             
             # Descrição
-            desc_match = re.search(r"DENOMINACAO DO PRODUTO\s*\n\s*(.+?)(?=\n)", block, re.IGNORECASE)
-            item["descricao"] = desc_match.group(1).strip() if desc_match else "ITEM " + item["numeroAdicao"]
+            desc_match = re.search(r"DENOMINACAO DO PRODUTO\s*[:\n]?\s*(.+?)(?=\n)", block, re.IGNORECASE)
+            item["descricao"] = desc_match.group(1).strip() if desc_match else f"ITEM {item['numeroAdicao']}"
             
-            # Quantidade
-            qtd_match = re.search(r"Qtde Unid. Estatística\s*\n\s*\"?([\d.,]+)", block)
+            # Valores e Qtd
+            qtd_match = re.search(r"Qtde Unid\. Estatística\s*[:\n]?\s*([\d.,]+)", block, re.IGNORECASE)
             item["quantidade"] = qtd_match.group(1) if qtd_match else "0"
             
-            # Unidade
-            unid_match = re.search(r"Unidad Estatística\s*\n\s*\"?(.+?)\"", block)
+            unid_match = re.search(r"Unidad Estatística\s*[:\n]?\s*([A-Z]+)", block, re.IGNORECASE)
             item["unidade"] = unid_match.group(1) if unid_match else "UN"
             
-            # Peso
-            peso_match = re.search(r"Peso Líquido \(KG\)\s*\n\s*\"?([\d.,]+)", block)
+            peso_match = re.search(r"Peso Líquido \(KG\)\s*[:\n]?\s*([\d.,]+)", block, re.IGNORECASE)
             item["pesoLiq"] = peso_match.group(1) if peso_match else "0"
             
-            # Valor
-            val_match = re.search(r"Valor Tot. Cond Venda\s*\n\s*\"?([\d.,]+)", block)
+            val_match = re.search(r"Valor Tot\. Cond Venda\s*[:\n]?\s*([\d.,]+)", block, re.IGNORECASE)
             item["valorTotal"] = val_match.group(1) if val_match else "0"
             
-            # TRIBUTOS (Scanner Inteligente)
-            item["ii_rate"], item["ii_val"] = self._extract_tax_flexible("IMPOSTO DE IMPORTAÇÃO", block)
-            item["ipi_rate"], item["ipi_val"] = self._extract_tax_flexible("IPI", block)
-            item["pis_rate"], item["pis_val"] = self._extract_tax_flexible("PIS/PASEP", block)
-            item["cofins_rate"], item["cofins_val"] = self._extract_tax_flexible("COFINS", block)
+            # Fornecedor Específico
+            forn_spec = re.search(r"EXPORTADOR ESTRANGEIRO\s*[:\n]?\s*(.+?)(?=\n)", block, re.IGNORECASE)
+            item["fornecedor_raw"] = forn_spec.group(1).strip() if forn_spec else self.header.get("fornecedorGlobal", "")
             
-            # Fornecedor
-            item["fornecedor_raw"] = self.header.get("fornecedorGlobal", "")
-            forn_spec = re.search(r"EXPORTADOR ESTRANGEIRO\s*\n\s*(.+?)(?=\n)", block)
-            if forn_spec:
-                item["fornecedor_raw"] = forn_spec.group(1).strip()
-
+            # IMPOSTOS (Scanner)
+            tax_data = self._scan_for_taxes(block)
+            item.update(tax_data) # Mescla os impostos encontrados no item
+            
             self.items.append(item)
 
 # ==============================================================================
@@ -503,50 +465,52 @@ class XMLBuilder:
             adicao = etree.SubElement(self.duimp, "adicao")
             
             base_total_reais = DataFormatter.format_number(it.get("valorTotal"), 15)
+            # Base ICMS = Valor Mercadoria (Fallback comum)
             icms_base_valor = base_total_reais 
             cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
-            supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"), "")
+            supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"))
 
+            # Mapeamento Final
             extracted_map = {
                 "numeroAdicao": it["numeroAdicao"],
                 "numeroDUIMP": duimp_fmt,
                 "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
                 "dadosMercadoriaMedidaEstatisticaQuantidade": DataFormatter.format_number(it.get("quantidade"), 14),
-                "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "").upper(),
-                "dadosMercadoriaPesoLiquido": DataFormatter.format_number(it.get("pesoLiq", "0"), 15),
+                "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "UN"),
+                "dadosMercadoriaPesoLiquido": DataFormatter.format_number(it.get("pesoLiq"), 15),
                 "condicaoVendaMoedaNome": "DOLAR DOS EUA",
                 "condicaoVendaValorMoeda": base_total_reais,
                 "condicaoVendaValorReais": base_total_reais,
                 "paisOrigemMercadoriaNome": "EXTERIOR",
                 "paisAquisicaoMercadoriaNome": "EXTERIOR",
                 "valorTotalCondicaoVenda": DataFormatter.format_number(it.get("valorTotal"), 11),
-                "descricaoMercadoria": DataFormatter.clean_text(it.get("descricao", "")),
+                "descricaoMercadoria": DataFormatter.clean_text(it.get("descricao")),
                 "quantidade": DataFormatter.format_number(it.get("quantidade"), 14),
-                "unidadeMedida": it.get("unidade", "").upper(),
+                "unidadeMedida": it.get("unidade", "UN"),
                 "valorUnitario": DataFormatter.format_number(it.get("valorTotal"), 20),
                 "dadosCargaUrfEntradaCodigo": "0000000",
                 
-                "fornecedorNome": supplier_data["fornecedorNome"][:60],
-                "fornecedorLogradouro": supplier_data["fornecedorLogradouro"][:60],
-                "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
-                "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
+                "fornecedorNome": supplier_data["fornecedorNome"],
+                "fornecedorLogradouro": supplier_data["fornecedorLogradouro"],
+                "fornecedorNumero": supplier_data["fornecedorNumero"],
+                "fornecedorCidade": supplier_data["fornecedorCidade"],
 
-                # TRIBUTOS EXTRAÍDOS (FORMATADOS)
-                "iiAliquotaAdValorem": DataFormatter.format_rate_xml(it.get("ii_rate")),
-                "iiAliquotaValorDevido": DataFormatter.format_number(it.get("ii_val"), 15),
+                # TRIBUTOS REAIS EXTRAÍDOS DO PDF
+                "iiAliquotaAdValorem": DataFormatter.format_rate_xml(it["ii_rate"]),
+                "iiAliquotaValorDevido": DataFormatter.format_number(it["ii_val"], 15),
                 
-                "ipiAliquotaAdValorem": DataFormatter.format_rate_xml(it.get("ipi_rate")),
-                "ipiAliquotaValorDevido": DataFormatter.format_number(it.get("ipi_val"), 15),
+                "ipiAliquotaAdValorem": DataFormatter.format_rate_xml(it["ipi_rate"]),
+                "ipiAliquotaValorDevido": DataFormatter.format_number(it["ipi_val"], 15),
                 
-                "pisPasepAliquotaAdValorem": DataFormatter.format_rate_xml(it.get("pis_rate")),
-                "pisPasepAliquotaValorDevido": DataFormatter.format_number(it.get("pis_val"), 15),
-                "pisPasepAliquotaValorRecolher": DataFormatter.format_number(it.get("pis_val"), 15),
+                "pisPasepAliquotaAdValorem": DataFormatter.format_rate_xml(it["pis_rate"]),
+                "pisPasepAliquotaValorDevido": DataFormatter.format_number(it["pis_val"], 15),
+                "pisPasepAliquotaValorRecolher": DataFormatter.format_number(it["pis_val"], 15),
                 
-                "cofinsAliquotaAdValorem": DataFormatter.format_rate_xml(it.get("cofins_rate")),
-                "cofinsAliquotaValorDevido": DataFormatter.format_number(it.get("cofins_val"), 15),
-                "cofinsAliquotaValorRecolher": DataFormatter.format_number(it.get("cofins_val"), 15),
+                "cofinsAliquotaAdValorem": DataFormatter.format_rate_xml(it["cofins_rate"]),
+                "cofinsAliquotaValorDevido": DataFormatter.format_number(it["cofins_val"], 15),
+                "cofinsAliquotaValorRecolher": DataFormatter.format_number(it["cofins_val"], 15),
 
-                # TRIBUTOS CALCULADOS
+                # TRIBUTOS CALCULADOS (CBS/IBS)
                 "icmsBaseCalculoValor": icms_base_valor,
                 "icmsBaseCalculoAliquota": "01800",
                 "cbsIbsClasstrib": "000001",
@@ -597,27 +561,28 @@ class XMLBuilder:
 # 5. APP
 # ==============================================================================
 
-st.title("Conversor DUIMP V5.0 (Enterprise)")
-st.markdown("Processamento de fluxo contínuo para alta volumetria e extração fiscal precisa.")
+st.title("Conversor DUIMP 6.0 (Enterprise)")
+st.markdown("Motor V6: Leitura física (Sort) e Busca Absoluta de Itens.")
 
 file = st.file_uploader("Upload PDF", type="pdf")
 
 if file:
     if st.button("Gerar XML"):
         try:
-            p = PDFParserV5(file.read())
-            p.preprocess()
-            p.extract_header()
-            p.extract_items()
-            
-            b = XMLBuilder(p)
-            xml = b.build()
-            
-            numero_duimp = p.header.get("numeroDUIMP", "000000").replace("/", "-")
-            nome_arquivo = f"DUIMP_{numero_duimp}.xml"
+            with st.spinner("Processando..."):
+                p = PDFParserV6(file.read())
+                p.preprocess()
+                p.extract_header()
+                p.extract_items()
+                
+                b = XMLBuilder(p)
+                xml = b.build()
+                
+                numero_duimp = p.header.get("numeroDUIMP", "000000").replace("/", "-")
+                nome_arquivo = f"DUIMP_{numero_duimp}.xml"
 
-            st.success(f"Sucesso Total! Processados {len(p.items)} itens com impostos.")
-            st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
+                st.success(f"Processamento Concluído! Encontrados {len(p.items)} itens.")
+                st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
             
         except Exception as e:
-            st.error(f"Erro: {e}")
+            st.error(f"Erro Crítico: {e}")
