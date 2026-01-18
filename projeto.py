@@ -2,17 +2,13 @@ import streamlit as st
 import fitz  # PyMuPDF
 import re
 from lxml import etree
-from datetime import datetime
 
-st.set_page_config(page_title="Conversor DUIMP (Layout Completo)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP (Fornecedor Corrigido)", layout="wide")
 
 # ==============================================================================
-# 1. ESQUELETO MESTRE DE TAGS (Baseado no M-DUIMP-8686868686.xml)
+# 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO - INTACTO)
 # ==============================================================================
-# Esta lista define a ordem exata de gravação. Não altere a ordem.
-
 ADICAO_FIELDS_ORDER = [
-    # Grupo Acrescimo
     {"tag": "acrescimo", "type": "complex", "children": [
         {"tag": "codigoAcrescimo", "default": "17"},
         {"tag": "denominacao", "default": "OUTROS ACRESCIMOS AO VALOR ADUANEIRO"},
@@ -33,13 +29,13 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "cofinsAliquotaValorDevido", "default": "000000000000000"},
     {"tag": "cofinsAliquotaValorRecolher", "default": "000000000000000"},
     {"tag": "condicaoVendaIncoterm", "default": "FCA"},
-    {"tag": "condicaoVendaLocal", "default": ""}, # Do PDF
+    {"tag": "condicaoVendaLocal", "default": ""},
     {"tag": "condicaoVendaMetodoValoracaoCodigo", "default": "01"},
     {"tag": "condicaoVendaMetodoValoracaoNome", "default": "METODO 1 - ART. 1 DO ACORDO (DECRETO 92930/86)"},
     {"tag": "condicaoVendaMoedaCodigo", "default": "978"},
-    {"tag": "condicaoVendaMoedaNome", "default": "EURO/COM.EUROPEIA"}, # Do PDF
-    {"tag": "condicaoVendaValorMoeda", "default": "000000000000000"}, # Do PDF
-    {"tag": "condicaoVendaValorReais", "default": "000000000000000"}, # Do PDF
+    {"tag": "condicaoVendaMoedaNome", "default": "EURO/COM.EUROPEIA"},
+    {"tag": "condicaoVendaValorMoeda", "default": "000000000000000"},
+    {"tag": "condicaoVendaValorReais", "default": "000000000000000"},
     {"tag": "dadosCambiaisCoberturaCambialCodigo", "default": "1"},
     {"tag": "dadosCambiaisCoberturaCambialNome", "default": "COM COBERTURA CAMBIAL E PAGAMENTO FINAL A PRAZO DE ATE' 180"},
     {"tag": "dadosCambiaisInstituicaoFinanciadoraCodigo", "default": "00"},
@@ -48,20 +44,20 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "dadosCambiaisMotivoSemCoberturaNome", "default": "N/I"},
     {"tag": "dadosCambiaisValorRealCambio", "default": "000000000000000"},
     {"tag": "dadosCargaPaisProcedenciaCodigo", "default": "000"},
-    {"tag": "dadosCargaUrfEntradaCodigo", "default": "0000000"}, # Do Header PDF
+    {"tag": "dadosCargaUrfEntradaCodigo", "default": "0000000"},
     {"tag": "dadosCargaViaTransporteCodigo", "default": "01"},
     {"tag": "dadosCargaViaTransporteNome", "default": "MARÍTIMA"},
     {"tag": "dadosMercadoriaAplicacao", "default": "REVENDA"},
     {"tag": "dadosMercadoriaCodigoNaladiNCCA", "default": "0000000"},
     {"tag": "dadosMercadoriaCodigoNaladiSH", "default": "00000000"},
-    {"tag": "dadosMercadoriaCodigoNcm", "default": "00000000"}, # Do PDF
+    {"tag": "dadosMercadoriaCodigoNcm", "default": "00000000"},
     {"tag": "dadosMercadoriaCondicao", "default": "NOVA"},
     {"tag": "dadosMercadoriaDescricaoTipoCertificado", "default": "Sem Certificado"},
     {"tag": "dadosMercadoriaIndicadorTipoCertificado", "default": "1"},
-    {"tag": "dadosMercadoriaMedidaEstatisticaQuantidade", "default": "00000000000000"}, # Do PDF
-    {"tag": "dadosMercadoriaMedidaEstatisticaUnidade", "default": "UNIDADE"}, # Do PDF
+    {"tag": "dadosMercadoriaMedidaEstatisticaQuantidade", "default": "00000000000000"},
+    {"tag": "dadosMercadoriaMedidaEstatisticaUnidade", "default": "UNIDADE"},
     {"tag": "dadosMercadoriaNomeNcm", "default": "DESCRIÇÃO PADRÃO NCM"},
-    {"tag": "dadosMercadoriaPesoLiquido", "default": "000000000000000"}, # Do PDF
+    {"tag": "dadosMercadoriaPesoLiquido", "default": "000000000000000"},
     {"tag": "dcrCoeficienteReducao", "default": "00000"},
     {"tag": "dcrIdentificacao", "default": "00000000"},
     {"tag": "dcrValorDevido", "default": "000000000000000"},
@@ -70,7 +66,7 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "dcrValorRecolher", "default": "000000000000000"},
     {"tag": "fornecedorCidade", "default": ""},
     {"tag": "fornecedorLogradouro", "default": ""},
-    {"tag": "fornecedorNome", "default": "FORNECEDOR ESTRANGEIRO"}, # Do PDF (Exportador)
+    {"tag": "fornecedorNome", "default": ""},
     {"tag": "fornecedorNumero", "default": ""},
     {"tag": "freteMoedaNegociadaCodigo", "default": "978"},
     {"tag": "freteMoedaNegociadaNome", "default": "EURO/COM.EUROPEIA"},
@@ -101,21 +97,20 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "ipiAliquotaValorRecolher", "default": "000000000000000"},
     {"tag": "ipiRegimeTributacaoCodigo", "default": "4"},
     {"tag": "ipiRegimeTributacaoNome", "default": "SEM BENEFICIO"},
-    # Mercadoria (Complex)
     {"tag": "mercadoria", "type": "complex", "children": [
-        {"tag": "descricaoMercadoria", "default": ""}, # Do PDF
+        {"tag": "descricaoMercadoria", "default": ""},
         {"tag": "numeroSequencialItem", "default": "01"},
-        {"tag": "quantidade", "default": "00000000000000"}, # Do PDF
-        {"tag": "unidadeMedida", "default": "UNIDADE"}, # Do PDF
-        {"tag": "valorUnitario", "default": "00000000000000000000"} # Do PDF (20 chars)
+        {"tag": "quantidade", "default": "00000000000000"},
+        {"tag": "unidadeMedida", "default": "UNIDADE"},
+        {"tag": "valorUnitario", "default": "00000000000000000000"}
     ]},
     {"tag": "numeroAdicao", "default": "001"},
-    {"tag": "numeroDUIMP", "default": ""}, # Do PDF
+    {"tag": "numeroDUIMP", "default": ""},
     {"tag": "numeroLI", "default": "0000000000"},
     {"tag": "paisAquisicaoMercadoriaCodigo", "default": "000"},
-    {"tag": "paisAquisicaoMercadoriaNome", "default": ""}, # Do PDF
+    {"tag": "paisAquisicaoMercadoriaNome", "default": ""},
     {"tag": "paisOrigemMercadoriaCodigo", "default": "000"},
-    {"tag": "paisOrigemMercadoriaNome", "default": ""}, # Do PDF
+    {"tag": "paisOrigemMercadoriaNome", "default": ""},
     {"tag": "pisCofinsBaseCalculoAliquotaICMS", "default": "00000"},
     {"tag": "pisCofinsBaseCalculoFundamentoLegalCodigo", "default": "00"},
     {"tag": "pisCofinsBaseCalculoPercentualReducao", "default": "00000"},
@@ -153,11 +148,11 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "valorMultaARecolherAjustado", "default": "000000000000000"},
     {"tag": "valorReaisFreteInternacional", "default": "000000000000000"},
     {"tag": "valorReaisSeguroInternacional", "default": "000000000000000"},
-    {"tag": "valorTotalCondicaoVenda", "default": "00000000000"}, # Do PDF
+    {"tag": "valorTotalCondicaoVenda", "default": "00000000000"},
     {"tag": "vinculoCompradorVendedor", "default": "Não há vinculação entre comprador e vendedor."}
 ]
 
-# Tags de rodapé (fora da adição)
+# Tags de Rodapé
 FOOTER_TAGS = {
     "armazem": {"tag": "nomeArmazem", "default": "TCP"},
     "armazenamentoRecintoAduaneiroCodigo": "9801303",
@@ -166,15 +161,15 @@ FOOTER_TAGS = {
     "canalSelecaoParametrizada": "001",
     "caracterizacaoOperacaoCodigoTipo": "1",
     "caracterizacaoOperacaoDescricaoTipo": "Importação Própria",
-    "cargaDataChegada": "20250115",
+    "cargaDataChegada": "20251120",
     "cargaNumeroAgente": "N/I",
     "cargaPaisProcedenciaCodigo": "386",
-    "cargaPaisProcedenciaNome": "", # Header
-    "cargaPesoBruto": "000000000000000", # Header
-    "cargaPesoLiquido": "000000000000000", # Header
+    "cargaPaisProcedenciaNome": "",
+    "cargaPesoBruto": "000000000000000",
+    "cargaPesoLiquido": "000000000000000",
     "cargaUrfEntradaCodigo": "0917800",
     "cargaUrfEntradaNome": "PORTO DE PARANAGUA",
-    "conhecimentoCargaEmbarqueData": "20250101",
+    "conhecimentoCargaEmbarqueData": "20251025",
     "conhecimentoCargaEmbarqueLocal": "EXTERIOR",
     "conhecimentoCargaId": "CE123456",
     "conhecimentoCargaIdMaster": "CE123456",
@@ -182,12 +177,11 @@ FOOTER_TAGS = {
     "conhecimentoCargaTipoNome": "HBL - House Bill of Lading",
     "conhecimentoCargaUtilizacao": "1",
     "conhecimentoCargaUtilizacaoNome": "Total",
-    "dataDesembaraco": "20250115",
-    "dataRegistro": "20250115",
+    "dataDesembaraco": "20251124",
+    "dataRegistro": "20251124",
     "documentoChegadaCargaCodigoTipo": "1",
     "documentoChegadaCargaNome": "Manifesto da Carga",
-    "documentoChegadaCargaNumero": "1234567890",
-    # Placeholders para listas repetitivas
+    "documentoChegadaCargaNumero": "1625502058594",
     "embalagem": [{"tag": "codigoTipoEmbalagem", "default": "60"}, {"tag": "nomeEmbalagem", "default": "PALLETS"}, {"tag": "quantidadeVolume", "default": "00001"}],
     "freteCollect": "000000000000000",
     "freteEmTerritorioNacional": "000000000000000",
@@ -201,15 +195,15 @@ FOOTER_TAGS = {
     "importadorCodigoTipo": "1",
     "importadorCpfRepresentanteLegal": "00000000000",
     "importadorEnderecoBairro": "CENTRO",
-    "importadorEnderecoCep": "80000000",
+    "importadorEnderecoCep": "00000000",
     "importadorEnderecoComplemento": "",
     "importadorEnderecoLogradouro": "RUA PRINCIPAL",
     "importadorEnderecoMunicipio": "CIDADE",
-    "importadorEnderecoNumero": "100",
+    "importadorEnderecoNumero": "00",
     "importadorEnderecoUf": "PR",
-    "importadorNome": "", # Header
+    "importadorNome": "",
     "importadorNomeRepresentanteLegal": "REPRESENTANTE",
-    "importadorNumero": "", # Header
+    "importadorNumero": "",
     "importadorNumeroTelefone": "0000000000",
     "informacaoComplementar": "Informações extraídas do Extrato DUIMP.",
     "localDescargaTotalDolares": "000000000000000",
@@ -218,9 +212,9 @@ FOOTER_TAGS = {
     "localEmbarqueTotalReais": "000000000000000",
     "modalidadeDespachoCodigo": "1",
     "modalidadeDespachoNome": "Normal",
-    "numeroDUIMP": "", # Header
+    "numeroDUIMP": "",
     "operacaoFundap": "N",
-    "pagamento": [{"tag": "agenciaPagamento", "default": "0000"}, {"tag": "bancoPagamento", "default": "001"}, {"tag": "codigoReceita", "default": "0086"}, {"tag": "valorReceita", "default": "000000000000000"}],
+    "pagamento": [{"tag": "agenciaPagamento", "default": "3715"}, {"tag": "bancoPagamento", "default": "341"}, {"tag": "codigoReceita", "default": "0086"}, {"tag": "valorReceita", "default": "000000000000000"}],
     "seguroMoedaNegociadaCodigo": "220",
     "seguroMoedaNegociadaNome": "DOLAR DOS EUA",
     "seguroTotalDolares": "000000000000000",
@@ -237,31 +231,25 @@ FOOTER_TAGS = {
     "viaTransporteCodigo": "01",
     "viaTransporteMultimodal": "N",
     "viaTransporteNome": "MARÍTIMA",
-    "viaTransporteNomeTransportador": "TRANSPORTE INTERNACIONAL",
-    "viaTransporteNomeVeiculo": "NAVIO PADRAO",
-    "viaTransportePaisTransportadorCodigo": "000",
-    "viaTransportePaisTransportadorNome": "EXTERIOR"
+    "viaTransporteNomeTransportador": "MAERSK A/S",
+    "viaTransporteNomeVeiculo": "MAERSK",
+    "viaTransportePaisTransportadorCodigo": "741",
+    "viaTransportePaisTransportadorNome": "CINGAPURA"
 }
 
 # ==============================================================================
-# 2. UTILS DE FORMATAÇÃO
+# 2. UTILS
 # ==============================================================================
 
 class DataFormatter:
     @staticmethod
     def clean_text(text):
-        """Limpa quebras de linha e espaços duplos."""
         if not text: return ""
-        # Substitui \n por espaço e remove múltiplos espaços
         text = text.replace('\n', ' ').replace('\r', '')
         return re.sub(r'\s+', ' ', text).strip()
 
     @staticmethod
     def format_number(value, length=15):
-        """
-        Formata números removendo pontuação e preenchendo com zeros.
-        Entrada: "1.066,01" -> Saída: "000000000106601"
-        """
         if not value: return "0" * length
         clean = re.sub(r'\D', '', value)
         if not clean: return "0" * length
@@ -272,8 +260,80 @@ class DataFormatter:
         if not value: return "00000000"
         return re.sub(r'\D', '', value)[:8]
 
+    @staticmethod
+    def calculate_cbs_ibs(base_xml_string):
+        try:
+            base_int = int(base_xml_string)
+            base_float = base_int / 100.0
+            
+            cbs_val = base_float * 0.009
+            cbs_str = str(int(round(cbs_val * 100))).zfill(14)
+            
+            ibs_val = base_float * 0.001
+            ibs_str = str(int(round(ibs_val * 100))).zfill(14)
+            
+            return cbs_str, ibs_str
+        except:
+            return "0".zfill(14), "0".zfill(14)
+
+    @staticmethod
+    def parse_supplier_info(raw_name, raw_addr):
+        """
+        Analisa as strings brutas do Fornecedor para extrair Nome, Logradouro, Número e Cidade.
+        Retorna dicionário.
+        """
+        data = {
+            "fornecedorNome": "",
+            "fornecedorLogradouro": "",
+            "fornecedorNumero": "S/N",
+            "fornecedorCidade": ""
+        }
+
+        # 1. Limpar Nome (Remove Código: "CODIGO-NOME")
+        if raw_name:
+            # Pega tudo após o primeiro hífen se existir, senão pega tudo
+            parts = raw_name.split('-', 1)
+            data["fornecedorNome"] = parts[-1].strip() if len(parts) > 1 else raw_name.strip()
+
+        # 2. Analisar Endereço
+        # Formato comum PDF: "RUA X, 123-CIDADE" ou "RUA Y-CIDADE-NUM"
+        if raw_addr:
+            clean_addr = DataFormatter.clean_text(raw_addr)
+            
+            # Tenta separar cidade pelo último traço (comum em NCMs/Endereços de importação)
+            parts_dash = clean_addr.rsplit('-', 1)
+            
+            if len(parts_dash) > 1:
+                # Assume que a última parte é a cidade (ou pais/cidade)
+                data["fornecedorCidade"] = parts_dash[1].strip()
+                street_part = parts_dash[0].strip()
+            else:
+                data["fornecedorCidade"] = "EXTERIOR"
+                street_part = clean_addr
+
+            # Tenta separar Logradouro e Número
+            # Procura por vírgula seguida de números
+            comma_split = street_part.rsplit(',', 1)
+            if len(comma_split) > 1:
+                # "Rua X, 123"
+                data["fornecedorLogradouro"] = comma_split[0].strip()
+                # Tenta limpar o número
+                num_match = re.search(r'\d+', comma_split[1])
+                if num_match:
+                    data["fornecedorNumero"] = num_match.group(0)
+            else:
+                # Se não tem vírgula, tenta achar numero no fim da string
+                num_match = re.search(r'(\d+)$', street_part)
+                if num_match:
+                    data["fornecedorNumero"] = num_match.group(1)
+                    data["fornecedorLogradouro"] = street_part[:num_match.start()].strip()
+                else:
+                    data["fornecedorLogradouro"] = street_part
+
+        return data
+
 # ==============================================================================
-# 3. EXTRAÇÃO DO PDF
+# 3. PARSER
 # ==============================================================================
 
 class PDFParser:
@@ -284,18 +344,15 @@ class PDFParser:
         self.items = []
 
     def preprocess(self):
-        """Lê o PDF e remove cabeçalhos/rodapés antes de processar."""
         clean_lines = []
         for page in self.doc:
             text = page.get_text("text")
             lines = text.split('\n')
             for line in lines:
                 l_strip = line.strip()
-                # Remove linhas de lixo comuns no extrato
                 if "Extrato da DUIMP" in l_strip: continue
                 if "Data, hora e responsável" in l_strip: continue
-                if re.match(r'^\d+\s*/\s*\d+$', l_strip): continue # Pag 1/9
-                if "The following table" in l_strip: continue
+                if re.match(r'^\d+\s*/\s*\d+$', l_strip): continue
                 clean_lines.append(line)
         self.full_text = "\n".join(clean_lines)
 
@@ -310,7 +367,6 @@ class PDFParser:
         self.header["paisProcedencia"] = self._regex(r"País de Procedência:\s*\n?(.+)", txt)
 
     def extract_items(self):
-        # Quebra por "Item 00001"
         chunks = re.split(r"Item\s+(\d{5})", self.full_text)
         if len(chunks) > 1:
             for i in range(1, len(chunks), 2):
@@ -327,7 +383,16 @@ class PDFParser:
                 item["valorTotal"] = self._regex(r"Valor total na condição de venda:\s*([\d\.,]+)", content)
                 item["moeda"] = self._regex(r"Moeda negociada:\s*(.+)", content)
                 
-                # Descrição limpa
+                # --- NOVAS CAPTURAS (FORNECEDOR) ---
+                # Código do Exportador
+                exp_match = re.search(r"Código do Exportador Estrangeiro:\s*(.+?)(?=\n\s*(?:Endereço|Dados))", content, re.DOTALL)
+                item["fornecedor_raw"] = exp_match.group(1).strip() if exp_match else ""
+                
+                # Endereço
+                addr_match = re.search(r"Endereço:\s*(.+?)(?=\n\s*(?:Dados da Mercadoria|Aplicação))", content, re.DOTALL)
+                item["endereco_raw"] = addr_match.group(1).strip() if addr_match else ""
+                # -----------------------------------
+
                 desc_match = re.search(r"Detalhamento do Produto:\s*(.+?)(?=\n\s*(?:Número de Identificação|Versão|Código de Class|Descrição complementar))", content, re.DOTALL)
                 item["descricao"] = desc_match.group(1).strip() if desc_match else ""
                 
@@ -338,7 +403,7 @@ class PDFParser:
         return match.group(1).strip() if match else ""
 
 # ==============================================================================
-# 4. GERADOR XML
+# 4. XML BUILDER
 # ==============================================================================
 
 class XMLBuilder:
@@ -351,12 +416,19 @@ class XMLBuilder:
         h = self.p.header
         duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
 
-        # A. ADIÇÕES
         for it in self.p.items:
             adicao = etree.SubElement(self.duimp, "adicao")
             
-            # Mapa de Valores REAIS extraídos do PDF para este item
-            real_values = {
+            # --- PROCESSAMENTO ---
+            base_total_reais = DataFormatter.format_number(it.get("valorTotal"), 15)
+            icms_base_valor = base_total_reais 
+            cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
+            
+            # Processa dados do fornecedor
+            supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"), it.get("endereco_raw"))
+
+            # Mapa de Valores
+            extracted_map = {
                 "numeroAdicao": it["numeroAdicao"][-3:],
                 "numeroDUIMP": duimp_fmt,
                 "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
@@ -364,8 +436,8 @@ class XMLBuilder:
                 "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "").upper(),
                 "dadosMercadoriaPesoLiquido": DataFormatter.format_number(it.get("pesoLiq"), 15),
                 "condicaoVendaMoedaNome": it.get("moeda", "").upper(),
-                "condicaoVendaValorMoeda": DataFormatter.format_number(it.get("valorTotal"), 15),
-                "condicaoVendaValorReais": DataFormatter.format_number(it.get("valorTotal"), 15), # Placeholder
+                "condicaoVendaValorMoeda": base_total_reais,
+                "condicaoVendaValorReais": base_total_reais,
                 "paisOrigemMercadoriaNome": it.get("paisOrigem", "").upper(),
                 "paisAquisicaoMercadoriaNome": it.get("paisOrigem", "").upper(),
                 "valorTotalCondicaoVenda": DataFormatter.format_number(it.get("valorTotal"), 11),
@@ -373,28 +445,40 @@ class XMLBuilder:
                 "quantidade": DataFormatter.format_number(it.get("quantidade"), 14),
                 "unidadeMedida": it.get("unidade", "").upper(),
                 "valorUnitario": DataFormatter.format_number(it.get("valorUnit"), 20),
-                "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800")
+                "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800"),
+                
+                # --- FORNECEDOR (PREENCHIDO) ---
+                "fornecedorNome": supplier_data["fornecedorNome"][:60], # Limite XML comum
+                "fornecedorLogradouro": supplier_data["fornecedorLogradouro"][:60],
+                "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
+                "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
+
+                # --- TRIBUTOS ---
+                "icmsBaseCalculoValor": icms_base_valor,
+                "icmsBaseCalculoAliquota": "01800",
+                "cbsIbsClasstrib": "000001",
+                "cbsBaseCalculoValor": icms_base_valor,
+                "cbsBaseCalculoAliquota": "00090",
+                "cbsBaseCalculoValorImposto": cbs_imposto,
+                "ibsBaseCalculoValor": icms_base_valor,
+                "ibsBaseCalculoAliquota": "00010",
+                "ibsBaseCalculoValorImposto": ibs_imposto
             }
 
-            # Preencher tags seguindo a ordem MESTRA
+            # Preenchimento XML (Layout Rígido)
             for field in ADICAO_FIELDS_ORDER:
                 tag_name = field["tag"]
-                
-                # 1. Tags Complexas (Aninhadas)
                 if field.get("type") == "complex":
                     parent = etree.SubElement(adicao, tag_name)
                     for child in field["children"]:
-                        child_tag = child["tag"]
-                        child_val = real_values.get(child_tag, child["default"])
-                        etree.SubElement(parent, child_tag).text = child_val
-                
-                # 2. Tags Simples
+                        c_tag = child["tag"]
+                        val = extracted_map.get(c_tag, child["default"])
+                        etree.SubElement(parent, c_tag).text = val
                 else:
-                    val = real_values.get(tag_name, field["default"])
+                    val = extracted_map.get(tag_name, field["default"])
                     etree.SubElement(adicao, tag_name).text = val
 
-        # B. DADOS GERAIS (RODAPÉ)
-        # Preenche com dados do Header PDF ou Defaults
+        # Rodapé
         footer_map = {
             "numeroDUIMP": duimp_fmt,
             "importadorNome": h.get("nomeImportador", ""),
@@ -406,17 +490,13 @@ class XMLBuilder:
         }
 
         for tag, default_val in FOOTER_TAGS.items():
-            # Tags complexas de rodapé (Listas como Pagamento, ICMS)
             if isinstance(default_val, list):
-                # Cria apenas UM elemento da lista como placeholder/exemplo
                 parent = etree.SubElement(self.duimp, tag)
                 for subfield in default_val:
                     etree.SubElement(parent, subfield["tag"]).text = subfield["default"]
-            # Tags complexas simples (Ex: Armazem)
             elif isinstance(default_val, dict):
                 parent = etree.SubElement(self.duimp, tag)
                 etree.SubElement(parent, default_val["tag"]).text = default_val["default"]
-            # Tags simples de rodapé
             else:
                 val = footer_map.get(tag, default_val)
                 etree.SubElement(self.duimp, tag).text = val
@@ -424,16 +504,15 @@ class XMLBuilder:
         return etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=True)
 
 # ==============================================================================
-# 5. INTERFACE
+# 5. APP
 # ==============================================================================
 
-st.title("Conversor DUIMP PDF > XML (Padrão Rigoroso)")
-st.markdown("Garante que TODAS as tags do modelo estejam presentes, preenchendo com zeros onde o PDF não informa.")
+st.title("Conversor DUIMP (Fornecedor + Cálculos)")
 
 file = st.file_uploader("Upload PDF", type="pdf")
 
 if file:
-    if st.button("Converter"):
+    if st.button("Gerar XML"):
         try:
             p = PDFParser(file.read())
             p.preprocess()
@@ -443,9 +522,11 @@ if file:
             b = XMLBuilder(p)
             xml = b.build()
             
-            st.success(f"XML Gerado com {len(p.items)} adições.")
-            st.download_button("Baixar XML", xml, "DUIMP_Completa.xml", "text/xml")
-            st.text_area("Preview", xml.decode(), height=500)
+            numero_duimp = p.header.get("numeroDUIMP", "00000000000").replace("/", "-")
+            nome_arquivo = f"DUIMP_{numero_duimp}.xml"
+
+            st.success(f"Sucesso! {len(p.items)} itens processados.")
+            st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
             
         except Exception as e:
             st.error(f"Erro: {e}")
