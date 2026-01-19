@@ -4,10 +4,10 @@ import re
 from lxml import etree
 import pandas as pd
 
-st.set_page_config(page_title="Conversor DUIMP (Original + Cálculos)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP (Layout Fixo)", layout="wide")
 
 # ==============================================================================
-# 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO - INTACTO)
+# 1. ESQUELETO MESTRE (ADICAO - INTACTO)
 # ==============================================================================
 ADICAO_FIELDS_ORDER = [
     {"tag": "acrescimo", "type": "complex", "children": [
@@ -153,7 +153,8 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "vinculoCompradorVendedor", "default": "Não há vinculação entre comprador e vendedor."}
 ]
 
-# Tags de Rodapé
+# Tags de Rodapé (ORDEM DO SEU CODIGO ORIGINAL PRESERVADA)
+# A tag "pagamento" aqui é um placeholder para marcar a posição.
 FOOTER_TAGS = {
     "armazem": {"tag": "nomeArmazem", "default": "TCP"},
     "armazenamentoRecintoAduaneiroCodigo": "9801303",
@@ -215,8 +216,7 @@ FOOTER_TAGS = {
     "modalidadeDespachoNome": "Normal",
     "numeroDUIMP": "",
     "operacaoFundap": "N",
-    # MANTIDO O PLACEHOLDER PARA MANTER A ORDEM, SERÁ SUBSTITUIDO NO LOOP
-    "pagamento": [{"tag": "agenciaPagamento", "default": "3715"}, {"tag": "bancoPagamento", "default": "341"}, {"tag": "codigoReceita", "default": "0086"}, {"tag": "valorReceita", "default": "000000000000000"}],
+    "pagamento": [], # Placeholder para a lógica dinâmica
     "seguroMoedaNegociadaCodigo": "220",
     "seguroMoedaNegociadaNome": "DOLAR DOS EUA",
     "seguroTotalDolares": "000000000000000",
@@ -262,12 +262,10 @@ class DataFormatter:
         if not value: return "00000000"
         return re.sub(r'\D', '', value)[:8]
 
-    # Formata input de tabela (com ponto) para string XML (sem ponto, zeros a esquerda)
     @staticmethod
     def format_input_fiscal(value, length=15, is_percent=False):
         try:
             val_float = float(value)
-            # Se for 100.00 -> 10000 (reais) ou 18.00 -> 1800 (percentual)
             val_int = int(round(val_float * 100))
             return str(val_int).zfill(length)
         except:
@@ -391,7 +389,7 @@ class PDFParser:
         return match.group(1).strip() if match else ""
 
 # ==============================================================================
-# 4. XML BUILDER (COM CÁLCULO AUTOMÁTICO DE TOTAIS NA ORDEM CORRETA)
+# 4. XML BUILDER (CORRIGIDO PARA O LAYOUT OBRIGATÓRIO DO EXEMPLO)
 # ==============================================================================
 
 class XMLBuilder:
@@ -405,17 +403,9 @@ class XMLBuilder:
         h = self.p.header
         duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
 
-        # --- PASSO 1: CALCULAR TOTAIS ---
-        totals = {
-            "frete": 0.0,
-            "seguro": 0.0,
-            "ii": 0.0,
-            "ipi": 0.0,
-            "pis": 0.0,
-            "cofins": 0.0
-        }
+        # --- CÁLCULO DE TOTAIS ---
+        totals = {"frete": 0.0, "seguro": 0.0, "ii": 0.0, "ipi": 0.0, "pis": 0.0, "cofins": 0.0}
 
-        # Itera sobre os itens para somar valores antes de escrever o XML
         def get_float(val):
             try: return float(val)
             except: return 0.0
@@ -428,48 +418,40 @@ class XMLBuilder:
             totals["pis"] += get_float(it.get("PIS (R$)", 0))
             totals["cofins"] += get_float(it.get("COFINS (R$)", 0))
 
-        # --- PASSO 2: GERAÇÃO DAS ADIÇÕES (ITENS) ---
+        # --- GERAÇÃO DAS ADIÇÕES ---
         for it in self.items_to_use:
             adicao = etree.SubElement(self.duimp, "adicao")
             
-            # --- PREPARAÇÃO DOS DADOS DO ITEM ---
             base_total_reais = DataFormatter.format_number(it.get("valorTotal"), 15)
             
+            # Dados da Tabela
             raw_frete = get_float(it.get("Frete (R$)", 0))
             raw_seguro = get_float(it.get("Seguro (R$)", 0))
             raw_aduaneiro = get_float(it.get("Aduaneiro (R$)", 0))
-            
             raw_ii_val = get_float(it.get("II (R$)", 0))
             raw_ipi_val = get_float(it.get("IPI (R$)", 0))
             raw_pis_val = get_float(it.get("PIS (R$)", 0))
             raw_cofins_val = get_float(it.get("COFINS (R$)", 0))
 
-            # Formatações
+            # Formatação XML
             frete_fmt = DataFormatter.format_input_fiscal(raw_frete)
             seguro_fmt = DataFormatter.format_input_fiscal(raw_seguro)
             aduaneiro_fmt = DataFormatter.format_input_fiscal(raw_aduaneiro)
-
             ii_base_fmt = DataFormatter.format_input_fiscal(it.get("II Base (R$)", 0))
             ii_aliq_fmt = DataFormatter.format_input_fiscal(it.get("II Alíq. (%)", 0), 5, True)
             ii_val_fmt = DataFormatter.format_input_fiscal(raw_ii_val)
-
             ipi_aliq_fmt = DataFormatter.format_input_fiscal(it.get("IPI Alíq. (%)", 0), 5, True)
             ipi_val_fmt = DataFormatter.format_input_fiscal(raw_ipi_val)
-
             pis_base_fmt = DataFormatter.format_input_fiscal(it.get("PIS Base (R$)", 0))
             pis_aliq_fmt = DataFormatter.format_input_fiscal(it.get("PIS Alíq. (%)", 0), 5, True)
             pis_val_fmt = DataFormatter.format_input_fiscal(raw_pis_val)
-
             cofins_aliq_fmt = DataFormatter.format_input_fiscal(it.get("COFINS Alíq. (%)", 0), 5, True)
             cofins_val_fmt = DataFormatter.format_input_fiscal(raw_cofins_val)
 
-            # Lógica CBS/IBS
             icms_base_valor = ii_base_fmt if int(ii_base_fmt) > 0 else base_total_reais
             cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
-            
             supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"), it.get("endereco_raw"))
 
-            # Mapa de Valores (Extração)
             extracted_map = {
                 "numeroAdicao": str(it["numeroAdicao"])[-3:],
                 "numeroDUIMP": duimp_fmt,
@@ -488,33 +470,26 @@ class XMLBuilder:
                 "unidadeMedida": it.get("unidade", "").upper(),
                 "valorUnitario": DataFormatter.format_number(it.get("valorUnit"), 20),
                 "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800"),
-                
                 "fornecedorNome": supplier_data["fornecedorNome"][:60],
                 "fornecedorLogradouro": supplier_data["fornecedorLogradouro"][:60],
                 "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
                 "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
-
                 "freteValorReais": frete_fmt,
                 "seguroValorReais": seguro_fmt,
-                
                 "iiBaseCalculo": ii_base_fmt,
                 "iiAliquotaAdValorem": ii_aliq_fmt,
                 "iiAliquotaValorDevido": ii_val_fmt,
                 "iiAliquotaValorRecolher": ii_val_fmt,
-
                 "ipiAliquotaAdValorem": ipi_aliq_fmt,
                 "ipiAliquotaValorDevido": ipi_val_fmt,
                 "ipiAliquotaValorRecolher": ipi_val_fmt,
-
                 "pisCofinsBaseCalculoValor": pis_base_fmt,
                 "pisPasepAliquotaAdValorem": pis_aliq_fmt,
                 "pisPasepAliquotaValorDevido": pis_val_fmt,
                 "pisPasepAliquotaValorRecolher": pis_val_fmt,
-
                 "cofinsAliquotaAdValorem": cofins_aliq_fmt,
                 "cofinsAliquotaValorDevido": cofins_val_fmt,
                 "cofinsAliquotaValorRecolher": cofins_val_fmt,
-
                 "icmsBaseCalculoValor": icms_base_valor,
                 "icmsBaseCalculoAliquota": "01800",
                 "cbsIbsClasstrib": "000001",
@@ -538,9 +513,9 @@ class XMLBuilder:
                     val = extracted_map.get(tag_name, field["default"])
                     etree.SubElement(adicao, tag_name).text = val
 
-        # --- PASSO 3: GERAÇÃO DO RODAPÉ (INJETANDO TOTAIS NA ORDEM CORRETA) ---
+        # --- RODAPÉ (PRESERVANDO ORDEM RIGOROSA) ---
         
-        # Preparar mapa de valores calculados para substituir no footer
+        # Mapa para atualizar valores calculados
         footer_map = {
             "numeroDUIMP": duimp_fmt,
             "importadorNome": h.get("nomeImportador", ""),
@@ -553,7 +528,6 @@ class XMLBuilder:
             "seguroTotalReais": DataFormatter.format_input_fiscal(totals["seguro"]),
         }
 
-        # Códigos de receita para gerar pagamentos dinâmicos
         receita_codes = [
             {"code": "0086", "val": totals["ii"]},
             {"code": "1038", "val": totals["ipi"]},
@@ -561,12 +535,11 @@ class XMLBuilder:
             {"code": "5629", "val": totals["cofins"]}
         ]
 
-        # LOOP RIGIDO QUE GARANTE A ORDEM DO XML
+        # LOOP PRINCIPAL DO RODAPÉ
         for tag, default_val in FOOTER_TAGS.items():
             
-            # --- INTERCEPTAÇÃO ESPECIAL PARA A TAG 'PAGAMENTO' ---
+            # BLOCO DE PAGAMENTO DINÂMICO (NOVO LAYOUT CORRIGIDO)
             if tag == "pagamento":
-                # Em vez de usar o default_val, gera 4 tags dinâmicas SE houver valor > 0
                 for rec in receita_codes:
                     if rec["val"] > 0:
                         pag = etree.SubElement(self.duimp, "pagamento")
@@ -574,15 +547,16 @@ class XMLBuilder:
                         etree.SubElement(pag, "bancoPagamento").text = "341"
                         etree.SubElement(pag, "codigoReceita").text = rec["code"]
                         etree.SubElement(pag, "codigoTipoPagamento").text = "1"
-                        etree.SubElement(pag, "dataPagamento").text = "20251124" # Pode ser parametrizado
+                        etree.SubElement(pag, "contaPagamento").text = "316273" # Exemplo do XML
+                        etree.SubElement(pag, "dataPagamento").text = "20251124"
                         etree.SubElement(pag, "nomeTipoPagamento").text = "Débito em Conta"
                         etree.SubElement(pag, "numeroRetificacao").text = "00"
                         etree.SubElement(pag, "valorJurosEncargos").text = "000000000"
                         etree.SubElement(pag, "valorMulta").text = "000000000"
                         etree.SubElement(pag, "valorReceita").text = DataFormatter.format_input_fiscal(rec["val"])
-                continue # Pula a geração padrão desta tag para não duplicar
+                continue
 
-            # GERAÇÃO PADRÃO DAS OUTRAS TAGS DO RODAPÉ
+            # GERAÇÃO PADRÃO
             if isinstance(default_val, list):
                 parent = etree.SubElement(self.duimp, tag)
                 for subfield in default_val:
@@ -597,10 +571,10 @@ class XMLBuilder:
         return etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=True)
 
 # ==============================================================================
-# 5. APP (INTERFACE STREAMLIT)
+# 5. APP
 # ==============================================================================
 
-st.title("Conversor DUIMP (Fornecedor Corrigido)")
+st.title("Conversor DUIMP (Fiscal + Layout Exato)")
 
 if "parsed_data" not in st.session_state:
     st.session_state["parsed_data"] = None
@@ -662,7 +636,7 @@ if file:
                 numero_duimp = p.header.get("numeroDUIMP", "00000000000").replace("/", "-")
                 nome_arquivo = f"DUIMP_{numero_duimp}.xml"
 
-                st.success(f"Sucesso! {len(p.items)} itens processados e totais calculados na ordem correta.")
+                st.success(f"Sucesso! {len(p.items)} itens processados e pagamentos calculados.")
                 st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
                 
             except Exception as e:
