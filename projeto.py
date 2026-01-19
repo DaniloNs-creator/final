@@ -2,8 +2,9 @@ import streamlit as st
 import fitz  # PyMuPDF
 import re
 from lxml import etree
+import pandas as pd  # NOVA IMPORTAÇÃO NECESSÁRIA
 
-st.set_page_config(page_title="Conversor DUIMP (Fornecedor Corrigido)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP (Fornecedor + Fiscal)", layout="wide")
 
 # ==============================================================================
 # 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO - INTACTO)
@@ -251,9 +252,35 @@ class DataFormatter:
     @staticmethod
     def format_number(value, length=15):
         if not value: return "0" * length
-        clean = re.sub(r'\D', '', value)
+        clean = re.sub(r'\D', '', str(value))
         if not clean: return "0" * length
         return clean.zfill(length)
+
+    @staticmethod
+    def format_currency_input(value, length=15):
+        """Converte float/string da tabela (ex: 100.50) para formato XML (000...010050)"""
+        try:
+            if isinstance(value, str):
+                value = value.replace(',', '.')
+            val_float = float(value)
+            # Multiplica por 100 para remover casas decimais
+            val_int = int(round(val_float * 100))
+            return str(val_int).zfill(length)
+        except:
+            return "0" * length
+
+    @staticmethod
+    def format_percent_input(value, length=5):
+        """Converte percentual da tabela (ex: 18.0) para formato XML (01800)"""
+        try:
+            if isinstance(value, str):
+                value = value.replace(',', '.')
+            val_float = float(value)
+            # Multiplica por 100 (ex: 9.65 -> 965, 18.0 -> 1800)
+            val_int = int(round(val_float * 100))
+            return str(val_int).zfill(length)
+        except:
+            return "0" * length
 
     @staticmethod
     def format_ncm(value):
@@ -278,10 +305,6 @@ class DataFormatter:
 
     @staticmethod
     def parse_supplier_info(raw_name, raw_addr):
-        """
-        Analisa as strings brutas do Fornecedor para extrair Nome, Logradouro, Número e Cidade.
-        Retorna dicionário.
-        """
         data = {
             "fornecedorNome": "",
             "fornecedorLogradouro": "",
@@ -289,40 +312,28 @@ class DataFormatter:
             "fornecedorCidade": ""
         }
 
-        # 1. Limpar Nome (Remove Código: "CODIGO-NOME")
         if raw_name:
-            # Pega tudo após o primeiro hífen se existir, senão pega tudo
             parts = raw_name.split('-', 1)
             data["fornecedorNome"] = parts[-1].strip() if len(parts) > 1 else raw_name.strip()
 
-        # 2. Analisar Endereço
-        # Formato comum PDF: "RUA X, 123-CIDADE" ou "RUA Y-CIDADE-NUM"
         if raw_addr:
             clean_addr = DataFormatter.clean_text(raw_addr)
-            
-            # Tenta separar cidade pelo último traço (comum em NCMs/Endereços de importação)
             parts_dash = clean_addr.rsplit('-', 1)
             
             if len(parts_dash) > 1:
-                # Assume que a última parte é a cidade (ou pais/cidade)
                 data["fornecedorCidade"] = parts_dash[1].strip()
                 street_part = parts_dash[0].strip()
             else:
                 data["fornecedorCidade"] = "EXTERIOR"
                 street_part = clean_addr
 
-            # Tenta separar Logradouro e Número
-            # Procura por vírgula seguida de números
             comma_split = street_part.rsplit(',', 1)
             if len(comma_split) > 1:
-                # "Rua X, 123"
                 data["fornecedorLogradouro"] = comma_split[0].strip()
-                # Tenta limpar o número
                 num_match = re.search(r'\d+', comma_split[1])
                 if num_match:
                     data["fornecedorNumero"] = num_match.group(0)
             else:
-                # Se não tem vírgula, tenta achar numero no fim da string
                 num_match = re.search(r'(\d+)$', street_part)
                 if num_match:
                     data["fornecedorNumero"] = num_match.group(1)
@@ -384,11 +395,9 @@ class PDFParser:
                 item["moeda"] = self._regex(r"Moeda negociada:\s*(.+)", content)
                 
                 # --- NOVAS CAPTURAS (FORNECEDOR) ---
-                # Código do Exportador
                 exp_match = re.search(r"Código do Exportador Estrangeiro:\s*(.+?)(?=\n\s*(?:Endereço|Dados))", content, re.DOTALL)
                 item["fornecedor_raw"] = exp_match.group(1).strip() if exp_match else ""
                 
-                # Endereço
                 addr_match = re.search(r"Endereço:\s*(.+?)(?=\n\s*(?:Dados da Mercadoria|Aplicação))", content, re.DOTALL)
                 item["endereco_raw"] = addr_match.group(1).strip() if addr_match else ""
                 # -----------------------------------
@@ -407,8 +416,10 @@ class PDFParser:
 # ==============================================================================
 
 class XMLBuilder:
-    def __init__(self, parser):
+    def __init__(self, parser, edited_items=None):
         self.p = parser
+        # Se houver itens editados manualmente, usa eles. Se não, usa os parseados.
+        self.items_to_use = edited_items if edited_items else self.p.items
         self.root = etree.Element("ListaDeclaracoes")
         self.duimp = etree.SubElement(self.root, "duimp")
 
@@ -416,28 +427,53 @@ class XMLBuilder:
         h = self.p.header
         duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
 
-        for it in self.p.items:
+        for it in self.items_to_use:
             adicao = etree.SubElement(self.duimp, "adicao")
             
             # --- PROCESSAMENTO ---
+            # Usa o valor total original para calculos base se não houver input manual
             base_total_reais = DataFormatter.format_number(it.get("valorTotal"), 15)
-            icms_base_valor = base_total_reais 
+            
+            # Se o usuário preencheu "II Base (R$)", usa para o ICMS também, senão usa o total.
+            # Nota: O input manual vem no dict `it` como float/string, precisamos formatar
+            
+            # Formatações Específicas dos Inputs Manuais
+            val_frete = DataFormatter.format_currency_input(it.get("input_frete", 0))
+            val_seguro = DataFormatter.format_currency_input(it.get("input_seguro", 0))
+            val_aduaneiro = DataFormatter.format_currency_input(it.get("input_aduaneiro", 0))
+            
+            val_ii_base = DataFormatter.format_currency_input(it.get("input_ii_base", 0))
+            val_ii_aliq = DataFormatter.format_percent_input(it.get("input_ii_aliq", 0))
+            val_ii_devido = DataFormatter.format_currency_input(it.get("input_ii_val", 0))
+            
+            val_ipi_aliq = DataFormatter.format_percent_input(it.get("input_ipi_aliq", 0))
+            val_ipi_devido = DataFormatter.format_currency_input(it.get("input_ipi_val", 0))
+            
+            val_pis_base = DataFormatter.format_currency_input(it.get("input_pis_base", 0))
+            val_pis_aliq = DataFormatter.format_percent_input(it.get("input_pis_aliq", 0))
+            val_pis_devido = DataFormatter.format_currency_input(it.get("input_pis_val", 0))
+            
+            val_cofins_aliq = DataFormatter.format_percent_input(it.get("input_cofins_aliq", 0))
+            val_cofins_devido = DataFormatter.format_currency_input(it.get("input_cofins_val", 0))
+
+            # Lógica CBS/IBS (mantida)
+            icms_base_valor = val_ii_base if int(val_ii_base) > 0 else base_total_reais
             cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
             
-            # Processa dados do fornecedor
             supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"), it.get("endereco_raw"))
 
             # Mapa de Valores
             extracted_map = {
-                "numeroAdicao": it["numeroAdicao"][-3:],
+                "numeroAdicao": str(it["numeroAdicao"])[-3:], # garante string
                 "numeroDUIMP": duimp_fmt,
                 "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
                 "dadosMercadoriaMedidaEstatisticaQuantidade": DataFormatter.format_number(it.get("quantidade"), 14),
                 "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "").upper(),
-                "dadosMercadoriaPesoLiquido": DataFormatter.format_number(it.get("pesoLiq"), 15),
+                "dadosMercadoriaMedidaEstatisticaPesoLiquido": DataFormatter.format_number(it.get("pesoLiq"), 15),
                 "condicaoVendaMoedaNome": it.get("moeda", "").upper(),
                 "condicaoVendaValorMoeda": base_total_reais,
-                "condicaoVendaValorReais": base_total_reais,
+                # Se Aduaneiro preenchido, usa ele, senão usa total
+                "condicaoVendaValorReais": val_aduaneiro if int(val_aduaneiro) > 0 else base_total_reais,
                 "paisOrigemMercadoriaNome": it.get("paisOrigem", "").upper(),
                 "paisAquisicaoMercadoriaNome": it.get("paisOrigem", "").upper(),
                 "valorTotalCondicaoVenda": DataFormatter.format_number(it.get("valorTotal"), 11),
@@ -447,13 +483,39 @@ class XMLBuilder:
                 "valorUnitario": DataFormatter.format_number(it.get("valorUnit"), 20),
                 "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800"),
                 
-                # --- FORNECEDOR (PREENCHIDO) ---
-                "fornecedorNome": supplier_data["fornecedorNome"][:60], # Limite XML comum
+                # --- FORNECEDOR ---
+                "fornecedorNome": supplier_data["fornecedorNome"][:60],
                 "fornecedorLogradouro": supplier_data["fornecedorLogradouro"][:60],
                 "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
                 "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
 
-                # --- TRIBUTOS ---
+                # --- CAMPOS FISCAIS INJETADOS ---
+                "freteValorReais": val_frete,
+                "seguroValorReais": val_seguro,
+                
+                # II
+                "iiBaseCalculo": val_ii_base,
+                "iiAliquotaAdValorem": val_ii_aliq,
+                "iiAliquotaValorDevido": val_ii_devido,
+                "iiAliquotaValorRecolher": val_ii_devido, # Assume igual devido
+                
+                # IPI
+                "ipiAliquotaAdValorem": val_ipi_aliq,
+                "ipiAliquotaValorDevido": val_ipi_devido,
+                "ipiAliquotaValorRecolher": val_ipi_devido,
+                
+                # PIS
+                "pisCofinsBaseCalculoValor": val_pis_base, # Base compartilhada PIS/COFINS
+                "pisPasepAliquotaAdValorem": val_pis_aliq,
+                "pisPasepAliquotaValorDevido": val_pis_devido,
+                "pisPasepAliquotaValorRecolher": val_pis_devido,
+                
+                # COFINS
+                "cofinsAliquotaAdValorem": val_cofins_aliq,
+                "cofinsAliquotaValorDevido": val_cofins_devido,
+                "cofinsAliquotaValorRecolher": val_cofins_devido,
+
+                # TRIBUTOS CBS/IBS
                 "icmsBaseCalculoValor": icms_base_valor,
                 "icmsBaseCalculoAliquota": "01800",
                 "cbsIbsClasstrib": "000001",
@@ -486,7 +548,7 @@ class XMLBuilder:
             "cargaPesoBruto": DataFormatter.format_number(h.get("pesoBruto"), 15),
             "cargaPesoLiquido": DataFormatter.format_number(h.get("pesoLiquido"), 15),
             "cargaPaisProcedenciaNome": h.get("paisProcedencia", "").upper(),
-            "totalAdicoes": str(len(self.p.items)).zfill(3)
+            "totalAdicoes": str(len(self.items_to_use)).zfill(3)
         }
 
         for tag, default_val in FOOTER_TAGS.items():
@@ -507,26 +569,110 @@ class XMLBuilder:
 # 5. APP
 # ==============================================================================
 
-st.title("Conversor DUIMP (Fornecedor + Cálculos)")
+st.title("Conversor DUIMP (Com Edição Fiscal)")
+
+# Gerenciamento de Estado para persistir os dados entre interações
+if 'parsed_items' not in st.session_state:
+    st.session_state.parsed_items = None
+if 'pdf_parser' not in st.session_state:
+    st.session_state.pdf_parser = None
 
 file = st.file_uploader("Upload PDF", type="pdf")
 
 if file:
-    if st.button("Gerar XML"):
+    # Se for um novo arquivo, reseta e processa
+    if st.session_state.pdf_parser is None:
         try:
             p = PDFParser(file.read())
             p.preprocess()
             p.extract_header()
             p.extract_items()
-            
-            b = XMLBuilder(p)
-            xml = b.build()
-            
-            numero_duimp = p.header.get("numeroDUIMP", "00000000000").replace("/", "-")
-            nome_arquivo = f"DUIMP_{numero_duimp}.xml"
-
-            st.success(f"Sucesso! {len(p.items)} itens processados.")
-            st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
-            
+            st.session_state.pdf_parser = p
+            st.session_state.parsed_items = p.items
         except Exception as e:
-            st.error(f"Erro: {e}")
+            st.error(f"Erro ao ler PDF: {e}")
+
+    # Se já temos itens processados, mostramos a tabela de edição
+    if st.session_state.parsed_items:
+        st.subheader("Preenchimento Obrigatório dos Campos Fiscais")
+        st.info("Preencha os valores abaixo (Use ponto para decimais, ex: 100.50).")
+        
+        # Cria DataFrame para edição
+        df = pd.DataFrame(st.session_state.parsed_items)
+        
+        # Define as colunas que queremos editar (inicializadas com 0.0)
+        # Mapeando a tabela que você pediu
+        edit_columns = [
+            "numeroAdicao", "input_aduaneiro", "input_frete", "input_seguro", 
+            "input_ii_val", "input_ipi_val", "input_pis_val", "input_cofins_val",
+            "input_ii_base", "input_ii_aliq", 
+            "input_ipi_base", "input_ipi_aliq",
+            "input_pis_base", "input_pis_aliq", 
+            "input_cofins_base", "input_cofins_aliq"
+        ]
+        
+        # Inicializa colunas se não existirem
+        for col in edit_columns:
+            if col not in df.columns:
+                df[col] = 0.0
+
+        # Renomeia colunas para ficar igual sua imagem na visualização
+        column_config = {
+            "numeroAdicao": st.column_config.TextColumn("Item", disabled=True),
+            "input_aduaneiro": st.column_config.NumberColumn("Aduaneiro (R$)", format="%.2f"),
+            "input_frete": st.column_config.NumberColumn("Frete (R$)", format="%.2f"),
+            "input_seguro": st.column_config.NumberColumn("Seguro (R$)", format="%.2f"),
+            "input_ii_val": st.column_config.NumberColumn("II (R$)", format="%.2f"),
+            "input_ipi_val": st.column_config.NumberColumn("IPI (R$)", format="%.2f"),
+            "input_pis_val": st.column_config.NumberColumn("PIS (R$)", format="%.2f"),
+            "input_cofins_val": st.column_config.NumberColumn("COFINS (R$)", format="%.2f"),
+            "input_ii_base": st.column_config.NumberColumn("II Base (R$)", format="%.2f"),
+            "input_ii_aliq": st.column_config.NumberColumn("II Alíq (%)", format="%.2f"),
+            "input_ipi_base": st.column_config.NumberColumn("IPI Base (R$)", format="%.2f"), # Apenas visual, XML não tem tag especifica de base IPI na lista, mas usaremos para logica se precisar
+            "input_ipi_aliq": st.column_config.NumberColumn("IPI Alíq (%)", format="%.2f"),
+            "input_pis_base": st.column_config.NumberColumn("PIS Base (R$)", format="%.2f"),
+            "input_pis_aliq": st.column_config.NumberColumn("PIS Alíq (%)", format="%.2f"),
+            "input_cofins_base": st.column_config.NumberColumn("COFINS Base (R$)", format="%.2f"),
+            "input_cofins_aliq": st.column_config.NumberColumn("COFINS Alíq (%)", format="%.2f"),
+        }
+
+        # Exibe editor
+        edited_df = st.data_editor(
+            df[edit_columns], 
+            hide_index=True, 
+            column_config=column_config,
+            num_rows="fixed"
+        )
+
+        st.divider()
+
+        if st.button("Gerar XML Final"):
+            try:
+                # Atualiza a lista de itens com os dados do DataFrame editado
+                # Precisamos mesclar os dados originais (descrição, ncm, etc) com os novos inputs
+                
+                # Converte o DF editado para lista de dicts
+                edited_records = edited_df.to_dict('records')
+                
+                # Mescla
+                final_items = []
+                for original, edited in zip(st.session_state.parsed_items, edited_records):
+                    merged = {**original, **edited} # Atualiza original com inputs
+                    final_items.append(merged)
+
+                # Gera XML com os dados mesclados
+                b = XMLBuilder(st.session_state.pdf_parser, edited_items=final_items)
+                xml = b.build()
+                
+                numero_duimp = st.session_state.pdf_parser.header.get("numeroDUIMP", "00000000000").replace("/", "-")
+                nome_arquivo = f"DUIMP_{numero_duimp}_CORRIGIDO.xml"
+
+                st.success(f"XML Gerado com Sucesso! {len(final_items)} itens processados com dados fiscais.")
+                st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
+                
+            except Exception as e:
+                st.error(f"Erro ao gerar XML: {e}")
+else:
+    # Reseta se remover arquivo
+    st.session_state.parsed_items = None
+    st.session_state.pdf_parser = None
