@@ -2,12 +2,12 @@ import streamlit as st
 import fitz  # PyMuPDF
 import re
 from lxml import etree
-import pandas as pd # ÚNICA BIBLIOTECA EXTRA NECESSÁRIA
+import pandas as pd
 
-st.set_page_config(page_title="Conversor DUIMP (Fornecedor Corrigido)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP (Fiscal + Totais)", layout="wide")
 
 # ==============================================================================
-# 1. ESQUELETO MESTRE (SEU LAYOUT ORIGINAL - INTACTO)
+# 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO)
 # ==============================================================================
 ADICAO_FIELDS_ORDER = [
     {"tag": "acrescimo", "type": "complex", "children": [
@@ -261,7 +261,7 @@ class DataFormatter:
         if not value: return "00000000"
         return re.sub(r'\D', '', value)[:8]
 
-    # ADIÇÃO PEQUENA: Função para tratar os inputs da tabela (que vem com ponto)
+    # Formata input de tabela (com ponto) para string XML (sem ponto, zeros a esquerda)
     @staticmethod
     def format_input_fiscal(value, length=15, is_percent=False):
         try:
@@ -390,12 +390,15 @@ class PDFParser:
         return match.group(1).strip() if match else ""
 
 # ==============================================================================
-# 4. XML BUILDER
+# 4. XML BUILDER (COM CÁLCULO AUTOMÁTICO DE TOTAIS)
 # ==============================================================================
 
 class XMLBuilder:
-    def __init__(self, parser):
+    def __init__(self, parser, edited_items=None):
         self.p = parser
+        # Se houver itens editados manualmente (pela tabela), usa eles.
+        # Caso contrário, usa os itens originais do PDF.
+        self.items_to_use = edited_items if edited_items else self.p.items
         self.root = etree.Element("ListaDeclaracoes")
         self.duimp = etree.SubElement(self.root, "duimp")
 
@@ -403,40 +406,72 @@ class XMLBuilder:
         h = self.p.header
         duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
 
-        for it in self.p.items:
+        # --- VARIÁVEIS ACUMULADORAS (PARA O RODAPÉ) ---
+        totals = {
+            "frete": 0.0,
+            "seguro": 0.0,
+            "ii": 0.0,
+            "ipi": 0.0,
+            "pis": 0.0,
+            "cofins": 0.0
+        }
+
+        # --- GERAÇÃO DAS ADIÇÕES (ITENS) ---
+        for it in self.items_to_use:
             adicao = etree.SubElement(self.duimp, "adicao")
             
-            # --- PROCESSAMENTO ---
+            # --- PREPARAÇÃO DOS DADOS ---
             base_total_reais = DataFormatter.format_number(it.get("valorTotal"), 15)
-            icms_base_valor = base_total_reais 
+            
+            # Função auxiliar para garantir float para soma matemática
+            def get_float(val):
+                try: return float(val)
+                except: return 0.0
+
+            raw_frete = get_float(it.get("Frete (R$)", 0))
+            raw_seguro = get_float(it.get("Seguro (R$)", 0))
+            raw_aduaneiro = get_float(it.get("Aduaneiro (R$)", 0))
+            
+            raw_ii_val = get_float(it.get("II (R$)", 0))
+            raw_ipi_val = get_float(it.get("IPI (R$)", 0))
+            raw_pis_val = get_float(it.get("PIS (R$)", 0))
+            raw_cofins_val = get_float(it.get("COFINS (R$)", 0))
+
+            # --- SOMA NOS TOTAIS ---
+            totals["frete"] += raw_frete
+            totals["seguro"] += raw_seguro
+            totals["ii"] += raw_ii_val
+            totals["ipi"] += raw_ipi_val
+            totals["pis"] += raw_pis_val
+            totals["cofins"] += raw_cofins_val
+
+            # --- FORMATAÇÃO PARA XML (STRING SEM PONTO) ---
+            frete_fmt = DataFormatter.format_input_fiscal(raw_frete)
+            seguro_fmt = DataFormatter.format_input_fiscal(raw_seguro)
+            aduaneiro_fmt = DataFormatter.format_input_fiscal(raw_aduaneiro)
+
+            ii_base_fmt = DataFormatter.format_input_fiscal(it.get("II Base (R$)", 0))
+            ii_aliq_fmt = DataFormatter.format_input_fiscal(it.get("II Alíq. (%)", 0), 5, True)
+            ii_val_fmt = DataFormatter.format_input_fiscal(raw_ii_val)
+
+            ipi_aliq_fmt = DataFormatter.format_input_fiscal(it.get("IPI Alíq. (%)", 0), 5, True)
+            ipi_val_fmt = DataFormatter.format_input_fiscal(raw_ipi_val)
+
+            pis_base_fmt = DataFormatter.format_input_fiscal(it.get("PIS Base (R$)", 0))
+            pis_aliq_fmt = DataFormatter.format_input_fiscal(it.get("PIS Alíq. (%)", 0), 5, True)
+            pis_val_fmt = DataFormatter.format_input_fiscal(raw_pis_val)
+
+            cofins_aliq_fmt = DataFormatter.format_input_fiscal(it.get("COFINS Alíq. (%)", 0), 5, True)
+            cofins_val_fmt = DataFormatter.format_input_fiscal(raw_cofins_val)
+
+            # Lógica CBS/IBS (Mantida)
+            icms_base_valor = ii_base_fmt if int(ii_base_fmt) > 0 else base_total_reais
             cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
             
             supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"), it.get("endereco_raw"))
 
-            # --- AQUI ESTA A LOGICA NOVA: SE TIVER INPUT MANUAL, USA, SE NAO, USA ZERO ---
-            # Valores Fiscais da Tabela (Se existirem no dict 'it')
-            frete_reais = DataFormatter.format_input_fiscal(it.get("Frete (R$)", 0))
-            seguro_reais = DataFormatter.format_input_fiscal(it.get("Seguro (R$)", 0))
-            aduaneiro_reais = DataFormatter.format_input_fiscal(it.get("Aduaneiro (R$)", 0))
-            
-            # Impostos (Base, Aliquota, Valor)
-            ii_base = DataFormatter.format_input_fiscal(it.get("II Base (R$)", 0))
-            ii_aliq = DataFormatter.format_input_fiscal(it.get("II Alíq. (%)", 0), 5, True)
-            ii_val = DataFormatter.format_input_fiscal(it.get("II (R$)", 0))
-
-            ipi_aliq = DataFormatter.format_input_fiscal(it.get("IPI Alíq. (%)", 0), 5, True)
-            ipi_val = DataFormatter.format_input_fiscal(it.get("IPI (R$)", 0))
-
-            pis_base = DataFormatter.format_input_fiscal(it.get("PIS Base (R$)", 0))
-            pis_aliq = DataFormatter.format_input_fiscal(it.get("PIS Alíq. (%)", 0), 5, True)
-            pis_val = DataFormatter.format_input_fiscal(it.get("PIS (R$)", 0))
-
-            cofins_aliq = DataFormatter.format_input_fiscal(it.get("COFINS Alíq. (%)", 0), 5, True)
-            cofins_val = DataFormatter.format_input_fiscal(it.get("COFINS (R$)", 0))
-            # --------------------------------------------------------------------------
-
             extracted_map = {
-                "numeroAdicao": it["numeroAdicao"][-3:],
+                "numeroAdicao": str(it["numeroAdicao"])[-3:],
                 "numeroDUIMP": duimp_fmt,
                 "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
                 "dadosMercadoriaMedidaEstatisticaQuantidade": DataFormatter.format_number(it.get("quantidade"), 14),
@@ -444,8 +479,7 @@ class XMLBuilder:
                 "dadosMercadoriaPesoLiquido": DataFormatter.format_number(it.get("pesoLiq"), 15),
                 "condicaoVendaMoedaNome": it.get("moeda", "").upper(),
                 "condicaoVendaValorMoeda": base_total_reais,
-                # Se aduaneiro foi preenchido, usa ele, senão usa o total padrão
-                "condicaoVendaValorReais": aduaneiro_reais if int(aduaneiro_reais) > 0 else base_total_reais,
+                "condicaoVendaValorReais": aduaneiro_fmt if int(aduaneiro_fmt) > 0 else base_total_reais,
                 "paisOrigemMercadoriaNome": it.get("paisOrigem", "").upper(),
                 "paisAquisicaoMercadoriaNome": it.get("paisOrigem", "").upper(),
                 "valorTotalCondicaoVenda": DataFormatter.format_number(it.get("valorTotal"), 11),
@@ -460,32 +494,27 @@ class XMLBuilder:
                 "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
                 "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
 
-                # --- MAPEAMENTO DOS NOVOS CAMPOS FISCAIS ---
-                "freteValorReais": frete_reais,
-                "seguroValorReais": seguro_reais,
+                # --- INSERÇÃO DOS VALORES FORMATADOS ---
+                "freteValorReais": frete_fmt,
+                "seguroValorReais": seguro_fmt,
                 
-                # II
-                "iiBaseCalculo": ii_base,
-                "iiAliquotaAdValorem": ii_aliq,
-                "iiAliquotaValorDevido": ii_val,
-                "iiAliquotaValorRecolher": ii_val,
+                "iiBaseCalculo": ii_base_fmt,
+                "iiAliquotaAdValorem": ii_aliq_fmt,
+                "iiAliquotaValorDevido": ii_val_fmt,
+                "iiAliquotaValorRecolher": ii_val_fmt,
 
-                # IPI
-                "ipiAliquotaAdValorem": ipi_aliq,
-                "ipiAliquotaValorDevido": ipi_val,
-                "ipiAliquotaValorRecolher": ipi_val,
+                "ipiAliquotaAdValorem": ipi_aliq_fmt,
+                "ipiAliquotaValorDevido": ipi_val_fmt,
+                "ipiAliquotaValorRecolher": ipi_val_fmt,
 
-                # PIS
-                "pisCofinsBaseCalculoValor": pis_base,
-                "pisPasepAliquotaAdValorem": pis_aliq,
-                "pisPasepAliquotaValorDevido": pis_val,
-                "pisPasepAliquotaValorRecolher": pis_val,
+                "pisCofinsBaseCalculoValor": pis_base_fmt,
+                "pisPasepAliquotaAdValorem": pis_aliq_fmt,
+                "pisPasepAliquotaValorDevido": pis_val_fmt,
+                "pisPasepAliquotaValorRecolher": pis_val_fmt,
 
-                # COFINS
-                "cofinsAliquotaAdValorem": cofins_aliq,
-                "cofinsAliquotaValorDevido": cofins_val,
-                "cofinsAliquotaValorRecolher": cofins_val,
-                # -------------------------------------------
+                "cofinsAliquotaAdValorem": cofins_aliq_fmt,
+                "cofinsAliquotaValorDevido": cofins_val_fmt,
+                "cofinsAliquotaValorRecolher": cofins_val_fmt,
 
                 "icmsBaseCalculoValor": icms_base_valor,
                 "icmsBaseCalculoAliquota": "01800",
@@ -510,6 +539,32 @@ class XMLBuilder:
                     val = extracted_map.get(tag_name, field["default"])
                     etree.SubElement(adicao, tag_name).text = val
 
+        # --- PROCESSAMENTO DO RODAPÉ COM TOTAIS CALCULADOS ---
+        
+        # 1. Cria Tags de Pagamento (DARF) baseadas nos totais acumulados
+        receita_codes = [
+            {"code": "0086", "val": totals["ii"], "name": "II"},
+            {"code": "1038", "val": totals["ipi"], "name": "IPI"},
+            {"code": "5602", "val": totals["pis"], "name": "PIS"},
+            {"code": "5629", "val": totals["cofins"], "name": "COFINS"}
+        ]
+        
+        # Gera os blocos de pagamento dinamicamente antes do restante do rodapé
+        for rec in receita_codes:
+            if rec["val"] > 0: # Só gera se tiver valor > 0
+                pag = etree.SubElement(self.duimp, "pagamento")
+                etree.SubElement(pag, "agenciaPagamento").text = "3715"
+                etree.SubElement(pag, "bancoPagamento").text = "341"
+                etree.SubElement(pag, "codigoReceita").text = rec["code"]
+                etree.SubElement(pag, "codigoTipoPagamento").text = "1" # Débito
+                etree.SubElement(pag, "dataPagamento").text = "20251124" # Data fixa
+                etree.SubElement(pag, "nomeTipoPagamento").text = "Débito em Conta"
+                etree.SubElement(pag, "numeroRetificacao").text = "00"
+                etree.SubElement(pag, "valorJurosEncargos").text = "000000000"
+                etree.SubElement(pag, "valorMulta").text = "000000000"
+                etree.SubElement(pag, "valorReceita").text = DataFormatter.format_input_fiscal(rec["val"])
+
+        # 2. Rodapé Padrão
         footer_map = {
             "numeroDUIMP": duimp_fmt,
             "importadorNome": h.get("nomeImportador", ""),
@@ -517,10 +572,18 @@ class XMLBuilder:
             "cargaPesoBruto": DataFormatter.format_number(h.get("pesoBruto"), 15),
             "cargaPesoLiquido": DataFormatter.format_number(h.get("pesoLiquido"), 15),
             "cargaPaisProcedenciaNome": h.get("paisProcedencia", "").upper(),
-            "totalAdicoes": str(len(self.p.items)).zfill(3)
+            "totalAdicoes": str(len(self.items_to_use)).zfill(3),
+            
+            # INJETA OS TOTAIS DE FRETE E SEGURO CALCULADOS
+            "freteTotalReais": DataFormatter.format_input_fiscal(totals["frete"]),
+            "seguroTotalReais": DataFormatter.format_input_fiscal(totals["seguro"]),
         }
 
         for tag, default_val in FOOTER_TAGS.items():
+            # Pula a tag 'pagamento' do FOOTER_TAGS estático pois geramos dinamicamente acima
+            if tag == "pagamento": 
+                continue 
+                
             if isinstance(default_val, list):
                 parent = etree.SubElement(self.duimp, tag)
                 for subfield in default_val:
@@ -535,7 +598,7 @@ class XMLBuilder:
         return etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=True)
 
 # ==============================================================================
-# 5. APP (ÚNICA PARTE ONDE A INTERFACE MUDA PARA PERMITIR A EDIÇÃO)
+# 5. APP (INTERFACE STREAMLIT)
 # ==============================================================================
 
 st.title("Conversor DUIMP (Fornecedor Corrigido)")
@@ -567,7 +630,7 @@ if file:
         # Cria DataFrame para exibir a tabela
         df = pd.DataFrame(p.items)
         
-        # Define as colunas que você quer editar (exatamente como na sua imagem)
+        # Define as colunas que você quer editar
         cols_fiscais = [
             "Aduaneiro (R$)", "Frete (R$)", "Seguro (R$)", 
             "II (R$)", "IPI (R$)", "PIS (R$)", "COFINS (R$)", 
@@ -603,22 +666,17 @@ if file:
                 
                 # Mescla os dados editados de volta nos items originais
                 for i, item in enumerate(p.items):
-                    # Procura o registro correspondente no df editado (por indice ou numeroAdicao)
-                    # Aqui assumimos ordem sequencial que é o padrão do pandas
                     item.update(records[i])
 
-                # Agora chama o Builder (que vai ler os novos campos updateados)
+                # Agora chama o Builder (que vai calcular os totais e gerar o XML)
                 b = XMLBuilder(p)
                 xml = b.build()
                 
                 numero_duimp = p.header.get("numeroDUIMP", "00000000000").replace("/", "-")
                 nome_arquivo = f"DUIMP_{numero_duimp}.xml"
 
-                st.success(f"Sucesso! {len(p.items)} itens processados.")
+                st.success(f"Sucesso! {len(p.items)} itens processados e totais calculados.")
                 st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
-                
-                # Limpa sessão para permitir novo upload se quiser
-                # st.session_state["parsed_data"] = None 
                 
             except Exception as e:
                 st.error(f"Erro: {e}")
