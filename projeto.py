@@ -685,7 +685,12 @@ class XMLBuilder:
                 val = footer_map.get(tag, default_val)
                 etree.SubElement(self.duimp, tag).text = val
 
-        return etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=True)
+        # ----------------------------------------------------------------------
+        # CORREÇÃO SOLICITADA: CABEÇALHO EXATO
+        # ----------------------------------------------------------------------
+        xml_content = etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=False)
+        header = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        return header + xml_content
 
 # ==============================================================================
 # EXECUÇÃO PRINCIPAL
