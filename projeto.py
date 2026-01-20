@@ -114,7 +114,7 @@ class HafelePDFParser:
         self._calculate_totals()
     
     def _find_all_items(self, text: str) -> List[Dict]:
-        """Encontra todos os itens no texto com proteção contra erros de índice"""
+        """Encontra todos os itens no texto"""
         items = []
         
         # Padrão para encontrar início de itens
@@ -123,38 +123,15 @@ class HafelePDFParser:
         
         logger.info(f"Encontrados {len(matches)} padrões de itens")
         
-        # Lógica Blindada de Iteração
         for i, match in enumerate(matches):
-            try:
-                start_pos = match.start()
-                
-                # Definição segura do fim do bloco
-                if i + 1 < len(matches):
-                    end_pos = matches[i + 1].start()
-                else:
-                    end_pos = len(text)
-                
-                # Verifica se os índices são válidos
-                if start_pos >= len(text) or end_pos > len(text):
-                    continue
-
-                item_text = text[start_pos:end_pos]
-                
-                # Extrai grupos do match atual
-                item_num = match.group(1)
-                ncm = match.group(2)
-                codigo = match.group(3)
-                
-                item_data = self._parse_item(item_text, item_num, ncm, codigo)
-                
-                if item_data:
-                    items.append(item_data)
-                    
-            except Exception as e:
-                # Se der erro em um item específico, loga e continua para o próximo
-                # Isso evita que o erro "list index out of range" pare o script inteiro
-                logger.warning(f"Erro ao processar item index {i}: {str(e)}")
-                continue
+            start_pos = match.start()
+            end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            
+            item_text = text[start_pos:end_pos]
+            item_data = self._parse_item(item_text, match.group(1), match.group(2), match.group(3))
+            
+            if item_data:
+                items.append(item_data)
         
         return items
     
@@ -185,13 +162,13 @@ class HafelePDFParser:
                 'pis_valor_devido': 0,
                 'cofins_valor_devido': 0,
                 
-                # Campos Base de Cálculo
+                # NOVOS CAMPOS: Base de Cálculo
                 'ii_base_calculo': 0,
                 'ipi_base_calculo': 0,
                 'pis_base_calculo': 0,
                 'cofins_base_calculo': 0,
                 
-                # Campos Alíquotas
+                # NOVOS CAMPOS: Alíquotas
                 'ii_aliquota': 0,
                 'ipi_aliquota': 0,
                 'pis_aliquota': 0,
@@ -202,16 +179,20 @@ class HafelePDFParser:
             }
             
             # --- SEÇÃO 1: TEXTOS E CÓDIGOS ---
+
+            # Nome do Produto
             nome_match = re.search(r'DENOMINACAO DO PRODUTO\s*\n(.*?)\n(?:DESCRICAO|MARCA)', text, re.IGNORECASE | re.DOTALL)
             if nome_match:
                 item['nome_produto'] = nome_match.group(1).replace('\n', ' ').strip()
             
+            # Código Interno (Limpo)
             codigo_match = re.search(r'Código interno\s*(.*?)\s*(?=FABRICANTE|Conhecido|Pais)', text, re.IGNORECASE | re.DOTALL)
             if codigo_match:
                 raw_code = codigo_match.group(1)
                 clean_code = raw_code.replace('(PARTNUMBER)', '').replace('Código interno', '').replace('\n', '')
                 item['codigo_interno'] = clean_code.strip()
             
+            # Outros campos textuais
             pais_match = re.search(r'Pais Origem\s*(.*?)\s*(?=CARACTERIZAÇÃO|\n)', text, re.IGNORECASE)
             if pais_match: item['pais_origem'] = pais_match.group(1).strip()
 
@@ -225,6 +206,7 @@ class HafelePDFParser:
             if cond_venda_match: item['condicao_venda'] = cond_venda_match.group(1).strip()
 
             # --- SEÇÃO 2: VALORES E QUANTIDADES ---
+
             qtd_match = re.search(r'Qtde Unid\. Comercial\s+([\d\.,]+)', text)
             if qtd_match: item['quantidade'] = self._parse_valor(qtd_match.group(1))
             
@@ -268,28 +250,35 @@ class HafelePDFParser:
     def _extract_taxes_directly(self, text: str, item: Dict) -> Dict:
         """Extrai impostos, bases e alíquotas diretamente do texto"""
         
-        # Mapeamento Completo
-        patterns = {
-            # Valores
+        # Mapeamento para Valore Devido
+        tax_values = {
             'ii_valor_devido': r'II.*?Valor Devido \(R\$\)\s*([\d\.,]+)',
             'ipi_valor_devido': r'IPI.*?Valor Devido \(R\$\)\s*([\d\.,]+)',
             'pis_valor_devido': r'PIS.*?Valor Devido \(R\$\)\s*([\d\.,]+)',
-            'cofins_valor_devido': r'COFINS.*?Valor Devido \(R\$\)\s*([\d\.,]+)',
-            
-            # Bases
+            'cofins_valor_devido': r'COFINS.*?Valor Devido \(R\$\)\s*([\d\.,]+)'
+        }
+        
+        # Mapeamento para Base de Cálculo (Procura 'Base de Cálculo (R$)' logo após o nome do imposto)
+        base_values = {
             'ii_base_calculo': r'II.*?Base de Cálculo \(R\$\)\s*([\d\.,]+)',
             'ipi_base_calculo': r'IPI.*?Base de Cálculo \(R\$\)\s*([\d\.,]+)',
             'pis_base_calculo': r'PIS.*?Base de Cálculo \(R\$\)\s*([\d\.,]+)',
-            'cofins_base_calculo': r'COFINS.*?Base de Cálculo \(R\$\)\s*([\d\.,]+)',
-            
-            # Alíquotas
+            'cofins_base_calculo': r'COFINS.*?Base de Cálculo \(R\$\)\s*([\d\.,]+)'
+        }
+
+        # Mapeamento para Alíquotas (Procura '% Alíquota' logo após o nome do imposto)
+        rate_values = {
             'ii_aliquota': r'II.*?% Alíquota\s*([\d\.,]+)',
             'ipi_aliquota': r'IPI.*?% Alíquota\s*([\d\.,]+)',
             'pis_aliquota': r'PIS.*?% Alíquota\s*([\d\.,]+)',
             'cofins_aliquota': r'COFINS.*?% Alíquota\s*([\d\.,]+)'
         }
         
-        for key, pattern in patterns.items():
+        # Executa as buscas
+        all_patterns = {**tax_values, **base_values, **rate_values}
+        
+        for key, pattern in all_patterns.items():
+            # re.DOTALL permite que o .*? atravesse linhas para encontrar o valor correspondente ao bloco
             match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
             if match:
                 item[key] = self._parse_valor(match.group(1))
@@ -339,16 +328,6 @@ class FinancialAnalyzer:
         itens_data = []
         
         for item in self.documento['itens']:
-            
-            # --- REGRA DA TAG XML (10.000.000) ---
-            # 1. Valor Total
-            valor_total_float = item.get('valor_total', 0)
-            xml_total_value = int(valor_total_float * 10000000)
-
-            # 2. Valor Unitário (Aplicado conforme solicitado)
-            valor_unit_float = item.get('valor_unitario', 0)
-            xml_unit_value = int(valor_unit_float * 10000000)
-            
             itens_data.append({
                 'Item': item.get('numero_item', ''),
                 'NCM': item.get('ncm', ''),
@@ -361,16 +340,9 @@ class FinancialAnalyzer:
                 'Cond. Venda': item.get('condicao_venda', ''),
                 'Quantidade': item.get('quantidade', 0),
                 'Peso (kg)': item.get('peso_liquido', 0),
-                
-                # Valores Principais e Tags XML
-                'Valor Unit. (R$)': valor_unit_float,
-                'XML <valorUnitarioCondicaoVenda>': str(xml_unit_value),
-                
-                'Valor Total (R$)': valor_total_float,
-                'XML <valorTotalCondicaoVenda>': str(xml_total_value),
-                
+                'Valor Unit. (R$)': item.get('valor_unitario', 0),
+                'Valor Total (R$)': item.get('valor_total', 0),
                 'Local Aduaneiro (R$)': item.get('local_aduaneiro', 0),
-                
                 'Frete (R$)': item.get('frete_internacional', 0),
                 'Seguro (R$)': item.get('seguro_internacional', 0),
                 
@@ -380,7 +352,7 @@ class FinancialAnalyzer:
                 'PIS (R$)': item.get('pis_valor_devido', 0),
                 'COFINS (R$)': item.get('cofins_valor_devido', 0),
                 
-                # Bases e Alíquotas
+                # NOVAS COLUNAS - Bases e Alíquotas
                 'II Base (R$)': item.get('ii_base_calculo', 0),
                 'II Alíq. (%)': item.get('ii_aliquota', 0),
                 'IPI Base (R$)': item.get('ipi_base_calculo', 0),
@@ -405,7 +377,7 @@ def main():
     st.markdown("""
     <div class="section-card">
         <strong>🔍 Extração Profissional</strong><br>
-        Sistema com regra de XML (Tags Unitário e Total), Bases de Cálculo e Alíquotas.
+        Sistema ajustado para ler Códigos Internos (Limpos), Local Aduaneiro, Bases de Cálculo e Alíquotas.
     </div>
     """, unsafe_allow_html=True)
     
@@ -493,14 +465,14 @@ def main():
             
             st.markdown('<h2 class="sub-header">📦 Lista de Itens Detalhada</h2>', unsafe_allow_html=True)
             
+            # Ordenação das colunas para visualização lógica
             cols_order = [
                 'Item', 'Código Interno', 'Produto', 'NCM',
-                'Valor Unit. (R$)', 'XML <valorUnitarioCondicaoVenda>',
-                'Valor Total (R$)', 'XML <valorTotalCondicaoVenda>', 
-                'II Base (R$)', 'II Alíq. (%)',
-                'IPI Base (R$)', 'IPI Alíq. (%)',
-                'PIS Base (R$)', 'PIS Alíq. (%)',
-                'COFINS Base (R$)', 'COFINS Alíq. (%)'
+                'Valor Total (R$)', 'Local Aduaneiro (R$)', 
+                'II Base (R$)', 'II Alíq. (%)', 'II (R$)',
+                'IPI Base (R$)', 'IPI Alíq. (%)', 'IPI (R$)',
+                'PIS Base (R$)', 'PIS Alíq. (%)', 'PIS (R$)',
+                'COFINS Base (R$)', 'COFINS Alíq. (%)', 'COFINS (R$)'
             ]
             
             display_cols = [c for c in cols_order if c in df.columns]
@@ -509,19 +481,15 @@ def main():
             
             display_df = df[final_cols].copy()
             
-            # Formatação
+            # Formatação de Moeda
             currency_cols = [col for col in display_df.columns if '(R$)' in col]
             for c in currency_cols:
                 display_df[c] = display_df[c].apply(lambda x: f"R$ {x:,.2f}")
             
+            # Formatação de Porcentagem
             pct_cols = [col for col in display_df.columns if '(%)' in col]
             for c in pct_cols:
                 display_df[c] = display_df[c].apply(lambda x: f"{x:,.2f}%")
-            
-            xml_cols = ['XML <valorTotalCondicaoVenda>', 'XML <valorUnitarioCondicaoVenda>']
-            for c in xml_cols:
-                if c in display_df.columns:
-                    display_df[c] = display_df[c].astype(str)
 
             st.dataframe(
                 display_df,
@@ -538,7 +506,7 @@ def main():
                 st.download_button(
                     label="📥 Baixar CSV (Completo)",
                     data=csv_data,
-                    file_name="itens_hafele_xml_ready.csv",
+                    file_name="itens_hafele_pro_completo.csv",
                     mime="text/csv"
                 )
             
@@ -551,7 +519,7 @@ def main():
                 st.download_button(
                     label="📊 Baixar Excel",
                     data=output.getvalue(),
-                    file_name="itens_hafele_xml_ready.xlsx",
+                    file_name="itens_hafele_pro_completo.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
         
