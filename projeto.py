@@ -114,7 +114,7 @@ class HafelePDFParser:
         self._calculate_totals()
     
     def _find_all_items(self, text: str) -> List[Dict]:
-        """Encontra todos os itens no texto"""
+        """Encontra todos os itens no texto com proteção contra erros de índice"""
         items = []
         
         # Padrão para encontrar início de itens
@@ -123,15 +123,38 @@ class HafelePDFParser:
         
         logger.info(f"Encontrados {len(matches)} padrões de itens")
         
+        # Lógica Blindada de Iteração
         for i, match in enumerate(matches):
-            start_pos = match.start()
-            end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-            
-            item_text = text[start_pos:end_pos]
-            item_data = self._parse_item(item_text, match.group(1), match.group(2), match.group(3))
-            
-            if item_data:
-                items.append(item_data)
+            try:
+                start_pos = match.start()
+                
+                # Definição segura do fim do bloco
+                if i + 1 < len(matches):
+                    end_pos = matches[i + 1].start()
+                else:
+                    end_pos = len(text)
+                
+                # Verifica se os índices são válidos
+                if start_pos >= len(text) or end_pos > len(text):
+                    continue
+
+                item_text = text[start_pos:end_pos]
+                
+                # Extrai grupos do match atual
+                item_num = match.group(1)
+                ncm = match.group(2)
+                codigo = match.group(3)
+                
+                item_data = self._parse_item(item_text, item_num, ncm, codigo)
+                
+                if item_data:
+                    items.append(item_data)
+                    
+            except Exception as e:
+                # Se der erro em um item específico, loga e continua para o próximo
+                # Isso evita que o erro "list index out of range" pare o script inteiro
+                logger.warning(f"Erro ao processar item index {i}: {str(e)}")
+                continue
         
         return items
     
@@ -322,7 +345,7 @@ class FinancialAnalyzer:
             valor_total_float = item.get('valor_total', 0)
             xml_total_value = int(valor_total_float * 10000000)
 
-            # 2. Valor Unitário (Nova correção solicitada)
+            # 2. Valor Unitário (Aplicado conforme solicitado)
             valor_unit_float = item.get('valor_unitario', 0)
             xml_unit_value = int(valor_unit_float * 10000000)
             
@@ -341,10 +364,10 @@ class FinancialAnalyzer:
                 
                 # Valores Principais e Tags XML
                 'Valor Unit. (R$)': valor_unit_float,
-                'XML <valorUnitarioCondicaoVenda>': str(xml_unit_value), # NOVA TAG ADICIONADA
+                'XML <valorUnitarioCondicaoVenda>': str(xml_unit_value),
                 
                 'Valor Total (R$)': valor_total_float,
-                'XML <valorTotalCondicaoVenda>': str(xml_total_value), # TAG ANTERIOR MANTIDA
+                'XML <valorTotalCondicaoVenda>': str(xml_total_value),
                 
                 'Local Aduaneiro (R$)': item.get('local_aduaneiro', 0),
                 
@@ -382,7 +405,7 @@ def main():
     st.markdown("""
     <div class="section-card">
         <strong>🔍 Extração Profissional</strong><br>
-        Sistema com regra de XML (Tags Unitário e Total multiplicados), Bases de Cálculo e Alíquotas.
+        Sistema com regra de XML (Tags Unitário e Total), Bases de Cálculo e Alíquotas.
     </div>
     """, unsafe_allow_html=True)
     
@@ -470,7 +493,6 @@ def main():
             
             st.markdown('<h2 class="sub-header">📦 Lista de Itens Detalhada</h2>', unsafe_allow_html=True)
             
-            # Ordenação das colunas incluindo as duas tags XML
             cols_order = [
                 'Item', 'Código Interno', 'Produto', 'NCM',
                 'Valor Unit. (R$)', 'XML <valorUnitarioCondicaoVenda>',
@@ -496,7 +518,6 @@ def main():
             for c in pct_cols:
                 display_df[c] = display_df[c].apply(lambda x: f"{x:,.2f}%")
             
-            # Formata as colunas XML como string simples
             xml_cols = ['XML <valorTotalCondicaoVenda>', 'XML <valorUnitarioCondicaoVenda>']
             for c in xml_cols:
                 if c in display_df.columns:
