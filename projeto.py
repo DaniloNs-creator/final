@@ -4,10 +4,10 @@ import re
 from lxml import etree
 import pandas as pd
 
-st.set_page_config(page_title="Conversor DUIMP (Layout 8686 + Regras)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP (Layout 8686 + Correção Pontuação)", layout="wide")
 
 # ==============================================================================
-# 1. ESQUELETO MESTRE (ADICAO)
+# 1. ESQUELETO MESTRE (ADICAO - LAYOUT 8686868686)
 # ==============================================================================
 ADICAO_FIELDS_ORDER = [
     {"tag": "acrescimo", "type": "complex", "children": [
@@ -239,7 +239,7 @@ FOOTER_TAGS = {
 }
 
 # ==============================================================================
-# 2. UTILS
+# 2. UTILS (CORRIGIDO)
 # ==============================================================================
 
 class DataFormatter:
@@ -262,9 +262,14 @@ class DataFormatter:
         return re.sub(r'\D', '', value)[:8]
 
     # Regra 1: Monetário Padrão (2 casas -> x100)
+    # CORREÇÃO CRÍTICA: Remove pontos de milhar antes da conversão
     @staticmethod
     def format_input_fiscal(value, length=15, is_percent=False):
         try:
+            if isinstance(value, str):
+                value = value.replace('.', '') # Remove milhar (ex: 3.000,00 -> 3000,00)
+                value = value.replace(',', '.') # Transforma decimal
+            
             val_float = float(value)
             val_int = int(round(val_float * 100))
             return str(val_int).zfill(length)
@@ -272,11 +277,14 @@ class DataFormatter:
             return "0" * length
 
     # Regra 2: Alta Precisão (7 casas -> x10.000.000)
-    # Para: ValorUnitario, ValorTotalCondicaoVenda
+    # CORREÇÃO CRÍTICA: Remove pontos de milhar antes da conversão
     @staticmethod
     def format_high_precision(value, length=15):
         try:
-            if isinstance(value, str): value = value.replace(',', '.')
+            if isinstance(value, str):
+                value = value.replace('.', '') # Remove milhar
+                value = value.replace(',', '.') # Transforma decimal
+            
             val_float = float(value)
             val_int = int(round(val_float * 10000000))
             return str(val_int).zfill(length)
@@ -284,11 +292,14 @@ class DataFormatter:
             return "0" * length
 
     # Regra 3: Quantidade/Peso (5 casas -> x100.000)
-    # Para: Quantidade, PesoLiquido
+    # CORREÇÃO CRÍTICA: Remove pontos de milhar antes da conversão
     @staticmethod
     def format_quantity(value, length=14):
         try:
-            if isinstance(value, str): value = value.replace(',', '.')
+            if isinstance(value, str):
+                value = value.replace('.', '') # Remove milhar
+                value = value.replace(',', '.') # Transforma decimal
+            
             val_float = float(value)
             val_int = int(round(val_float * 100000))
             return str(val_int).zfill(length)
@@ -298,7 +309,6 @@ class DataFormatter:
     @staticmethod
     def calculate_cbs_ibs(base_xml_string):
         try:
-            # Base do calculo tributario geralmente é formato monetario (x100)
             base_int = int(base_xml_string)
             base_float = base_int / 100.0
             
@@ -348,7 +358,7 @@ class DataFormatter:
         return data
 
 # ==============================================================================
-# 3. PARSER (FLEXÍVEL)
+# 3. PARSER
 # ==============================================================================
 
 class PDFParser:
@@ -433,7 +443,8 @@ class XMLBuilder:
 
         def get_float(val):
             try: 
-                if isinstance(val, str): val = val.replace(',', '.')
+                if isinstance(val, str): 
+                    val = val.replace('.', '').replace(',', '.')
                 return float(val)
             except: return 0.0
 
@@ -460,7 +471,8 @@ class XMLBuilder:
             peso_liq_fmt = DataFormatter.format_quantity(it.get("pesoLiq"), 15)
 
             # 3. Regra 2 casas (Monetário)
-            base_total_reais_fmt = DataFormatter.format_number(it.get("valorTotal"), 15) # Assume string limpa x100 do parser
+            # Para base em reais, usamos o formatador normal que lida com o texto bruto do PDF
+            base_total_reais_fmt = DataFormatter.format_input_fiscal(it.get("valorTotal", "0"), 15)
             
             raw_frete = get_float(it.get("Frete (R$)", 0))
             raw_seguro = get_float(it.get("Seguro (R$)", 0))
@@ -673,7 +685,7 @@ if file:
                     numero_duimp = p.header.get("numeroDUIMP", "00000000000").replace("/", "-")
                     nome_arquivo = f"DUIMP_{numero_duimp}.xml"
 
-                    st.success(f"Sucesso! XML Gerado com regras de 7 e 5 casas decimais aplicadas.")
+                    st.success(f"Sucesso! XML Gerado com correção de pontuação e layout 8686.")
                     st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
                     
                 except Exception as e:
