@@ -317,10 +317,14 @@ class FinancialAnalyzer:
         
         for item in self.documento['itens']:
             
-            # --- NOVA REGRA DA TAG XML ---
-            # Multiplica o valor total por 10.000.000 e converte para inteiro
+            # --- REGRA DA TAG XML (10.000.000) ---
+            # 1. Valor Total
             valor_total_float = item.get('valor_total', 0)
-            xml_value = int(valor_total_float * 10000000)
+            xml_total_value = int(valor_total_float * 10000000)
+
+            # 2. Valor Unitário (Nova correção solicitada)
+            valor_unit_float = item.get('valor_unitario', 0)
+            xml_unit_value = int(valor_unit_float * 10000000)
             
             itens_data.append({
                 'Item': item.get('numero_item', ''),
@@ -334,11 +338,14 @@ class FinancialAnalyzer:
                 'Cond. Venda': item.get('condicao_venda', ''),
                 'Quantidade': item.get('quantidade', 0),
                 'Peso (kg)': item.get('peso_liquido', 0),
-                'Valor Unit. (R$)': item.get('valor_unitario', 0),
                 
-                # Campos de Valor Principal
+                # Valores Principais e Tags XML
+                'Valor Unit. (R$)': valor_unit_float,
+                'XML <valorUnitarioCondicaoVenda>': str(xml_unit_value), # NOVA TAG ADICIONADA
+                
                 'Valor Total (R$)': valor_total_float,
-                'XML <valorTotalCondicaoVenda>': str(xml_value), # Formatado como string para garantir visualização correta
+                'XML <valorTotalCondicaoVenda>': str(xml_total_value), # TAG ANTERIOR MANTIDA
+                
                 'Local Aduaneiro (R$)': item.get('local_aduaneiro', 0),
                 
                 'Frete (R$)': item.get('frete_internacional', 0),
@@ -375,7 +382,7 @@ def main():
     st.markdown("""
     <div class="section-card">
         <strong>🔍 Extração Profissional</strong><br>
-        Sistema com regra de XML (Valor Total Multiplicado), Bases de Cálculo e Alíquotas.
+        Sistema com regra de XML (Tags Unitário e Total multiplicados), Bases de Cálculo e Alíquotas.
     </div>
     """, unsafe_allow_html=True)
     
@@ -463,9 +470,10 @@ def main():
             
             st.markdown('<h2 class="sub-header">📦 Lista de Itens Detalhada</h2>', unsafe_allow_html=True)
             
-            # Ordenação das colunas incluindo a nova tag XML
+            # Ordenação das colunas incluindo as duas tags XML
             cols_order = [
                 'Item', 'Código Interno', 'Produto', 'NCM',
+                'Valor Unit. (R$)', 'XML <valorUnitarioCondicaoVenda>',
                 'Valor Total (R$)', 'XML <valorTotalCondicaoVenda>', 
                 'II Base (R$)', 'II Alíq. (%)',
                 'IPI Base (R$)', 'IPI Alíq. (%)',
@@ -488,6 +496,12 @@ def main():
             for c in pct_cols:
                 display_df[c] = display_df[c].apply(lambda x: f"{x:,.2f}%")
             
+            # Formata as colunas XML como string simples
+            xml_cols = ['XML <valorTotalCondicaoVenda>', 'XML <valorUnitarioCondicaoVenda>']
+            for c in xml_cols:
+                if c in display_df.columns:
+                    display_df[c] = display_df[c].astype(str)
+
             st.dataframe(
                 display_df,
                 use_container_width=True,
