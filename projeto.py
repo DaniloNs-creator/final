@@ -4,10 +4,10 @@ import re
 from lxml import etree
 import pandas as pd
 
-st.set_page_config(page_title="Conversor DUIMP (Layout + Cálculos Precisos)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP (Layout 8686 + Regras)", layout="wide")
 
 # ==============================================================================
-# 1. ESQUELETO MESTRE
+# 1. ESQUELETO MESTRE (ADICAO)
 # ==============================================================================
 ADICAO_FIELDS_ORDER = [
     {"tag": "acrescimo", "type": "complex", "children": [
@@ -261,38 +261,34 @@ class DataFormatter:
         if not value: return "00000000"
         return re.sub(r'\D', '', value)[:8]
 
-    # Formata input monetário (2 casas decimais -> x100)
+    # Regra 1: Monetário Padrão (2 casas -> x100)
     @staticmethod
     def format_input_fiscal(value, length=15, is_percent=False):
         try:
             val_float = float(value)
-            # Se for percentual (ex: 18.00) -> 1800 (x100)
-            # Se for valor (ex: 100.50) -> 10050 (x100)
             val_int = int(round(val_float * 100))
             return str(val_int).zfill(length)
         except:
             return "0" * length
 
-    # NOVO: Formatação de alta precisão (7 casas decimais -> x10.000.000)
-    # Usado para: valorTotalCondicaoVenda e valorUnitario
+    # Regra 2: Alta Precisão (7 casas -> x10.000.000)
+    # Para: ValorUnitario, ValorTotalCondicaoVenda
     @staticmethod
     def format_high_precision(value, length=15):
         try:
+            if isinstance(value, str): value = value.replace(',', '.')
             val_float = float(value)
-            # Multiplica por 10^7
             val_int = int(round(val_float * 10000000))
             return str(val_int).zfill(length)
         except:
             return "0" * length
 
-    # NOVO: Formatação de quantidade/peso (5 casas decimais -> x100.000)
-    # Usado para: quantidade, pesoLiquido, pesoBruto
+    # Regra 3: Quantidade/Peso (5 casas -> x100.000)
+    # Para: Quantidade, PesoLiquido
     @staticmethod
     def format_quantity(value, length=14):
         try:
-            # Se já vier formatado do PDF como string sem ponto, tenta converter
-            if isinstance(value, str) and ',' in value:
-                value = value.replace('.', '').replace(',', '.')
+            if isinstance(value, str): value = value.replace(',', '.')
             val_float = float(value)
             val_int = int(round(val_float * 100000))
             return str(val_int).zfill(length)
@@ -302,11 +298,8 @@ class DataFormatter:
     @staticmethod
     def calculate_cbs_ibs(base_xml_string):
         try:
-            # Entrada base vem formatada (x10.000.000 ou x100?)
-            # O XML base de cálculo geralmente é x100 (2 casas) para tributos
-            # Se vier da regra de 7 casas, precisamos ajustar
+            # Base do calculo tributario geralmente é formato monetario (x100)
             base_int = int(base_xml_string)
-            # Assume base padrão monetária x100
             base_float = base_int / 100.0
             
             cbs_val = base_float * 0.009
@@ -355,7 +348,7 @@ class DataFormatter:
         return data
 
 # ==============================================================================
-# 3. PARSER
+# 3. PARSER (FLEXÍVEL)
 # ==============================================================================
 
 class PDFParser:
@@ -421,7 +414,7 @@ class PDFParser:
         return match.group(1).strip() if match else ""
 
 # ==============================================================================
-# 4. XML BUILDER (COM REGRAS ESPECÍFICAS DE 7 E 5 CASAS)
+# 4. XML BUILDER (REGRAS APLICADAS)
 # ==============================================================================
 
 class XMLBuilder:
@@ -456,43 +449,26 @@ class XMLBuilder:
         for it in self.items_to_use:
             adicao = etree.SubElement(self.duimp, "adicao")
             
-            # --- FORMATAÇÕES ESPECIAIS (REGRAS DUIMP) ---
+            # --- FORMATAÇÃO DOS CAMPOS ESPECIAIS ---
             
-            # 1. Regra das 7 casas decimais (x 10.000.000)
-            # Aplica-se a: Valor Total Condição Venda e Valor Unitário
-            val_total_venda_raw = it.get("valorTotal", "0")
-            if isinstance(val_total_venda_raw, str): 
-                val_total_venda_raw = val_total_venda_raw.replace(',', '.')
-            val_total_venda_fmt = DataFormatter.format_high_precision(val_total_venda_raw, 11)
+            # 1. Regra 7 casas (Valor Total e Unitário)
+            val_total_venda_fmt = DataFormatter.format_high_precision(it.get("valorTotal", "0"), 11)
+            val_unit_fmt = DataFormatter.format_high_precision(it.get("valorUnit", "0"), 20)
 
-            val_unit_raw = it.get("valorUnit", "0")
-            if isinstance(val_unit_raw, str):
-                val_unit_raw = val_unit_raw.replace(',', '.')
-            val_unit_fmt = DataFormatter.format_high_precision(val_unit_raw, 20)
-
-            # 2. Regra das 5 casas decimais (x 100.000)
-            # Aplica-se a: Quantidade, Peso Líquido
+            # 2. Regra 5 casas (Quantidade e Peso)
             qtd_fmt = DataFormatter.format_quantity(it.get("quantidade"), 14)
             peso_liq_fmt = DataFormatter.format_quantity(it.get("pesoLiq"), 15)
 
-            # 3. Regra das 2 casas decimais (x 100) - Padrão Monetário
-            # Aplica-se a: Frete, Seguro, Impostos, Valor em Reais
+            # 3. Regra 2 casas (Monetário)
+            base_total_reais_fmt = DataFormatter.format_number(it.get("valorTotal"), 15) # Assume string limpa x100 do parser
+            
             raw_frete = get_float(it.get("Frete (R$)", 0))
             raw_seguro = get_float(it.get("Seguro (R$)", 0))
             raw_aduaneiro = get_float(it.get("Aduaneiro (R$)", 0))
             
-            # Formatações Monetárias
             frete_fmt = DataFormatter.format_input_fiscal(raw_frete)
             seguro_fmt = DataFormatter.format_input_fiscal(raw_seguro)
             aduaneiro_fmt = DataFormatter.format_input_fiscal(raw_aduaneiro)
-            
-            # Recupera Base Original (para cálculos se não editado)
-            # Aqui usamos o valor total original do PDF como base para conversão em Reais 
-            # se o usuário não digitou o Aduaneiro.
-            # Nota: valorTotalCondicaoVenda no XML original é base moeda estrangeira ou reais?
-            # Geralmente é moeda estrangeira. Vamos manter a lógica anterior de 'base_total_reais'
-            # mas usando o formatador padrão monetário (x100) para campos de Reais.
-            base_total_reais_fmt = DataFormatter.format_number(it.get("valorTotal"), 15) 
 
             ii_base_fmt = DataFormatter.format_input_fiscal(it.get("II Base (R$)", 0))
             ii_aliq_fmt = DataFormatter.format_input_fiscal(it.get("II Alíq. (%)", 0), 5, True)
@@ -517,52 +493,45 @@ class XMLBuilder:
                 "numeroAdicao": str(it["numeroAdicao"])[-3:],
                 "numeroDUIMP": duimp_fmt,
                 "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
-                "dadosMercadoriaMedidaEstatisticaQuantidade": qtd_fmt, # 5 casas
+                "dadosMercadoriaMedidaEstatisticaQuantidade": qtd_fmt,
                 "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "").upper(),
-                "dadosMercadoriaPesoLiquido": peso_liq_fmt, # 5 casas
+                "dadosMercadoriaPesoLiquido": peso_liq_fmt,
                 "condicaoVendaMoedaNome": it.get("moeda", "").upper(),
                 
-                # Campos de Valor Alto (7 casas)
-                "valorTotalCondicaoVenda": val_total_venda_fmt, 
+                # Campos com regra de 7 casas
+                "valorTotalCondicaoVenda": val_total_venda_fmt,
                 "valorUnitario": val_unit_fmt,
 
-                # Campos Monetários (2 casas)
-                "condicaoVendaValorMoeda": base_total_reais_fmt, 
+                # Campos com regra de 2 casas
+                "condicaoVendaValorMoeda": base_total_reais_fmt,
                 "condicaoVendaValorReais": aduaneiro_fmt if int(aduaneiro_fmt) > 0 else base_total_reais_fmt,
                 
                 "paisOrigemMercadoriaNome": it.get("paisOrigem", "").upper(),
                 "paisAquisicaoMercadoriaNome": it.get("paisOrigem", "").upper(),
                 "descricaoMercadoria": DataFormatter.clean_text(it.get("descricao", "")),
-                "quantidade": qtd_fmt, # 5 casas
+                "quantidade": qtd_fmt,
                 "unidadeMedida": it.get("unidade", "").upper(),
                 "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800"),
-                
                 "fornecedorNome": supplier_data["fornecedorNome"][:60],
                 "fornecedorLogradouro": supplier_data["fornecedorLogradouro"][:60],
                 "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
                 "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
-
                 "freteValorReais": frete_fmt,
                 "seguroValorReais": seguro_fmt,
-                
                 "iiBaseCalculo": ii_base_fmt,
                 "iiAliquotaAdValorem": ii_aliq_fmt,
                 "iiAliquotaValorDevido": ii_val_fmt,
                 "iiAliquotaValorRecolher": ii_val_fmt,
-
                 "ipiAliquotaAdValorem": ipi_aliq_fmt,
                 "ipiAliquotaValorDevido": ipi_val_fmt,
                 "ipiAliquotaValorRecolher": ipi_val_fmt,
-
                 "pisCofinsBaseCalculoValor": pis_base_fmt,
                 "pisPasepAliquotaAdValorem": pis_aliq_fmt,
                 "pisPasepAliquotaValorDevido": pis_val_fmt,
                 "pisPasepAliquotaValorRecolher": pis_val_fmt,
-
                 "cofinsAliquotaAdValorem": cofins_aliq_fmt,
                 "cofinsAliquotaValorDevido": cofins_val_fmt,
                 "cofinsAliquotaValorRecolher": cofins_val_fmt,
-
                 "icmsBaseCalculoValor": icms_base_valor,
                 "icmsBaseCalculoAliquota": "01800",
                 "cbsIbsClasstrib": "000001",
@@ -588,15 +557,14 @@ class XMLBuilder:
 
         # --- RODAPÉ ---
         
-        # Formata totais de Peso para 5 casas (x100.000)
-        peso_bruto_total_fmt = DataFormatter.format_quantity(h.get("pesoBruto"), 15)
+        peso_bruto_fmt = DataFormatter.format_quantity(h.get("pesoBruto"), 15)
         peso_liq_total_fmt = DataFormatter.format_quantity(h.get("pesoLiquido"), 15)
 
         footer_map = {
             "numeroDUIMP": duimp_fmt,
             "importadorNome": h.get("nomeImportador", ""),
             "importadorNumero": DataFormatter.format_number(h.get("cnpj"), 14),
-            "cargaPesoBruto": peso_bruto_total_fmt, # 5 casas
+            "cargaPesoBruto": peso_bruto_fmt, # 5 casas
             "cargaPesoLiquido": peso_liq_total_fmt, # 5 casas
             "cargaPaisProcedenciaNome": h.get("paisProcedencia", "").upper(),
             "totalAdicoes": str(len(self.items_to_use)).zfill(3),
@@ -662,7 +630,7 @@ if file:
         p = st.session_state["parsed_data"]
         
         if not p.items:
-            st.warning("⚠️ Nenhum item encontrado no PDF. Verifique se o formato do arquivo está correto.")
+            st.warning("⚠️ Nenhum item encontrado no PDF.")
         else:
             st.info("Preencha os dados fiscais faltantes:")
             
