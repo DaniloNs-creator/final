@@ -4,10 +4,10 @@ import re
 from lxml import etree
 import pandas as pd
 
-st.set_page_config(page_title="Conversor DUIMP (Layout 8686 + Correção Pontuação)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP (Layout 8686 + NUMBER)", layout="wide")
 
 # ==============================================================================
-# 1. ESQUELETO MESTRE (ADICAO - LAYOUT 8686868686)
+# 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO - INTACTO)
 # ==============================================================================
 ADICAO_FIELDS_ORDER = [
     {"tag": "acrescimo", "type": "complex", "children": [
@@ -239,7 +239,7 @@ FOOTER_TAGS = {
 }
 
 # ==============================================================================
-# 2. UTILS (CORRIGIDO)
+# 2. UTILS
 # ==============================================================================
 
 class DataFormatter:
@@ -261,14 +261,12 @@ class DataFormatter:
         if not value: return "00000000"
         return re.sub(r'\D', '', value)[:8]
 
-    # Regra 1: Monetário Padrão (2 casas -> x100)
-    # CORREÇÃO CRÍTICA: Remove pontos de milhar antes da conversão
     @staticmethod
     def format_input_fiscal(value, length=15, is_percent=False):
         try:
             if isinstance(value, str):
-                value = value.replace('.', '') # Remove milhar (ex: 3.000,00 -> 3000,00)
-                value = value.replace(',', '.') # Transforma decimal
+                value = value.replace('.', '')
+                value = value.replace(',', '.')
             
             val_float = float(value)
             val_int = int(round(val_float * 100))
@@ -276,14 +274,12 @@ class DataFormatter:
         except:
             return "0" * length
 
-    # Regra 2: Alta Precisão (7 casas -> x10.000.000)
-    # CORREÇÃO CRÍTICA: Remove pontos de milhar antes da conversão
     @staticmethod
     def format_high_precision(value, length=15):
         try:
             if isinstance(value, str):
-                value = value.replace('.', '') # Remove milhar
-                value = value.replace(',', '.') # Transforma decimal
+                value = value.replace('.', '')
+                value = value.replace(',', '.')
             
             val_float = float(value)
             val_int = int(round(val_float * 10000000))
@@ -291,14 +287,12 @@ class DataFormatter:
         except:
             return "0" * length
 
-    # Regra 3: Quantidade/Peso (5 casas -> x100.000)
-    # CORREÇÃO CRÍTICA: Remove pontos de milhar antes da conversão
     @staticmethod
     def format_quantity(value, length=14):
         try:
             if isinstance(value, str):
-                value = value.replace('.', '') # Remove milhar
-                value = value.replace(',', '.') # Transforma decimal
+                value = value.replace('.', '')
+                value = value.replace(',', '.')
             
             val_float = float(value)
             val_int = int(round(val_float * 100000))
@@ -424,7 +418,7 @@ class PDFParser:
         return match.group(1).strip() if match else ""
 
 # ==============================================================================
-# 4. XML BUILDER (REGRAS APLICADAS)
+# 4. XML BUILDER
 # ==============================================================================
 
 class XMLBuilder:
@@ -460,18 +454,20 @@ class XMLBuilder:
         for it in self.items_to_use:
             adicao = etree.SubElement(self.duimp, "adicao")
             
-            # --- FORMATAÇÃO DOS CAMPOS ESPECIAIS ---
+            # --- CONCATENAÇÃO DE DESCRIÇÃO (NUMBER) ---
+            input_number = str(it.get("NUMBER", "")).strip()
+            original_desc = DataFormatter.clean_text(it.get("descricao", ""))
             
-            # 1. Regra 7 casas (Valor Total e Unitário)
+            if input_number:
+                final_desc = f"{input_number} - {original_desc}"
+            else:
+                final_desc = original_desc
+
+            # --- FORMATAÇÃO DOS CAMPOS ESPECIAIS ---
             val_total_venda_fmt = DataFormatter.format_high_precision(it.get("valorTotal", "0"), 11)
             val_unit_fmt = DataFormatter.format_high_precision(it.get("valorUnit", "0"), 20)
-
-            # 2. Regra 5 casas (Quantidade e Peso)
             qtd_fmt = DataFormatter.format_quantity(it.get("quantidade"), 14)
             peso_liq_fmt = DataFormatter.format_quantity(it.get("pesoLiq"), 15)
-
-            # 3. Regra 2 casas (Monetário)
-            # Para base em reais, usamos o formatador normal que lida com o texto bruto do PDF
             base_total_reais_fmt = DataFormatter.format_input_fiscal(it.get("valorTotal", "0"), 15)
             
             raw_frete = get_float(it.get("Frete (R$)", 0))
@@ -509,18 +505,16 @@ class XMLBuilder:
                 "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "").upper(),
                 "dadosMercadoriaPesoLiquido": peso_liq_fmt,
                 "condicaoVendaMoedaNome": it.get("moeda", "").upper(),
-                
-                # Campos com regra de 7 casas
                 "valorTotalCondicaoVenda": val_total_venda_fmt,
                 "valorUnitario": val_unit_fmt,
-
-                # Campos com regra de 2 casas
                 "condicaoVendaValorMoeda": base_total_reais_fmt,
                 "condicaoVendaValorReais": aduaneiro_fmt if int(aduaneiro_fmt) > 0 else base_total_reais_fmt,
-                
                 "paisOrigemMercadoriaNome": it.get("paisOrigem", "").upper(),
                 "paisAquisicaoMercadoriaNome": it.get("paisOrigem", "").upper(),
-                "descricaoMercadoria": DataFormatter.clean_text(it.get("descricao", "")),
+                
+                # --- DESCRIÇÃO CONCATENADA ---
+                "descricaoMercadoria": final_desc,
+                
                 "quantidade": qtd_fmt,
                 "unidadeMedida": it.get("unidade", "").upper(),
                 "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800"),
@@ -576,8 +570,8 @@ class XMLBuilder:
             "numeroDUIMP": duimp_fmt,
             "importadorNome": h.get("nomeImportador", ""),
             "importadorNumero": DataFormatter.format_number(h.get("cnpj"), 14),
-            "cargaPesoBruto": peso_bruto_fmt, # 5 casas
-            "cargaPesoLiquido": peso_liq_total_fmt, # 5 casas
+            "cargaPesoBruto": peso_bruto_fmt,
+            "cargaPesoLiquido": peso_liq_total_fmt,
             "cargaPaisProcedenciaNome": h.get("paisProcedencia", "").upper(),
             "totalAdicoes": str(len(self.items_to_use)).zfill(3),
             "freteTotalReais": DataFormatter.format_input_fiscal(totals["frete"]),
@@ -620,7 +614,7 @@ class XMLBuilder:
 # 5. APP
 # ==============================================================================
 
-st.title("Conversor DUIMP (Layout + Cálculos Precisos)")
+st.title("Conversor DUIMP (Layout 8686 + NUMBER)")
 
 if "parsed_data" not in st.session_state:
     st.session_state["parsed_data"] = None
@@ -644,11 +638,12 @@ if file:
         if not p.items:
             st.warning("⚠️ Nenhum item encontrado no PDF.")
         else:
-            st.info("Preencha os dados fiscais faltantes:")
+            st.info("Preencha os dados fiscais e o NUMBER (opcional):")
             
             df = pd.DataFrame(p.items)
             
             cols_fiscais = [
+                "NUMBER", # Nova coluna de input
                 "Aduaneiro (R$)", "Frete (R$)", "Seguro (R$)", 
                 "II (R$)", "IPI (R$)", "PIS (R$)", "COFINS (R$)", 
                 "II Base (R$)", "II Alíq. (%)", 
@@ -657,8 +652,12 @@ if file:
                 "COFINS Base (R$)", "COFINS Alíq. (%)"
             ]
             
+            # Inicializa colunas
+            if "NUMBER" not in df.columns:
+                df["NUMBER"] = "" # String vazia
+            
             for col in cols_fiscais:
-                if col not in df.columns:
+                if col != "NUMBER" and col not in df.columns:
                     df[col] = 0.00
 
             cols_display = ["numeroAdicao"] + cols_fiscais
@@ -668,6 +667,7 @@ if file:
                 hide_index=True,
                 column_config={
                     "numeroAdicao": st.column_config.TextColumn("Item", disabled=True),
+                    "NUMBER": st.column_config.TextColumn("NUMBER (Concatena na Descrição)"),
                 }
             )
 
@@ -685,7 +685,7 @@ if file:
                     numero_duimp = p.header.get("numeroDUIMP", "00000000000").replace("/", "-")
                     nome_arquivo = f"DUIMP_{numero_duimp}.xml"
 
-                    st.success(f"Sucesso! XML Gerado com correção de pontuação e layout 8686.")
+                    st.success(f"Sucesso! XML Gerado com layout 8686 e concatenação NUMBER.")
                     st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
                     
                 except Exception as e:
