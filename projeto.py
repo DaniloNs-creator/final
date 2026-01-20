@@ -4,10 +4,10 @@ import re
 from lxml import etree
 import pandas as pd
 
-st.set_page_config(page_title="Conversor DUIMP (Layout Padrão Corrigido)", layout="wide")
+st.set_page_config(page_title="Conversor DUIMP (Layout Fixo)", layout="wide")
 
 # ==============================================================================
-# 1. ESQUELETO MESTRE (LAYOUT OBRIGATÓRIO - INTACTO)
+# 1. ESQUELETO MESTRE (ADICAO - INTACTO)
 # ==============================================================================
 ADICAO_FIELDS_ORDER = [
     {"tag": "acrescimo", "type": "complex", "children": [
@@ -153,7 +153,8 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "vinculoCompradorVendedor", "default": "Não há vinculação entre comprador e vendedor."}
 ]
 
-# Tags de Rodapé - ORDEM ORIGINAL PRESERVADA
+# Tags de Rodapé (ORDEM DO SEU CODIGO ORIGINAL PRESERVADA)
+# A tag "pagamento" aqui é um placeholder para marcar a posição.
 FOOTER_TAGS = {
     "armazem": {"tag": "nomeArmazem", "default": "TCP"},
     "armazenamentoRecintoAduaneiroCodigo": "9801303",
@@ -215,8 +216,7 @@ FOOTER_TAGS = {
     "modalidadeDespachoNome": "Normal",
     "numeroDUIMP": "",
     "operacaoFundap": "N",
-    # MANTIDA A ESTRUTURA ORIGINAL PARA PRESERVAR POSIÇÃO
-    "pagamento": [], 
+    "pagamento": [], # Placeholder para a lógica dinâmica
     "seguroMoedaNegociadaCodigo": "220",
     "seguroMoedaNegociadaNome": "DOLAR DOS EUA",
     "seguroTotalDolares": "000000000000000",
@@ -389,7 +389,7 @@ class PDFParser:
         return match.group(1).strip() if match else ""
 
 # ==============================================================================
-# 4. XML BUILDER (PAGAMENTO ESTRITO 4 CAMPOS)
+# 4. XML BUILDER (CORRIGIDO PARA O LAYOUT OBRIGATÓRIO DO EXEMPLO)
 # ==============================================================================
 
 class XMLBuilder:
@@ -403,7 +403,7 @@ class XMLBuilder:
         h = self.p.header
         duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
 
-        # --- TOTAIS ---
+        # --- CÁLCULO DE TOTAIS ---
         totals = {"frete": 0.0, "seguro": 0.0, "ii": 0.0, "ipi": 0.0, "pis": 0.0, "cofins": 0.0}
 
         def get_float(val):
@@ -424,6 +424,7 @@ class XMLBuilder:
             
             base_total_reais = DataFormatter.format_number(it.get("valorTotal"), 15)
             
+            # Dados da Tabela
             raw_frete = get_float(it.get("Frete (R$)", 0))
             raw_seguro = get_float(it.get("Seguro (R$)", 0))
             raw_aduaneiro = get_float(it.get("Aduaneiro (R$)", 0))
@@ -432,6 +433,7 @@ class XMLBuilder:
             raw_pis_val = get_float(it.get("PIS (R$)", 0))
             raw_cofins_val = get_float(it.get("COFINS (R$)", 0))
 
+            # Formatação XML
             frete_fmt = DataFormatter.format_input_fiscal(raw_frete)
             seguro_fmt = DataFormatter.format_input_fiscal(raw_seguro)
             aduaneiro_fmt = DataFormatter.format_input_fiscal(raw_aduaneiro)
@@ -511,8 +513,9 @@ class XMLBuilder:
                     val = extracted_map.get(tag_name, field["default"])
                     etree.SubElement(adicao, tag_name).text = val
 
-        # --- RODAPÉ ---
+        # --- RODAPÉ (PRESERVANDO ORDEM RIGOROSA) ---
         
+        # Mapa para atualizar valores calculados
         footer_map = {
             "numeroDUIMP": duimp_fmt,
             "importadorNome": h.get("nomeImportador", ""),
@@ -532,9 +535,10 @@ class XMLBuilder:
             {"code": "5629", "val": totals["cofins"]}
         ]
 
+        # LOOP PRINCIPAL DO RODAPÉ
         for tag, default_val in FOOTER_TAGS.items():
             
-            # --- PAGAMENTO (VOLTANDO AO LAYOUT ORIGINAL DE 4 CAMPOS) ---
+            # BLOCO DE PAGAMENTO DINÂMICO (NOVO LAYOUT CORRIGIDO)
             if tag == "pagamento":
                 for rec in receita_codes:
                     if rec["val"] > 0:
@@ -542,10 +546,17 @@ class XMLBuilder:
                         etree.SubElement(pag, "agenciaPagamento").text = "3715"
                         etree.SubElement(pag, "bancoPagamento").text = "341"
                         etree.SubElement(pag, "codigoReceita").text = rec["code"]
-                        # CAMPO VALOR ORIGINALMENTE ERA "valorReceita"
+                        etree.SubElement(pag, "codigoTipoPagamento").text = "1"
+                        etree.SubElement(pag, "contaPagamento").text = "316273" # Exemplo do XML
+                        etree.SubElement(pag, "dataPagamento").text = "20251124"
+                        etree.SubElement(pag, "nomeTipoPagamento").text = "Débito em Conta"
+                        etree.SubElement(pag, "numeroRetificacao").text = "00"
+                        etree.SubElement(pag, "valorJurosEncargos").text = "000000000"
+                        etree.SubElement(pag, "valorMulta").text = "000000000"
                         etree.SubElement(pag, "valorReceita").text = DataFormatter.format_input_fiscal(rec["val"])
                 continue
 
+            # GERAÇÃO PADRÃO
             if isinstance(default_val, list):
                 parent = etree.SubElement(self.duimp, tag)
                 for subfield in default_val:
@@ -563,7 +574,7 @@ class XMLBuilder:
 # 5. APP
 # ==============================================================================
 
-st.title("Conversor DUIMP (Original c/ Cálculos)")
+st.title("Conversor DUIMP (Fiscal + Layout Exato)")
 
 if "parsed_data" not in st.session_state:
     st.session_state["parsed_data"] = None
@@ -625,7 +636,7 @@ if file:
                 numero_duimp = p.header.get("numeroDUIMP", "00000000000").replace("/", "-")
                 nome_arquivo = f"DUIMP_{numero_duimp}.xml"
 
-                st.success(f"Sucesso! {len(p.items)} itens processados. Layout Pagamento Original preservado.")
+                st.success(f"Sucesso! {len(p.items)} itens processados e pagamentos calculados.")
                 st.download_button("Baixar XML", xml, nome_arquivo, "text/xml")
                 
             except Exception as e:
