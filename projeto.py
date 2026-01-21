@@ -1,6 +1,6 @@
 import streamlit as st
-import fitz  # PyMuPDF (Para o App 1)
-import pdfplumber # (Para o App 2)
+import fitz  # PyMuPDF (App 1)
+import pdfplumber # (App 2)
 import re
 import pandas as pd
 import numpy as np
@@ -13,9 +13,9 @@ from typing import Dict, List, Optional, Any
 # ==============================================================================
 # CONFIGURAÇÃO GERAL
 # ==============================================================================
-st.set_page_config(page_title="Sistema Unificado 2026", layout="wide")
+st.set_page_config(page_title="Sistema Unificado 2026 (Pro)", layout="wide")
 
-# Estilos do seu código original + ajustes
+# Estilos CSS (Mistura dos dois apps para consistência)
 st.markdown("""
 <style>
     .main-header { font-size: 2.5rem; color: #1E3A8A; font-weight: bold; margin-bottom: 1rem; }
@@ -24,6 +24,7 @@ st.markdown("""
     .metric-value { font-size: 1.8rem; font-weight: bold; color: #1E3A8A; }
     .metric-label { font-size: 0.9rem; color: #6B7280; }
     .success-box { background-color: #d1fae5; color: #065f46; padding: 10px; border-radius: 5px; margin: 10px 0; }
+    .stButton>button { width: 100%; border-radius: 5px; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -32,7 +33,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==============================================================================
-# PARTE 1: APP 2 - CÓDIGO ORIGINAL DA HÄFELE (INTACTO)
+# PARTE 1: CÓDIGO ORIGINAL DO APP 2 (HÄFELE) - INTACTO
 # ==============================================================================
 
 class HafelePDFParser:
@@ -81,10 +82,10 @@ class HafelePDFParser:
         self._calculate_totals()
     
     def _find_all_items(self, text: str) -> List[Dict]:
-        """Encontra todos os itens no texto (SUA REGEX ORIGINAL)"""
+        """Encontra todos os itens no texto"""
         items = []
         
-        # Padrão para encontrar início de itens (Do seu código original)
+        # Padrão para encontrar início de itens (SEU REGEX ORIGINAL)
         item_pattern = r'(?:^|\n)(\d+)\s+(\d{4}\.\d{2}\.\d{2})\s+(\d+)\s'
         matches = list(re.finditer(item_pattern, text))
         
@@ -103,7 +104,7 @@ class HafelePDFParser:
         return items
     
     def _parse_item(self, text: str, item_num: str, ncm: str, codigo: str) -> Optional[Dict]:
-        """Parse de um item individual (SEU CÓDIGO ORIGINAL)"""
+        """Parse de um item individual"""
         try:
             item = {
                 'numero_item': item_num,
@@ -341,8 +342,6 @@ class FinancialAnalyzer:
 # ==============================================================================
 
 ADICAO_FIELDS_ORDER = [
-    # ... (Sua lista gigante de campos layout 8686 - Mantida resumida aqui para não estourar o limite, 
-    # o código completo usa a mesma lista que você forneceu no APP 1) ...
     {"tag": "acrescimo", "type": "complex", "children": [
         {"tag": "codigoAcrescimo", "default": "17"},
         {"tag": "denominacao", "default": "OUTROS ACRESCIMOS AO VALOR ADUANEIRO"},
@@ -351,7 +350,6 @@ ADICAO_FIELDS_ORDER = [
         {"tag": "valorMoedaNegociada", "default": "000000000000000"},
         {"tag": "valorReais", "default": "000000000000000"}
     ]},
-    # ... Todos os outros campos do layout 8686 ...
     {"tag": "cideValorAliquotaEspecifica", "default": "00000000000"},
     {"tag": "cideValorDevido", "default": "000000000000000"},
     {"tag": "cideValorRecolher", "default": "000000000000000"},
@@ -670,7 +668,7 @@ class DataFormatter:
         return data
 
 class DuimpPDFParser:
-    """Parser do App 1"""
+    """Parser do App 1 (Mantido original)"""
     def __init__(self, file_stream):
         self.doc = fitz.open(stream=file_stream, filetype="pdf")
         self.full_text = ""
@@ -904,7 +902,7 @@ class XMLBuilder:
                 val = footer_map.get(tag, default_val)
                 etree.SubElement(self.duimp, tag).text = val
         
-        # Header XML EXATO
+        # --- HEADER XML EXATO ---
         xml_content = etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=False)
         header = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         return header + xml_content
