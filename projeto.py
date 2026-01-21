@@ -7,6 +7,8 @@ import pandas as pd
 import tempfile
 import os
 import logging
+# AQUI ESTAVA O ERRO: Faltava importar Dict, List e Optional
+from typing import Dict, List, Optional
 
 # ==============================================================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -350,7 +352,7 @@ class DataFormatter:
         return data
 
 # ==============================================================================
-# 2. PARSERS (APP 1 & APP 2 REVISADO)
+# 2. PARSERS (APP 1 & APP 2 CORRIGIDO)
 # ==============================================================================
 
 class DuimpPDFParser:
