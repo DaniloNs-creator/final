@@ -8,25 +8,24 @@ import numpy as np
 import tempfile
 import os
 import logging
-# CORREÇÃO CRÍTICA: Importação dos tipos para evitar NameError
-from typing import Dict, List, Optional, Any
+# IMPORTS ESSENCIAIS PARA EVITAR NAMEERROR
+from typing import Dict, List, Optional, Any, Tuple
 
 # ==============================================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ==============================================================================
 st.set_page_config(page_title="Sistema Integrado DUIMP 2026 (Final)", layout="wide")
 
-# Estilos CSS
 st.markdown("""
 <style>
     .success-box { background-color: #d4edda; color: #155724; padding: 10px; border-radius: 5px; margin-bottom: 10px; }
-    .warning-box { background-color: #fff3cd; color: #856404; padding: 10px; border-radius: 5px; margin-bottom: 10px; }
     .header-style { font-size: 24px; font-weight: bold; color: #003366; border-bottom: 2px solid #003366; margin-top: 10px; }
+    .stButton>button { width: 100%; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 1. CONSTANTES (APP 1 - LAYOUT 8686 OBRIGATÓRIO)
+# 1. CONSTANTES E UTILS (APP 1 - XML LAYOUT 8686)
 # ==============================================================================
 
 ADICAO_FIELDS_ORDER = [
@@ -257,10 +256,6 @@ FOOTER_TAGS = {
     "viaTransportePaisTransportadorNome": "CINGAPURA"
 }
 
-# ==============================================================================
-# 2. UTILS
-# ==============================================================================
-
 class DataFormatter:
     @staticmethod
     def clean_text(text):
@@ -324,13 +319,10 @@ class DataFormatter:
         try:
             base_int = int(base_xml_string)
             base_float = base_int / 100.0
-            
             cbs_val = base_float * 0.009
             cbs_str = str(int(round(cbs_val * 100))).zfill(14)
-            
             ibs_val = base_float * 0.001
             ibs_str = str(int(round(ibs_val * 100))).zfill(14)
-            
             return cbs_str, ibs_str
         except:
             return "0".zfill(14), "0".zfill(14)
@@ -360,7 +352,7 @@ class DataFormatter:
         return data
 
 # ==============================================================================
-# 3. PARSERS (APP 1 & APP 2 REVISADO)
+# 2. PARSERS (APP 1 & APP 2 REESCRITO COM BASE NO TEXTO FORNECIDO)
 # ==============================================================================
 
 class DuimpPDFParser:
@@ -422,7 +414,7 @@ class DuimpPDFParser:
         return match.group(1).strip() if match else ""
 
 class HafelePDFParser:
-    """Parser do App 2 (Redesenhado para o PDF que contém 'ITENS DA DUIMP-XXXX')"""
+    """Parser do App 2 (Completamente reescrito para o layout real do texto fornecido)"""
     
     def __init__(self):
         self.documento = {'itens': []}
@@ -439,14 +431,12 @@ class HafelePDFParser:
             
     def _process_full_text(self, text: str):
         # O arquivo PDF usa "ITENS DA DUIMP-XXXXX" como separador principal
-        # Vamos dividir o texto inteiro com base nisso
         chunks = re.split(r"ITENS DA DUIMP-(\d+)", text)
         
         items = []
         if len(chunks) > 1:
-            # chunks[0] é o inicio (capa), chunks[1] = numero 00001, chunks[2] = conteudo do item 1...
             for i in range(1, len(chunks), 2):
-                item_num_str = chunks[i] # "00001"
+                item_num_str = chunks[i] # Ex: "00001"
                 content = chunks[i+1] # Conteúdo do item
                 
                 try:
@@ -460,14 +450,14 @@ class HafelePDFParser:
         self.documento['itens'] = items
     
     def _parse_item_content(self, text: str, item_num: int) -> Dict:
-        """Extrai os dados de um bloco de item"""
+        """Extrai os dados de um bloco de item usando lógica posicional de blocos"""
         item = {
             'numero_item': item_num,
             'codigo_interno': '',
             'frete_internacional': 0.0,
             'seguro_internacional': 0.0,
             'local_aduaneiro': 0.0,
-            # Impostos (II, IPI, PIS, COFINS)
+            # Impostos
             'ii_valor_devido': 0.0, 'ii_base_calculo': 0.0, 'ii_aliquota': 0.0,
             'ipi_valor_devido': 0.0, 'ipi_base_calculo': 0.0, 'ipi_aliquota': 0.0,
             'pis_valor_devido': 0.0, 'pis_base_calculo': 0.0, 'pis_aliquota': 0.0,
@@ -475,15 +465,14 @@ class HafelePDFParser:
         }
 
         # 1. Código Interno
-        # Padrão visual: "Código interno 342.79.301" ou em linhas diferentes
-        # Usamos re.DOTALL e permitimos espaços/quebras
+        # Padrão: "Código interno" seguido de quebra de linha ou espaço e o código
         code_match = re.search(r'Código interno\s*[\n\r]*([0-9\.]+)', text)
         if code_match:
             item['codigo_interno'] = code_match.group(1).strip()
 
-        # 2. Valores Logísticos (Frete, Seguro, Local Aduaneiro)
-        # O pdfplumber as vezes extrai "Frete Internac. (R$) 41,12"
+        # 2. Valores Logísticos
         def get_val(pattern, txt):
+            # O DOTALL é essencial pois o valor pode estar na linha seguinte
             m = re.search(pattern, txt, re.IGNORECASE | re.DOTALL)
             return self._parse_valor(m.group(1)) if m else 0.0
 
@@ -492,22 +481,17 @@ class HafelePDFParser:
         item['local_aduaneiro'] = get_val(r'Local Aduaneiro\s*\(R\$\)\s*([\d\.,]+)', text)
 
         # 3. Impostos - Extração por Blocos
-        # A ordem costuma ser II -> IPI -> PIS -> COFINS
-        # Vamos dividir o texto em blocos para não misturar os valores
+        # Isolamos o texto de cada imposto para não pegar valor errado
         
-        # Encontra as posições das palavras chaves
         idx_ii = text.find("II")
         idx_ipi = text.find("IPI")
-        # PIS pode aparecer em outros contextos, procuramos "PIS" seguido de quebra ou espaço
+        # PIS pode aparecer em outros contextos, procuramos "PIS" seguido de quebra/espaço
         match_pis = re.search(r'PIS[\s\n]', text)
         idx_pis = match_pis.start() if match_pis else -1
         idx_cofins = text.find("COFINS")
 
-        # Define os textos dos blocos (se existirem)
-        # Se não achar IPI, o bloco II vai até PIS, etc.
         def get_block(start_idx, end_indices):
             if start_idx == -1: return ""
-            # Acha o menor indice que seja maior que start_idx
             valid_ends = [i for i in end_indices if i > start_idx]
             end_idx = min(valid_ends) if valid_ends else len(text)
             return text[start_idx:end_idx]
@@ -517,18 +501,12 @@ class HafelePDFParser:
         txt_pis = get_block(idx_pis, [idx_cofins])
         txt_cofins = text[idx_cofins:] if idx_cofins != -1 else ""
 
-        # Função auxiliar de extração dentro do bloco
         def extract_tax(subtext, prefix):
             if not subtext: return
-            
-            # Valor Devido - O texto pode estar quebrado "Valor Devido (R$)\n 531,00"
-            # Regex procura label + caracteres não-digitos + numero
+            # Regex tolerante a quebras de linha entre o Label e o Valor
+            # Ex: Valor Devido (R$)\n 531,00
             val = get_val(r'Valor Devido \(R\$\)[^\d]*([\d\.,]+)', subtext)
-            
-            # Base Calculo
             base = get_val(r'Base de Cálculo \(R\$\)[^\d]*([\d\.,]+)', subtext)
-            
-            # Aliquota
             aliq = get_val(r'% Alíquota[^\d]*([\d\.,]+)', subtext)
 
             item[f'{prefix}_valor_devido'] = val
@@ -551,7 +529,7 @@ class HafelePDFParser:
             return 0.0
 
 # ==============================================================================
-# 4. XML BUILDER (HEADER XML CORRIGIDO)
+# 4. XML BUILDER (HEADER CORRIGIDO E LAYOUT OBRIGATÓRIO)
 # ==============================================================================
 
 class XMLBuilder:
@@ -726,7 +704,7 @@ class XMLBuilder:
                 val = footer_map.get(tag, default_val)
                 etree.SubElement(self.duimp, tag).text = val
         
-        # --- HEADER XML CORRIGIDO ---
+        # HEADER XML EXATO
         xml_content = etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=False)
         header = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         return header + xml_content
@@ -787,7 +765,7 @@ def main():
                 except Exception as e:
                     st.error(f"Erro ao ler DUIMP: {e}")
 
-        # Processamento Häfele (Com Correção de Regex)
+        # Processamento Häfele (Corrigido para o Layout Real)
         if file_hafele and st.session_state["parsed_hafele"] is None:
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
                 tmp.write(file_hafele.getvalue())
@@ -893,7 +871,7 @@ def main():
             st.info("Aguardando dados...")
 
     with tab3:
-        st.header("💾 Gerar Arquivo Final")
+        st.header("💾 Exportar XML")
         if st.session_state["merged_df"] is not None:
             if st.button("Gerar XML (Layout 8686)", type="primary"):
                 try:
