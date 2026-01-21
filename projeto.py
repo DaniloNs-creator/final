@@ -4,28 +4,29 @@ import pdfplumber
 import re
 from lxml import etree
 import pandas as pd
+import numpy as np
 import tempfile
 import os
 import logging
-# AQUI ESTAVA O ERRO: Faltava importar Dict, List e Optional
-from typing import Dict, List, Optional
+# CORREÇÃO CRÍTICA: Importação dos tipos para evitar NameError
+from typing import Dict, List, Optional, Any
 
 # ==============================================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ==============================================================================
-st.set_page_config(page_title="Sistema Integrado DUIMP 2026", layout="wide")
+st.set_page_config(page_title="Sistema Integrado DUIMP 2026 (Final)", layout="wide")
 
-# Estilos para facilitar a visualização
+# Estilos CSS
 st.markdown("""
 <style>
     .success-box { background-color: #d4edda; color: #155724; padding: 10px; border-radius: 5px; margin-bottom: 10px; }
     .warning-box { background-color: #fff3cd; color: #856404; padding: 10px; border-radius: 5px; margin-bottom: 10px; }
-    .header-style { font-size: 20px; font-weight: bold; color: #003366; border-bottom: 2px solid #003366; margin-top: 20px; }
+    .header-style { font-size: 24px; font-weight: bold; color: #003366; border-bottom: 2px solid #003366; margin-top: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 1. CONSTANTES E UTILS (APP 1 - XML LAYOUT 8686)
+# 1. CONSTANTES (APP 1 - LAYOUT 8686 OBRIGATÓRIO)
 # ==============================================================================
 
 ADICAO_FIELDS_ORDER = [
@@ -256,6 +257,10 @@ FOOTER_TAGS = {
     "viaTransportePaisTransportadorNome": "CINGAPURA"
 }
 
+# ==============================================================================
+# 2. UTILS
+# ==============================================================================
+
 class DataFormatter:
     @staticmethod
     def clean_text(text):
@@ -319,10 +324,13 @@ class DataFormatter:
         try:
             base_int = int(base_xml_string)
             base_float = base_int / 100.0
+            
             cbs_val = base_float * 0.009
             cbs_str = str(int(round(cbs_val * 100))).zfill(14)
+            
             ibs_val = base_float * 0.001
             ibs_str = str(int(round(ibs_val * 100))).zfill(14)
+            
             return cbs_str, ibs_str
         except:
             return "0".zfill(14), "0".zfill(14)
@@ -352,11 +360,11 @@ class DataFormatter:
         return data
 
 # ==============================================================================
-# 2. PARSERS (APP 1 & APP 2 CORRIGIDO)
+# 3. PARSERS (APP 1 & APP 2 REVISADO)
 # ==============================================================================
 
 class DuimpPDFParser:
-    """Parser do App 1 (Mantido original)"""
+    """Parser do App 1 (Mantido conforme original)"""
     def __init__(self, file_stream):
         self.doc = fitz.open(stream=file_stream, filetype="pdf")
         self.full_text = ""
@@ -414,7 +422,7 @@ class DuimpPDFParser:
         return match.group(1).strip() if match else ""
 
 class HafelePDFParser:
-    """Parser do App 2 (Corrigido para ler o formato exato do PDF 'APP2.pdf')"""
+    """Parser do App 2 (Redesenhado para o PDF que contém 'ITENS DA DUIMP-XXXX')"""
     
     def __init__(self):
         self.documento = {'itens': []}
@@ -430,19 +438,17 @@ class HafelePDFParser:
             return self.documento
             
     def _process_full_text(self, text: str):
-        # CORREÇÃO CRÍTICA: O PDF usa "ITENS DA DUIMP-00001" como separador
-        # Vamos dividir o texto em blocos baseados nesse padrão
+        # O arquivo PDF usa "ITENS DA DUIMP-XXXXX" como separador principal
+        # Vamos dividir o texto inteiro com base nisso
         chunks = re.split(r"ITENS DA DUIMP-(\d+)", text)
         
         items = []
         if len(chunks) > 1:
-            # chunk[0] é o preâmbulo/capa. 
-            # chunks[1] = numero item, chunks[2] = conteudo item, etc.
+            # chunks[0] é o inicio (capa), chunks[1] = numero 00001, chunks[2] = conteudo do item 1...
             for i in range(1, len(chunks), 2):
-                item_num_str = chunks[i] # Ex: "00001"
-                content = chunks[i+1]
+                item_num_str = chunks[i] # "00001"
+                content = chunks[i+1] # Conteúdo do item
                 
-                # Converter "00001" para int "1" para bater com o DUIMP
                 try:
                     item_num = int(item_num_str)
                 except:
@@ -454,14 +460,14 @@ class HafelePDFParser:
         self.documento['itens'] = items
     
     def _parse_item_content(self, text: str, item_num: int) -> Dict:
-        """Extrai dados específicos de dentro do bloco do item"""
+        """Extrai os dados de um bloco de item"""
         item = {
             'numero_item': item_num,
             'codigo_interno': '',
             'frete_internacional': 0.0,
             'seguro_internacional': 0.0,
             'local_aduaneiro': 0.0,
-            # Impostos
+            # Impostos (II, IPI, PIS, COFINS)
             'ii_valor_devido': 0.0, 'ii_base_calculo': 0.0, 'ii_aliquota': 0.0,
             'ipi_valor_devido': 0.0, 'ipi_base_calculo': 0.0, 'ipi_aliquota': 0.0,
             'pis_valor_devido': 0.0, 'pis_base_calculo': 0.0, 'pis_aliquota': 0.0,
@@ -469,103 +475,83 @@ class HafelePDFParser:
         }
 
         # 1. Código Interno
-        # Padrão observado: "Código interno\n 342.79.301" ou "Código interno 342.79.301"
-        code_match = re.search(r'Código interno\s*([\d\.]+)', text)
+        # Padrão visual: "Código interno 342.79.301" ou em linhas diferentes
+        # Usamos re.DOTALL e permitimos espaços/quebras
+        code_match = re.search(r'Código interno\s*[\n\r]*([0-9\.]+)', text)
         if code_match:
             item['codigo_interno'] = code_match.group(1).strip()
 
-        # 2. Valores Logísticos
+        # 2. Valores Logísticos (Frete, Seguro, Local Aduaneiro)
+        # O pdfplumber as vezes extrai "Frete Internac. (R$) 41,12"
         def get_val(pattern, txt):
-            m = re.search(pattern, txt, re.IGNORECASE)
+            m = re.search(pattern, txt, re.IGNORECASE | re.DOTALL)
             return self._parse_valor(m.group(1)) if m else 0.0
 
         item['frete_internacional'] = get_val(r'Frete Internac\.\s*\(R\$\)\s*([\d\.,]+)', text)
         item['seguro_internacional'] = get_val(r'Seguro Internac\.\s*\(R\$\)\s*([\d\.,]+)', text)
         item['local_aduaneiro'] = get_val(r'Local Aduaneiro\s*\(R\$\)\s*([\d\.,]+)', text)
 
-        # 3. Impostos - Estratégia de Blocos
-        # O texto contém seções: "CALCULOS DOS TRIBUTOS ... II", depois "IPI", "PIS", "COFINS"
-        # Vamos tentar capturar os blocos de texto para evitar pegar valor de um imposto no outro
+        # 3. Impostos - Extração por Blocos
+        # A ordem costuma ser II -> IPI -> PIS -> COFINS
+        # Vamos dividir o texto em blocos para não misturar os valores
         
-        # Padrões aproximados para achar onde começa cada imposto no texto do item
+        # Encontra as posições das palavras chaves
         idx_ii = text.find("II")
         idx_ipi = text.find("IPI")
-        idx_pis = text.find("PIS") # Pode confundir com PIS-IMPORTACAO
+        # PIS pode aparecer em outros contextos, procuramos "PIS" seguido de quebra ou espaço
+        match_pis = re.search(r'PIS[\s\n]', text)
+        idx_pis = match_pis.start() if match_pis else -1
         idx_cofins = text.find("COFINS")
-        
-        # Helper para extrair dentro de um range
-        def extract_tax_data(start_idx, end_idx, prefix):
-            if start_idx == -1: return
-            subtext = text[start_idx:end_idx] if end_idx != -1 else text[start_idx:]
-            
-            # Valor Devido
-            val_dev = get_val(r'Valor Devido \(R\$\)\s*([\d\.,]+)', subtext)
-            if val_dev == 0: # Tentar padrão alternativo se houver quebra de linha estranha
-                 val_dev = get_val(r'Valor Devido \(R\$\).*?([\d\.,]+)', subtext)
-            
-            # Base Cálculo
-            base_calc = get_val(r'Base de Cálculo \(R\$\)\s*([\d\.,]+)', subtext)
-            
-            # Alíquota
-            aliq = get_val(r'% Alíquota\s*([\d\.,]+)', subtext)
 
-            item[f'{prefix}_valor_devido'] = val_dev
-            item[f'{prefix}_base_calculo'] = base_calc
+        # Define os textos dos blocos (se existirem)
+        # Se não achar IPI, o bloco II vai até PIS, etc.
+        def get_block(start_idx, end_indices):
+            if start_idx == -1: return ""
+            # Acha o menor indice que seja maior que start_idx
+            valid_ends = [i for i in end_indices if i > start_idx]
+            end_idx = min(valid_ends) if valid_ends else len(text)
+            return text[start_idx:end_idx]
+
+        txt_ii = get_block(idx_ii, [idx_ipi, idx_pis, idx_cofins])
+        txt_ipi = get_block(idx_ipi, [idx_pis, idx_cofins])
+        txt_pis = get_block(idx_pis, [idx_cofins])
+        txt_cofins = text[idx_cofins:] if idx_cofins != -1 else ""
+
+        # Função auxiliar de extração dentro do bloco
+        def extract_tax(subtext, prefix):
+            if not subtext: return
+            
+            # Valor Devido - O texto pode estar quebrado "Valor Devido (R$)\n 531,00"
+            # Regex procura label + caracteres não-digitos + numero
+            val = get_val(r'Valor Devido \(R\$\)[^\d]*([\d\.,]+)', subtext)
+            
+            # Base Calculo
+            base = get_val(r'Base de Cálculo \(R\$\)[^\d]*([\d\.,]+)', subtext)
+            
+            # Aliquota
+            aliq = get_val(r'% Alíquota[^\d]*([\d\.,]+)', subtext)
+
+            item[f'{prefix}_valor_devido'] = val
+            item[f'{prefix}_base_calculo'] = base
             item[f'{prefix}_aliquota'] = aliq
 
-        # Definir limites (assumindo ordem II -> IPI -> PIS -> COFINS, mas verificando posições)
-        # Uma lógica simplificada mas robusta:
-        
-        # II
-        ii_block = re.search(r'(CALCULOS DOS TRIBUTOS.*?)(?=IPI|PIS|COFINS|$)', text, re.DOTALL)
-        if ii_block: extract_tax_data(0, -1, 'ii') # Passamos o bloco como texto inteiro para a função auxiliar se reescrevermos ela, mas vamos usar indices globais:
-        
-        # Refazendo com regex de bloco para segurança
-        # Bloco II
-        match_ii = re.search(r'II(.*?)IPI', text, re.DOTALL)
-        if match_ii:
-            t = match_ii.group(1)
-            item['ii_valor_devido'] = get_val(r'Valor Devido \(R\$\)\s*([\d\.,]+)', t)
-            item['ii_base_calculo'] = get_val(r'Base de Cálculo \(R\$\)\s*([\d\.,]+)', t)
-            item['ii_aliquota'] = get_val(r'% Alíquota\s*([\d\.,]+)', t)
-            
-        # Bloco IPI
-        match_ipi = re.search(r'IPI(.*?)PIS', text, re.DOTALL)
-        if match_ipi:
-            t = match_ipi.group(1)
-            item['ipi_valor_devido'] = get_val(r'Valor Devido \(R\$\)\s*([\d\.,]+)', t)
-            item['ipi_base_calculo'] = get_val(r'Base de Cálculo \(R\$\)\s*([\d\.,]+)', t)
-            item['ipi_aliquota'] = get_val(r'% Alíquota\s*([\d\.,]+)', t)
-
-        # Bloco PIS (Geralmente vem antes de COFINS)
-        match_pis = re.search(r'PIS(.*?)COFINS', text, re.DOTALL)
-        if match_pis:
-            t = match_pis.group(1)
-            item['pis_valor_devido'] = get_val(r'Valor Devido \(R\$\)\s*([\d\.,]+)', t)
-            item['pis_base_calculo'] = get_val(r'Base de Cálculo \(R\$\)\s*([\d\.,]+)', t)
-            item['pis_aliquota'] = get_val(r'% Alíquota\s*([\d\.,]+)', t)
-
-        # Bloco COFINS (Até o fim ou próximo cabeçalho)
-        match_cofins = re.search(r'COFINS(.*?)(?:Item|$)', text, re.DOTALL)
-        if match_cofins:
-            t = match_cofins.group(1)
-            item['cofins_valor_devido'] = get_val(r'Valor Devido \(R\$\)\s*([\d\.,]+)', t)
-            item['cofins_base_calculo'] = get_val(r'Base de Cálculo \(R\$\)\s*([\d\.,]+)', t)
-            item['cofins_aliquota'] = get_val(r'% Alíquota\s*([\d\.,]+)', t)
+        extract_tax(txt_ii, 'ii')
+        extract_tax(txt_ipi, 'ipi')
+        extract_tax(txt_pis, 'pis')
+        extract_tax(txt_cofins, 'cofins')
 
         return item
 
     def _parse_valor(self, valor_str: str) -> float:
         if not valor_str: return 0.0
         try:
-            # Remove pontos de milhar e troca vírgula decimal por ponto
             clean = valor_str.replace('.', '').replace(',', '.')
             return float(clean)
         except:
             return 0.0
 
 # ==============================================================================
-# 3. XML BUILDER (COM HEADER CORRIGIDO)
+# 4. XML BUILDER (HEADER XML CORRIGIDO)
 # ==============================================================================
 
 class XMLBuilder:
@@ -750,14 +736,13 @@ class XMLBuilder:
 # ==============================================================================
 
 def main():
-    st.markdown('<div class="header-style">Sistema Unificado: DUIMP + Häfele (Versão 2026 Revisada)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="header-style">Sistema Unificado: DUIMP + Häfele (Versão 2026 Final)</div>', unsafe_allow_html=True)
     st.markdown("---")
 
     # Inicialização do Session State
     if "parsed_duimp" not in st.session_state: st.session_state["parsed_duimp"] = None
     if "parsed_hafele" not in st.session_state: st.session_state["parsed_hafele"] = None
     if "merged_df" not in st.session_state: st.session_state["merged_df"] = None
-    if "active_tab" not in st.session_state: st.session_state["active_tab"] = "Upload"
 
     # Abas principais
     tab1, tab2, tab3 = st.tabs(["📂 Upload e Vinculação", "📋 Conferência Detalhada", "💾 Exportação XML"])
