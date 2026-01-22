@@ -7,20 +7,20 @@ import numpy as np
 from lxml import etree
 import tempfile
 import os
-import unicodedata
 import logging
 from typing import Dict, List, Optional, Any
 
 # ==============================================================================
 # CONFIGURAÇÃO GERAL
 # ==============================================================================
-st.set_page_config(page_title="Sistema Integrado DUIMP 2026 (Pro)", layout="wide")
+st.set_page_config(page_title="Sistema Integrado DUIMP 2026 (Final)", layout="wide")
 
 st.markdown("""
 <style>
-    .main-header { font-size: 2.2rem; color: #003366; font-weight: bold; margin-bottom: 1rem; border-bottom: 2px solid #003366; }
-    .success-box { background-color: #d4edda; color: #155724; padding: 15px; border-radius: 5px; margin: 10px 0; border: 1px solid #c3e6cb; }
-    .stButton>button { width: 100%; border-radius: 5px; font-weight: bold; background-color: #003366; color: white; height: 3em; }
+    .main-header { font-size: 2.5rem; color: #003366; font-weight: bold; margin-bottom: 1rem; border-bottom: 2px solid #003366; }
+    .success-box { background-color: #d1fae5; color: #065f46; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #34d399; }
+    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; height: 3em; background-color: #003366; color: white; transition: 0.3s; }
+    .stButton>button:hover { background-color: #004080; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -29,35 +29,41 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==============================================================================
-# 1. PARSER APP 2 (HÄFELE) - ENGINE BIDIRECIONAL
+# 1. PARSER APP 2 (HÄFELE) - ENGINE PROFISSIONAL REESCRITA
 # ==============================================================================
 
 class HafelePDFParser:
     """
-    Parser profissional com extração BIDIRECIONAL (Lê Valor->Label ou Label->Valor).
-    Resolve o problema de alinhamento de colunas do PDF.
+    Parser avançado que segmenta o PDF em blocos lógicos para extração precisa de tributos.
+    Resolve problemas de formatação de tabela quebrada e mistura de dados.
     """
     
     def __init__(self):
         self.documento = {'itens': []}
         
     def parse_pdf(self, pdf_path: str) -> Dict:
-        with pdfplumber.open(pdf_path) as pdf:
-            all_text = ""
-            for page in pdf.pages:
-                # layout=True mantém a posição relativa (essencial para tabelas invertidas)
-                text = page.extract_text(layout=True)
-                if text: all_text += text + "\n"
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                all_text = ""
+                # Extração otimizada para manter fluxo de texto
+                for page in pdf.pages:
+                    # 'layout=True' é crucial para PDFs onde a posição visual importa mais que o fluxo de stream
+                    text = page.extract_text(layout=True)
+                    if text: all_text += text + "\n"
             
             self._process_full_text(all_text)
             return self.documento
+        except Exception as e:
+            logger.error(f"Erro fatal no parser Häfele: {e}")
+            return {'itens': []}
             
     def _process_full_text(self, text: str):
-        # Separador Mestre: "ITENS DA DUIMP-XXXX"
+        # Separador mestre dos itens
         chunks = re.split(r"ITENS DA DUIMP-(\d+)", text)
         
         items = []
         if len(chunks) > 1:
+            # Iteração: chunks[1]=ID, chunks[2]=Conteudo, chunks[3]=ID...
             for i in range(1, len(chunks), 2):
                 try:
                     item_num = int(chunks[i])
@@ -65,14 +71,11 @@ class HafelePDFParser:
                     item_data = self._parse_item_content(content, item_num)
                     items.append(item_data)
                 except Exception as e:
-                    logger.error(f"Erro ao processar chunk {i}: {e}")
+                    logger.warning(f"Erro ao processar item {i}: {e}")
         
         self.documento['itens'] = items
     
     def _parse_item_content(self, text: str, item_num: int) -> Dict:
-        # Normalização leve para busca (mantém quebras de linha para regex multiline)
-        text_search = text 
-        
         item = {
             'numero_item': item_num,
             'codigo_interno': '',
@@ -87,105 +90,101 @@ class HafelePDFParser:
             'cofins_valor_devido': 0.0, 'cofins_base_calculo': 0.0, 'cofins_aliquota': 0.0
         }
 
-        # 1. CÓDIGO INTERNO e DESCRIÇÃO
-        code_match = re.search(r'Código interno[^\d]*([\d\.]+)', text_search, re.IGNORECASE)
-        if code_match: item['codigo_interno'] = code_match.group(1).strip()
-
-        desc_match = re.search(r'DESCRIÇÃO COMPLEMENTAR DA MERCADORIA\s*\n?(.*?)(?=\n|CONDIÇÃO|NCM)', text_search, re.IGNORECASE | re.DOTALL)
-        if desc_match: item['descricao_complementar'] = desc_match.group(1).strip().replace('\n', ' ')
-
-        # 2. VALORES LOGÍSTICOS
-        item['frete_internacional'] = self._extract_value_flexible(r'Frete Internac', text_search)
-        item['seguro_internacional'] = self._extract_value_flexible(r'Seguro Internac', text_search)
-        item['local_aduaneiro'] = self._extract_value_flexible(r'Local Aduaneiro', text_search)
-
-        # 3. IMPOSTOS (Lógica de Blocos Isolados)
-        # Recorta o texto para analisar cada imposto separadamente
+        # --- 1. DADOS DE IDENTIFICAÇÃO ---
         
+        # Código Interno: Busca flexível ignorando caracteres intermediários
+        code_match = re.search(r'Código interno[^\d\n]*([\d\.]+)', text, re.IGNORECASE)
+        if code_match:
+            item['codigo_interno'] = code_match.group(1).strip()
+
+        # Descrição Complementar: Captura multilinhas até a próxima chave
+        desc_match = re.search(r'DESCRIÇÃO COMPLEMENTAR DA MERCADORIA\s*\n?(.*?)(?=\n|CONDIÇÃO|NCM)', text, re.IGNORECASE | re.DOTALL)
+        if desc_match:
+            raw_desc = desc_match.group(1).strip()
+            item['descricao_complementar'] = re.sub(r'\s+', ' ', raw_desc) # Remove quebras extras
+
+        # --- 2. VALORES LOGÍSTICOS ---
+        
+        item['frete_internacional'] = self._extract_value_robust(r'Frete Internac\.', text)
+        item['seguro_internacional'] = self._extract_value_robust(r'Seguro Internac\.', text)
+        item['local_aduaneiro'] = self._extract_value_robust(r'Local Aduaneiro', text)
+
+        # --- 3. ENGINE DE IMPOSTOS (SEGMENTAÇÃO) ---
+        
+        # Encontra as posições relativas dos blocos de impostos
+        # "11" é usado como fallback para "II" (erro comum de OCR)
         idx_ii = -1
-        # II pode aparecer como "11" (OCR) ou "II"
-        match_ii = re.search(r'\b(II|11)\b', text_search)
+        match_ii = re.search(r'\b(II|11)\b', text)
         if match_ii: idx_ii = match_ii.start()
         
-        idx_ipi = text_search.find("IPI", idx_ii if idx_ii != -1 else 0)
+        match_ipi = re.search(r'\bIPI\b', text)
+        idx_ipi = match_ipi.start() if match_ipi else -1
         
-        # PIS pode confundir com "PIS-IMPORTAÇÃO", buscamos a seção
-        match_pis = re.search(r'\bPIS\b', text_search[idx_ipi if idx_ipi != -1 else 0:])
-        idx_pis = (match_pis.start() + (idx_ipi if idx_ipi != -1 else 0)) if match_pis else -1
+        # Evita confundir com "PIS-IMPORTAÇÃO" ou outros textos
+        match_pis = re.search(r'\bPIS\b[\s\n]', text)
+        idx_pis = match_pis.start() if match_pis else -1
         
-        match_cofins = re.search(r'\bCOFINS\b', text_search[idx_pis if idx_pis != -1 else 0:])
-        idx_cofins = (match_cofins.start() + (idx_pis if idx_pis != -1 else 0)) if match_cofins else -1
+        match_cofins = re.search(r'\bCOFINS\b', text)
+        idx_cofins = match_cofins.start() if match_cofins else -1
 
-        def get_block(start, potential_ends):
+        # Helper para fatiar o texto
+        def get_slice(start, potential_next_starts):
             if start == -1: return ""
-            valid_ends = [x for x in potential_ends if x > start]
-            end = min(valid_ends) if valid_ends else len(text_search)
-            return text_search[start:end]
+            valid_next = [x for x in potential_next_starts if x > start]
+            end = min(valid_next) if valid_next else len(text)
+            return text[start:end]
 
-        block_ii = get_block(idx_ii, [idx_ipi, idx_pis, idx_cofins])
-        block_ipi = get_block(idx_ipi, [idx_pis, idx_cofins])
-        block_pis = get_block(idx_pis, [idx_cofins])
-        block_cofins = text_search[idx_cofins:] if idx_cofins != -1 else ""
+        # Cria as "janelas" de texto para cada imposto
+        block_ii = get_slice(idx_ii, [idx_ipi, idx_pis, idx_cofins])
+        block_ipi = get_slice(idx_ipi, [idx_pis, idx_cofins])
+        block_pis = get_slice(idx_pis, [idx_cofins])
+        block_cofins = text[idx_cofins:] if idx_cofins != -1 else ""
 
-        self._populate_tax(item, 'ii', block_ii)
-        self._populate_tax(item, 'ipi', block_ipi)
-        self._populate_tax(item, 'pis', block_pis)
-        self._populate_tax(item, 'cofins', block_cofins)
+        # Preenche os dados de cada bloco
+        self._populate_tax_from_block(item, 'ii', block_ii)
+        self._populate_tax_from_block(item, 'ipi', block_ipi)
+        self._populate_tax_from_block(item, 'pis', block_pis)
+        self._populate_tax_from_block(item, 'cofins', block_cofins)
 
         return item
 
-    def _populate_tax(self, item: Dict, prefix: str, block: str):
+    def _populate_tax_from_block(self, item: Dict, prefix: str, block: str):
         if not block: return
         
-        # Alíquota (Pode ser: "% Alíquota ... 2,1" ou "2,1 ... % Alíquota")
-        aliq = self._extract_value_flexible(r'% Alíquota', block)
-        if aliq == 0: aliq = self._extract_value_flexible(r'Ad Valorem', block)
+        # Busca Valor (Prioridade: Devido -> Recolher -> Calculado)
+        val = self._extract_value_robust(r'Valor Devido', block)
+        if val == 0: val = self._extract_value_robust(r'Valor A Recolher', block)
+        if val == 0: val = self._extract_value_robust(r'Valor Calculado', block)
+        
+        # Busca Base e Alíquota
+        base = self._extract_value_robust(r'Base de Cálculo', block)
+        if base == 0: base = self._extract_value_robust(r'Base de Calculo', block)
+        
+        aliq = self._extract_value_robust(r'% Alíquota', block)
+        if aliq == 0: aliq = self._extract_value_robust(r'Ad Valorem', block)
 
-        # Base de Cálculo
-        base = self._extract_value_flexible(r'Base de Cálculo', block)
-        
-        # Valor Devido (Tenta 'Devido', se não 'Recolher', se não 'Calculado')
-        # Tenta padrões específicos primeiro
-        val = self._extract_value_flexible(r'Valor Devido', block)
-        if val == 0: val = self._extract_value_flexible(r'Valor A Recolher', block)
-        if val == 0: val = self._extract_value_flexible(r'Valor Calculado', block)
-        
         item[f'{prefix}_valor_devido'] = val
         item[f'{prefix}_base_calculo'] = base
         item[f'{prefix}_aliquota'] = aliq
 
-    def _extract_value_flexible(self, key_pattern: str, text: str) -> float:
+    def _extract_value_robust(self, label_pattern: str, text_block: str) -> float:
         """
-        REGEX PODEROSA: Busca 'Label ... Valor' E TAMBÉM 'Valor ... Label'
-        Essencial para PDFs onde o layout coloca o valor à esquerda do rótulo.
+        Regex de Alta Permeabilidade:
+        Procura o Label + Ignora qualquer caractere não numérico ([^0-9\n]*) + Captura o número
+        Suporta tabelas quebradas como: "Valor Devido (R$)\n",,,"531,00"
         """
         try:
-            # Padrão 1: Label -> Lixo -> Valor (ex: "Valor Devido ... 1.000,00")
-            regex_fwd = key_pattern + r'[^\d\n]*?([\d\.]*,\d+)'
+            # Pattern: Label ... (lixo opcional) ... (Numero formato BR)
+            # [\d\.]*,\d+ captura 1.000,00 ou 50,00
+            regex = label_pattern + r'[^\d\n]*?([\d\.]*,\d+)'
+            match = re.search(regex, text_block, re.IGNORECASE | re.DOTALL)
             
-            # Padrão 2: Valor -> Lixo -> Label (ex: "1.000,00 ... Valor Devido")
-            # (?m) ativa multiline, ^ define inicio da linha se necessário, mas aqui buscamos proximidade
-            regex_rev = r'([\d\.]*,\d+)[^\d\n]*?' + key_pattern
-            
-            # Tenta Padrão Invertido Primeiro (comum no seu PDF para Base de Calculo e Aliquota em colunas)
-            match_rev = re.search(regex_rev, text, re.IGNORECASE)
-            if match_rev:
-                return self._parse_valor(match_rev.group(1))
-            
-            # Tenta Padrão Normal
-            match_fwd = re.search(regex_fwd, text, re.IGNORECASE)
-            if match_fwd:
-                return self._parse_valor(match_fwd.group(1))
-                
+            if match:
+                val_str = match.group(1)
+                # Limpeza final
+                clean_val = val_str.replace('.', '').replace(',', '.')
+                return float(clean_val)
             return 0.0
-        except:
-            return 0.0
-
-    def _parse_valor(self, valor_str: str) -> float:
-        if not valor_str: return 0.0
-        try:
-            clean = valor_str.replace('.', '').replace(',', '.')
-            return float(clean)
         except:
             return 0.0
 
@@ -348,7 +347,7 @@ class DataFormatter:
                 data["fornecedorLogradouro"] = street_part
         return data
 
-# LAYOUT 8686 - MANTIDO INTEGRALMENTE
+# LAYOUT OBRIGATÓRIO 8686 - MANTIDO
 ADICAO_FIELDS_ORDER = [
     {"tag": "acrescimo", "type": "complex", "children": [
         {"tag": "codigoAcrescimo", "default": "17"},
@@ -576,7 +575,7 @@ FOOTER_TAGS = {
 # ==============================================================================
 
 def main():
-    st.markdown('<div class="main-header">Sistema Unificado: DUIMP + Häfele (Versão Final Pro)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">Sistema Unificado 2026 (Final)</div>', unsafe_allow_html=True)
 
     if "parsed_duimp" not in st.session_state: st.session_state["parsed_duimp"] = None
     if "parsed_hafele" not in st.session_state: st.session_state["parsed_hafele"] = None
@@ -643,7 +642,7 @@ def main():
                             if item_num in src_map:
                                 src = src_map[item_num]
                                 
-                                # CONCATENAÇÃO SOLICITADA
+                                # CONCATENAÇÃO OBRIGATÓRIA
                                 cod_interno = src.get('codigo_interno', '')
                                 desc_comp = src.get('descricao_complementar', '')
                                 final_number = f"{cod_interno} - {desc_comp}" if desc_comp else cod_interno
