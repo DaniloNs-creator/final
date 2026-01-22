@@ -1,289 +1,584 @@
 import streamlit as st
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import pdfplumber
 import re
-import pandas as pd
+import json
+from typing import Dict, List, Tuple, Optional, Any
 import tempfile
 import os
+from dataclasses import dataclass
+from collections import defaultdict
 import logging
-from typing import Dict, List, Optional, Any
 
-# ==============================================================================
-# CONFIGURAÇÃO GERAL
-# ==============================================================================
-st.set_page_config(page_title="Sistema Integrado DUIMP 2026 (Final)", layout="wide")
-
-st.markdown("""
-<style>
-    .main-header { font-size: 2.2rem; color: #003366; font-weight: bold; margin-bottom: 1rem; border-bottom: 2px solid #003366; }
-    .stButton>button { width: 100%; border-radius: 5px; font-weight: bold; background-color: #003366; color: white; height: 3em; }
-    .metric-box { background-color: #f0f2f6; border-radius: 5px; padding: 15px; border-left: 5px solid #003366; }
-</style>
-""", unsafe_allow_html=True)
-
+# Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ==============================================================================
-# 1. PARSER APP 2 (HÄFELE) - ENGINE HÍBRIDA (PADRÃO + INVERTIDO)
-# ==============================================================================
+# Configuração da página
+st.set_page_config(
+    page_title="Sistema Completo de Análise Häfele",
+    page_icon="🏭",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Estilos CSS personalizados
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.8rem;
+        color: #1E3A8A;
+        font-weight: bold;
+        margin-bottom: 1rem;
+    }
+    .sub-header {
+        font-size: 1.8rem;
+        color: #2563EB;
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+        border-bottom: 3px solid #E5E7EB;
+        padding-bottom: 0.5rem;
+        font-weight: 600;
+    }
+    .section-card {
+        background: #FFFFFF;
+        border-radius: 12px;
+        padding: 1.5rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        margin-bottom: 1.5rem;
+        border: 1px solid #E5E7EB;
+    }
+    .metric-value {
+        font-size: 2.2rem;
+        font-weight: bold;
+        color: #1E3A8A;
+        line-height: 1;
+    }
+    .metric-label {
+        font-size: 1rem;
+        color: #6B7280;
+        margin-top: 0.5rem;
+        font-weight: 500;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 class HafelePDFParser:
-    """
-    Parser profissional capaz de ler layouts mistos (Standard e Left-Shifted).
-    """
+    """Parser robusto para PDFs da Häfele"""
+    
     def __init__(self):
-        self.documento = {'itens': [], 'totais': {}}
+        self.documento = {
+            'cabecalho': {},
+            'itens': [],
+            'totais': {}
+        }
         
     def parse_pdf(self, pdf_path: str) -> Dict:
-        with pdfplumber.open(pdf_path) as pdf:
-            all_text = ""
-            for page in pdf.pages:
-                # layout=True mantém a posição relativa visual (essencial para este PDF)
-                text = page.extract_text(layout=True)
-                if text: 
-                    # Remove rodapés para limpar a leitura contínua
-                    text = re.sub(r'--- PAGE \d+ ---', '', text)
-                    all_text += text + "\n"
+        """Parse completo do PDF"""
+        try:
+            logger.info(f"Iniciando parsing do PDF: {pdf_path}")
             
+            with pdfplumber.open(pdf_path) as pdf:
+                total_pages = len(pdf.pages)
+                logger.info(f"PDF com {total_pages} páginas")
+                
+                all_text = ""
+                for page_num, page in enumerate(pdf.pages, 1):
+                    logger.info(f"Processando página {page_num}/{total_pages}")
+                    text = page.extract_text()
+                    if text:
+                        all_text += text + "\n"
+            
+            # Processar todo o texto
             self._process_full_text(all_text)
+            
+            logger.info(f"Parsing concluído. {len(self.documento['itens'])} itens processados.")
             return self.documento
             
+        except Exception as e:
+            logger.error(f"Erro no parsing: {str(e)}")
+            raise
+    
     def _process_full_text(self, text: str):
-        # Separa os itens pelo marcador mestre "ITENS DA DUIMP"
-        chunks = re.split(r"ITENS DA DUIMP-(\d+)", text)
-        
-        items = []
-        if len(chunks) > 1:
-            # chunks[1]=Numero, chunks[2]=Conteudo...
-            for i in range(1, len(chunks), 2):
-                try:
-                    item_num = int(chunks[i])
-                    content = chunks[i+1]
-                    item_data = self._parse_item_content(content, item_num)
-                    items.append(item_data)
-                except Exception as e:
-                    logger.error(f"Erro item {i}: {e}")
-        
+        """Processa todo o texto do PDF"""
+        # Encontrar todos os itens
+        items = self._find_all_items(text)
         self.documento['itens'] = items
+        
+        # Calcular totais
         self._calculate_totals()
     
-    def _parse_item_content(self, text: str, item_num: int) -> Dict:
-        item = {
-            'numero_item': item_num,
-            'codigo_interno': '',
-            'descricao_complementar': '',
-            'ncm': '',
-            'produto': '',
-            'valor_total': 0.0,
-            'local_aduaneiro': 0.0, # BASE DE CÁLCULO PRINCIPAL
-            'frete_internacional': 0.0,
-            'seguro_internacional': 0.0,
-            # Impostos (Valores e Alíquotas)
-            'ii_valor': 0.0, 'ii_aliq': 0.0,
-            'ipi_valor': 0.0, 'ipi_aliq': 0.0,
-            'pis_valor': 0.0, 'pis_aliq': 0.0,
-            'cofins_valor': 0.0, 'cofins_aliq': 0.0
-        }
-
-        # --- 1. IDENTIFICAÇÃO (CÓDIGO E DESCRIÇÃO) ---
-        code_match = re.search(r'Código interno[^\d\n]*([\d\.]+)', text, re.IGNORECASE)
-        if code_match: item['codigo_interno'] = code_match.group(1).strip()
-
-        desc_match = re.search(r'DESCRIÇÃO COMPLEMENTAR DA MERCADORIA\s*\n?(.*?)(?=\n|CONDIÇÃO|NCM)', text, re.IGNORECASE | re.DOTALL)
-        if desc_match: item['descricao_complementar'] = desc_match.group(1).strip().replace('\n', ' ')
+    def _find_all_items(self, text: str) -> List[Dict]:
+        """Encontra todos os itens no texto"""
+        items = []
         
-        prod_match = re.search(r'DENOMINACAO DO PRODUTO\s*\n?(.*?)(?=\n|DESCRICAO)', text, re.IGNORECASE | re.DOTALL)
-        if prod_match: item['produto'] = prod_match.group(1).strip()
-
-        ncm_match = re.search(r'NCM\s*\n?([\d\.]+)', text)
-        if ncm_match: item['ncm'] = ncm_match.group(1).strip()
-
-        # --- 2. VALORES (USANDO SUA LÓGICA PREFERIDA PARA ADUANEIRO) ---
+        # Padrão para encontrar início de itens
+        # Procurando: número_item NCM código (ex: "1 3926.30.00 123")
+        item_pattern = r'(\d+)\s+(\d{4}\.\d{2}\.\d{2})\s+(\d+)\s'
+        matches = list(re.finditer(item_pattern, text))
         
-        # Local Aduaneiro (Padrão: Label -> Valor)
-        # Sua lógica: re.search(r'Local Aduaneiro \(R\$\)\s*([\d\.,]+)')
-        loc_adu = re.search(r'Local Aduaneiro\s*\(R\$\)\s*([\d\.,]+)', text, re.IGNORECASE)
-        if loc_adu: item['local_aduaneiro'] = self._parse_valor(loc_adu.group(1))
-
-        # Frete e Seguro (Padrão: Label -> Valor)
-        item['frete_internacional'] = self._extract_smart(r'Frete Internac\.', text, force_forward=True)
-        item['seguro_internacional'] = self._extract_smart(r'Seguro Internac\.', text, force_forward=True)
-        item['valor_total'] = self._extract_smart(r'Valor Tot\. Cond Venda', text, force_forward=True)
-
-        # --- 3. IMPOSTOS (LÓGICA HÍBRIDA DE BLOCOS) ---
-        # Isolamos cada imposto para evitar misturar dados
-        self._extract_taxes_blocks(text, item)
-
-        return item
-
-    def _extract_taxes_blocks(self, text: str, item: Dict):
-        """
-        Recorta o texto em blocos (II, IPI...) e aplica extração bidirecional (Frente/Trás).
-        """
-        # Encontra índices
-        idx_ii = -1
-        match_ii = re.search(r'\b(II|11)\b[\s\n]', text) # Aceita II ou 11 (OCR)
-        if match_ii: idx_ii = match_ii.start()
+        logger.info(f"Encontrados {len(matches)} padrões de itens")
         
-        idx_ipi = text.find("IPI", idx_ii if idx_ii != -1 else 0)
-        
-        match_pis = re.search(r'\bPIS\b[\s\n-]', text) # PIS isolado
-        idx_pis = match_pis.start() if match_pis else -1
-        
-        match_cofins = re.search(r'\bCOFINS\b[\s\n]', text)
-        idx_cofins = match_cofins.start() if match_cofins else -1
-
-        def get_block(start, potential_ends):
-            if start == -1: return ""
-            valid = [x for x in potential_ends if x > start]
-            end = min(valid) if valid else len(text)
-            return text[start:end]
-
-        # Blocos
-        b_ii = get_block(idx_ii, [idx_ipi, idx_pis, idx_cofins])
-        b_ipi = get_block(idx_ipi, [idx_pis, idx_cofins])
-        b_pis = get_block(idx_pis, [idx_cofins])
-        b_cofins = text[idx_cofins:] if idx_cofins != -1 else ""
-
-        # Extração (Tenta Padrão Invertido Primeiro para Valores de Imposto)
-        def process_tax(prefix, block):
-            if not block: return
+        for i, match in enumerate(matches):
+            start_pos = match.start()
+            end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(text)
             
-            # Valor (Geralmente invertido: "531,00 Valor Devido")
-            val = self._extract_smart(r'Valor Devido', block)
-            if val == 0: val = self._extract_smart(r'Valor A Recolher', block)
-            if val == 0: val = self._extract_smart(r'Valor Calculado', block)
+            item_text = text[start_pos:end_pos]
+            item_data = self._parse_item(item_text, match.group(1), match.group(2), match.group(3))
             
-            # Alíquota
-            aliq = self._extract_smart(r'% Alíquota', block)
-            if aliq == 0: aliq = self._extract_smart(r'Ad Valorem', block)
-
-            item[f'{prefix}_valor'] = val
-            item[f'{prefix}_aliq'] = aliq
-
-        process_tax('ii', b_ii)
-        process_tax('ipi', b_ipi)
-        process_tax('pis', b_pis)
-        process_tax('cofins', b_cofins)
-
-    def _extract_smart(self, label_pattern: str, text: str, force_forward: bool = False) -> float:
-        """
-        Tenta extrair o valor olhando para frente (Label -> Valor) E para trás (Valor -> Label).
-        """
+            if item_data:
+                items.append(item_data)
+        
+        return items
+    
+    def _parse_item(self, text: str, item_num: str, ncm: str, codigo: str) -> Optional[Dict]:
+        """Parse de um item individual"""
         try:
-            # 1. Forward (Padrão): Label ... Valor
-            regex_fwd = label_pattern + r'[^\d\n]*?([\d\.]*,\d+)'
-            match_fwd = re.search(regex_fwd, text, re.IGNORECASE | re.DOTALL)
-            val_fwd = self._parse_valor(match_fwd.group(1)) if match_fwd else 0.0
+            item = {
+                'numero_item': item_num,
+                'ncm': ncm,
+                'codigo_produto': codigo,
+                'nome_produto': '',
+                'codigo_interno': '',
+                'quantidade': 0,
+                'peso_liquido': 0,
+                'valor_unitario': 0,
+                'valor_total': 0,
+                'frete_internacional': 0,
+                'seguro_internacional': 0,
+                'ii_valor_devido': 0,
+                'ipi_valor_devido': 0,
+                'pis_valor_devido': 0,
+                'cofins_valor_devido': 0,
+                'total_impostos': 0,
+                'valor_total_com_impostos': 0
+            }
             
-            if force_forward: return val_fwd
-
-            # 2. Reverse (Invertido): Valor ... Label (comum em tabelas quebradas)
-            # ([\d\.]*,\d+) ... Label
-            regex_rev = r'([\d\.]*,\d+)[^\d\n]*?' + label_pattern
-            match_rev = re.search(regex_rev, text, re.IGNORECASE)
-            val_rev = self._parse_valor(match_rev.group(1)) if match_rev else 0.0
-
-            # Prioridade: Maior valor ou Reverse se existir (já que forward pode pegar lixo distante)
-            return val_rev if val_rev > 0 else val_fwd
+            # Extrair nome do produto
+            nome_match = re.search(r'DENOMINACAO DO PRODUTO\s*\n(.+?)\n', text, re.IGNORECASE)
+            if nome_match:
+                item['nome_produto'] = nome_match.group(1).strip()
+            
+            # Extrair código interno
+            codigo_match = re.search(r'Código interno\s+(.+?)\n', text, re.IGNORECASE)
+            if codigo_match:
+                item['codigo_interno'] = codigo_match.group(1).strip()
+            
+            # Extrair quantidade
+            qtd_match = re.search(r'Qtde Unid\. Comercial\s+([\d\.,]+)', text)
+            if qtd_match:
+                item['quantidade'] = self._parse_valor(qtd_match.group(1))
+            
+            # Extrair peso
+            peso_match = re.search(r'Peso Líquido \(KG\)\s+([\d\.,]+)', text)
+            if peso_match:
+                item['peso_liquido'] = self._parse_valor(peso_match.group(1))
+            
+            # Extrair valor unitário
+            valor_unit_match = re.search(r'Valor Unit Cond Venda\s+([\d\.,]+)', text)
+            if valor_unit_match:
+                item['valor_unitario'] = self._parse_valor(valor_unit_match.group(1))
+            
+            # Extrair valor total
+            valor_total_match = re.search(r'Valor Tot\. Cond Venda\s+([\d\.,]+)', text)
+            if valor_total_match:
+                item['valor_total'] = self._parse_valor(valor_total_match.group(1))
+            
+            # Extrair frete
+            frete_match = re.search(r'Frete Internac\. \(R\$\)\s+([\d\.,]+)', text)
+            if frete_match:
+                item['frete_internacional'] = self._parse_valor(frete_match.group(1))
+            
+            # Extrair seguro
+            seguro_match = re.search(r'Seguro Internac\. \(R\$\)\s+([\d\.,]+)', text)
+            if seguro_match:
+                item['seguro_internacional'] = self._parse_valor(seguro_match.group(1))
+            
+            # Extrair impostos - MÉTODO DIRETO E ROBUSTO
+            item = self._extract_taxes_directly(text, item)
+            
+            # Calcular totais
+            item['total_impostos'] = (
+                item['ii_valor_devido'] + 
+                item['ipi_valor_devido'] + 
+                item['pis_valor_devido'] + 
+                item['cofins_valor_devido']
+            )
+            
+            item['valor_total_com_impostos'] = item['valor_total'] + item['total_impostos']
+            
+            return item
+            
+        except Exception as e:
+            logger.error(f"Erro ao parsear item {item_num}: {str(e)}")
+            return None
+    
+    def _extract_taxes_directly(self, text: str, item: Dict) -> Dict:
+        """Extrai impostos diretamente do texto"""
+        # Método 1: Buscar padrões específicos
+        patterns = {
+            'ii_valor_devido': r'II.*?Valor Devido \(R\$\)\s*([\d\.,]+)',
+            'ipi_valor_devido': r'IPI.*?Valor Devido \(R\$\)\s*([\d\.,]+)',
+            'pis_valor_devido': r'PIS.*?Valor Devido \(R\$\)\s*([\d\.,]+)',
+            'cofins_valor_devido': r'COFINS.*?Valor Devido \(R\$\)\s*([\d\.,]+)'
+        }
+        
+        # Método 2: Buscar todas as ocorrências de "Valor Devido"
+        valor_devido_pattern = r'Valor Devido \(R\$\)\s*([\d\.,]+)'
+        valor_devido_matches = list(re.finditer(valor_devido_pattern, text))
+        
+        # Se encontrou os valores, atribuir na ordem
+        if len(valor_devido_matches) >= 4:
+            item['ii_valor_devido'] = self._parse_valor(valor_devido_matches[0].group(1))
+            item['ipi_valor_devido'] = self._parse_valor(valor_devido_matches[1].group(1))
+            item['pis_valor_devido'] = self._parse_valor(valor_devido_matches[2].group(1))
+            item['cofins_valor_devido'] = self._parse_valor(valor_devido_matches[3].group(1))
+        
+        # Método 3: Buscar por cada imposto individualmente
+        else:
+            for tax_key, pattern in patterns.items():
+                match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+                if match:
+                    item[tax_key] = self._parse_valor(match.group(1))
+        
+        # Método 4: Buscar por valores próximos aos nomes dos impostos
+        if item['pis_valor_devido'] == 0:
+            item['pis_valor_devido'] = self._find_tax_near_text(text, 'PIS')
+        
+        if item['cofins_valor_devido'] == 0:
+            item['cofins_valor_devido'] = self._find_tax_near_text(text, 'COFINS')
+        
+        return item
+    
+    def _find_tax_near_text(self, text: str, tax_name: str) -> float:
+        """Encontra valor de imposto próximo ao nome"""
+        lines = text.split('\n')
+        
+        for i, line in enumerate(lines):
+            if tax_name in line.upper():
+                # Procurar números nas próximas 5 linhas
+                for j in range(i, min(i + 5, len(lines))):
+                    # Padrão para valores monetários
+                    valor_match = re.search(r'([\d\.,]+)\s*$', lines[j])
+                    if valor_match:
+                        return self._parse_valor(valor_match.group(1))
+        
+        return 0.0
+    
+    def _calculate_totals(self):
+        """Calcula totais do documento"""
+        totais = {
+            'valor_total_mercadoria': 0,
+            'peso_total': 0,
+            'quantidade_total': 0,
+            'ii_total': 0,
+            'ipi_total': 0,
+            'pis_total': 0,
+            'cofins_total': 0,
+            'total_impostos': 0,
+            'frete_total': 0,
+            'seguro_total': 0
+        }
+        
+        for item in self.documento['itens']:
+            totais['valor_total_mercadoria'] += item.get('valor_total', 0)
+            totais['peso_total'] += item.get('peso_liquido', 0)
+            totais['quantidade_total'] += item.get('quantidade', 0)
+            totais['ii_total'] += item.get('ii_valor_devido', 0)
+            totais['ipi_total'] += item.get('ipi_valor_devido', 0)
+            totais['pis_total'] += item.get('pis_valor_devido', 0)
+            totais['cofins_total'] += item.get('cofins_valor_devido', 0)
+            totais['total_impostos'] += item.get('total_impostos', 0)
+            totais['frete_total'] += item.get('frete_internacional', 0)
+            totais['seguro_total'] += item.get('seguro_internacional', 0)
+        
+        totais['valor_total_com_impostos'] = (
+            totais['valor_total_mercadoria'] + 
+            totais['total_impostos']
+        )
+        
+        self.documento['totais'] = totais
+    
+    def _parse_valor(self, valor_str: str) -> float:
+        """Converte string de valor para float"""
+        try:
+            if not valor_str or valor_str.strip() == '':
+                return 0.0
+            
+            # Remover pontos de milhar e converter vírgula decimal
+            valor_limpo = valor_str.replace('.', '').replace(',', '.')
+            return float(valor_limpo)
         except:
             return 0.0
 
-    def _calculate_totals(self):
-        totais = {'total_impostos': 0.0, 'total_mercadoria': 0.0}
-        for item in self.documento['itens']:
-            imp = item['ii_valor'] + item['ipi_valor'] + item['pis_valor'] + item['cofins_valor']
-            totais['total_impostos'] += imp
-            totais['total_mercadoria'] += item['valor_total']
-        self.documento['totais'] = totais
-
-    def _parse_valor(self, valor_str: str) -> float:
-        if not valor_str: return 0.0
-        try:
-            clean = valor_str.replace('.', '').replace(',', '.')
-            return float(clean)
-        except: return 0.0
-
 class FinancialAnalyzer:
+    """Analisador financeiro simples"""
+    
     def __init__(self, documento: Dict):
         self.documento = documento
-    
+        self.itens_df = None
+        
     def prepare_dataframe(self):
-        # Converte lista de dicts para DataFrame flat
-        data = []
-        for it in self.documento['itens']:
-            # Concatenação solicitada
-            cod = it.get('codigo_interno', '')
-            desc = it.get('descricao_complementar', '')
-            full_id = f"{cod} - {desc}" if desc else cod
-            
-            row = {
-                'Item': it.get('numero_item'),
-                'ID Composto': full_id,
-                'Código Interno': cod,
-                'Descrição': desc,
-                'Produto': it.get('produto', ''),
-                'NCM': it.get('ncm', ''),
-                'Aduaneiro (Base)': it.get('local_aduaneiro', 0.0),
-                'Frete': it.get('frete_internacional', 0.0),
-                'Seguro': it.get('seguro_internacional', 0.0),
-                'II Valor': it.get('ii_valor', 0.0), 'II %': it.get('ii_aliq', 0.0),
-                'IPI Valor': it.get('ipi_valor', 0.0), 'IPI %': it.get('ipi_aliq', 0.0),
-                'PIS Valor': it.get('pis_valor', 0.0), 'PIS %': it.get('pis_aliq', 0.0),
-                'COFINS Valor': it.get('cofins_valor', 0.0), 'COFINS %': it.get('cofins_aliq', 0.0)
-            }
-            data.append(row)
-        return pd.DataFrame(data)
-
-# ==============================================================================
-# MAIN APP
-# ==============================================================================
+        """Prepara DataFrame para análise"""
+        itens_data = []
+        
+        for item in self.documento['itens']:
+            itens_data.append({
+                'Item': item.get('numero_item', ''),
+                'NCM': item.get('ncm', ''),
+                'Código': item.get('codigo_produto', ''),
+                'Código Interno': item.get('codigo_interno', ''),
+                'Produto': item.get('nome_produto', ''),
+                'Quantidade': item.get('quantidade', 0),
+                'Peso (kg)': item.get('peso_liquido', 0),
+                'Valor Unit. (R$)': item.get('valor_unitario', 0),
+                'Valor Total (R$)': item.get('valor_total', 0),
+                'Frete (R$)': item.get('frete_internacional', 0),
+                'Seguro (R$)': item.get('seguro_internacional', 0),
+                'II (R$)': item.get('ii_valor_devido', 0),
+                'IPI (R$)': item.get('ipi_valor_devido', 0),
+                'PIS (R$)': item.get('pis_valor_devido', 0),
+                'COFINS (R$)': item.get('cofins_valor_devido', 0),
+                'Total Impostos (R$)': item.get('total_impostos', 0),
+                'Valor c/ Impostos (R$)': item.get('valor_total_com_impostos', 0),
+                'Custo Unitário (R$)': item.get('valor_total_com_impostos', 0) / item.get('quantidade', 1) if item.get('quantidade', 0) > 0 else 0
+            })
+        
+        self.itens_df = pd.DataFrame(itens_data)
+        return self.itens_df
 
 def main():
-    st.markdown('<div class="main-header">🏭 Sistema de Análise Häfele (Final)</div>', unsafe_allow_html=True)
-
+    """Função principal"""
+    
+    # Cabeçalho
+    st.markdown('<h1 class="main-header">🏭 Sistema de Análise de Extratos Häfele</h1>', unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="section-card">
+        <strong>🔍 Extração Simplificada e Robusta</strong><br>
+        Sistema focado em extrair todos os dados dos itens, incluindo impostos PIS e COFINS.
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Sidebar
     with st.sidebar:
-        st.header("Upload")
-        uploaded_file = st.file_uploader("Arquivo Häfele (.pdf)", type=['pdf'])
-
-    if uploaded_file:
+        st.markdown("### 📁 Upload do Documento")
+        
+        uploaded_file = st.file_uploader(
+            "Selecione o arquivo PDF",
+            type=['pdf'],
+            help="Documento PDF no formato padrão Häfele"
+        )
+        
+        st.markdown("---")
+        
+        if uploaded_file:
+            file_size = uploaded_file.size / (1024 * 1024)
+            st.info(f"📄 Arquivo: {uploaded_file.name}")
+            st.success(f"📊 Tamanho: {file_size:.2f} MB")
+        else:
+            st.warning("⏳ Aguardando upload do arquivo")
+    
+    # Processamento principal
+    if uploaded_file is not None:
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
-                tmp.write(uploaded_file.getvalue())
-                tmp_path = tmp.name
+            # Salvar arquivo temporariamente
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                tmp_file.write(uploaded_file.getvalue())
+                tmp_path = tmp_file.name
+            
+            # Progresso
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # Etapa 1: Parsing
+            status_text.text("📄 Analisando documento PDF...")
+            progress_bar.progress(30)
             
             parser = HafelePDFParser()
-            doc = parser.parse_pdf(tmp_path)
-            os.unlink(tmp_path)
+            documento = parser.parse_pdf(tmp_path)
             
-            analyser = FinancialAnalyzer(doc)
+            # Etapa 2: Análise
+            status_text.text("📊 Processando dados...")
+            progress_bar.progress(60)
+            
+            analyser = FinancialAnalyzer(documento)
             df = analyser.prepare_dataframe()
             
-            # --- DASHBOARD ---
-            totais = doc['totais']
-            c1, c2 = st.columns(2)
-            c1.markdown(f'<div class="metric-box"><h3>Total Mercadoria</h3><h2>R$ {totais.get("total_mercadoria", 0):,.2f}</h2></div>', unsafe_allow_html=True)
-            c2.markdown(f'<div class="metric-box"><h3>Total Impostos</h3><h2>R$ {totais.get("total_impostos", 0):,.2f}</h2></div>', unsafe_allow_html=True)
+            progress_bar.progress(100)
+            status_text.text("✅ Processamento concluído!")
             
-            st.divider()
-            st.subheader(f"📦 Itens Extraídos ({len(df)})")
+            # Limpar arquivo
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
             
-            # Formatação para exibição
-            display_df = df.copy()
-            cols_moeda = ['Aduaneiro (Base)', 'Frete', 'Seguro', 'II Valor', 'IPI Valor', 'PIS Valor', 'COFINS Valor']
-            for c in cols_moeda:
-                display_df[c] = display_df[c].apply(lambda x: f"R$ {x:,.2f}")
+            # Informações do processamento
+            totais = documento['totais']
+            st.success(f"✅ **{len(documento['itens'])} itens** extraídos com sucesso!")
             
-            st.dataframe(display_df, use_container_width=True, height=500)
+            # Métricas principais
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.markdown(f"""
+                <div class="section-card">
+                    <div class="metric-value">R$ {totais.get('valor_total_mercadoria', 0):,.2f}</div>
+                    <div class="metric-label">Valor Mercadoria</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown(f"""
+                <div class="section-card">
+                    <div class="metric-value">R$ {totais.get('total_impostos', 0):,.2f}</div>
+                    <div class="metric-label">Total Impostos</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                st.markdown(f"""
+                <div class="section-card">
+                    <div class="metric-value">R$ {totais.get('pis_total', 0):,.2f}</div>
+                    <div class="metric-label">Total PIS</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col4:
+                st.markdown(f"""
+                <div class="section-card">
+                    <div class="metric-value">R$ {totais.get('cofins_total', 0):,.2f}</div>
+                    <div class="metric-label">Total COFINS</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Tabela de itens
+            st.markdown('<h2 class="sub-header">📦 Lista de Itens</h2>', unsafe_allow_html=True)
+            
+            # Filtros simples
+            search_term = st.text_input("🔍 Buscar por produto ou código:", "")
+            
+            if search_term:
+                filtered_df = df[
+                    df['Produto'].str.contains(search_term, case=False, na=False) |
+                    df['Código Interno'].astype(str).str.contains(search_term, case=False, na=False) |
+                    df['Código'].astype(str).str.contains(search_term, case=False, na=False)
+                ]
+            else:
+                filtered_df = df
+            
+            # Formatar valores
+            display_df = filtered_df.copy()
+            
+            # Formatar colunas numéricas
+            format_cols = ['Quantidade', 'Peso (kg)', 'Valor Unit. (R$)', 'Valor Total (R$)',
+                         'Frete (R$)', 'Seguro (R$)', 'II (R$)', 'IPI (R$)',
+                         'PIS (R$)', 'COFINS (R$)', 'Total Impostos (R$)',
+                         'Valor c/ Impostos (R$)', 'Custo Unitário (R$)']
+            
+            for col in format_cols:
+                if col in display_df.columns:
+                    if 'Unitário' in col or 'Unit.' in col:
+                        display_df[col] = display_df[col].apply(lambda x: f'R$ {x:,.4f}' if pd.notnull(x) else 'R$ 0,0000')
+                    else:
+                        display_df[col] = display_df[col].apply(lambda x: f'R$ {x:,.2f}' if pd.notnull(x) else 'R$ 0,00')
+            
+            # Exibir tabela
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                height=600
+            )
+            
+            # Estatísticas de extração
+            zero_pis = (df['PIS (R$)'] == 0).sum()
+            zero_cofins = (df['COFINS (R$)'] == 0).sum()
+            
+            if zero_pis > 0 or zero_cofins > 0:
+                st.warning(f"""
+                ⚠️ **Atenção:** Alguns impostos não foram extraídos completamente:
+                - {zero_pis} itens sem valor de PIS
+                - {zero_cofins} itens sem valor de COFINS
+                """)
             
             # Exportação
-            csv = df.to_csv(index=False, sep=';', encoding='utf-8-sig').encode('utf-8-sig')
-            st.download_button("📥 Baixar CSV para Excel", csv, "relatorio_hafele.csv", "text/csv")
+            st.markdown('<h2 class="sub-header">💾 Exportação</h2>', unsafe_allow_html=True)
             
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # CSV
+                csv_data = df.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="📥 Baixar CSV",
+                    data=csv_data,
+                    file_name="itens_hafele.csv",
+                    mime="text/csv"
+                )
+            
+            with col2:
+                # Excel
+                import io
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, sheet_name='Itens', index=False)
+                
+                st.download_button(
+                    label="📊 Baixar Excel",
+                    data=output.getvalue(),
+                    file_name="itens_hafele.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            
+            # Resumo por NCM
+            st.markdown('<h2 class="sub-header">🏷️ Análise por NCM</h2>', unsafe_allow_html=True)
+            
+            if not df.empty:
+                ncm_analysis = df.groupby('NCM').agg({
+                    'Quantidade': 'sum',
+                    'Valor Total (R$)': 'sum',
+                    'Total Impostos (R$)': 'sum'
+                }).reset_index()
+                
+                ncm_analysis = ncm_analysis.sort_values('Valor Total (R$)', ascending=False)
+                
+                st.dataframe(
+                    ncm_analysis,
+                    use_container_width=True
+                )
+        
         except Exception as e:
-            st.error(f"Erro: {e}")
+            st.error(f"❌ Erro no processamento: {str(e)}")
+    
     else:
-        st.info("Por favor, carregue o PDF 'APP2' para iniciar.")
+        # Tela inicial
+        st.markdown("""
+        <div class="section-card">
+            <h3>🚀 Sistema de Extração Häfele</h3>
+            <p>Este sistema extrai todos os dados dos itens de extratos da Häfele, incluindo:</p>
+            
+            <ul>
+                <li><strong>Códigos e descrições</strong> dos produtos</li>
+                <li><strong>Quantidades e pesos</strong></li>
+                <li><strong>Valores</strong> (unitário e total)</li>
+                <li><strong>Impostos</strong> (II, IPI, PIS, COFINS)</li>
+            </ul>
+            
+            <h4>📋 Como usar:</h4>
+            <ol>
+                <li>Faça upload do PDF no menu lateral</li>
+                <li>Aguarde o processamento</li>
+                <li>Explore os resultados na tabela</li>
+                <li>Exporte os dados para análise</li>
+            </ol>
+        </div>
+        """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
