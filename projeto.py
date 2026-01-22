@@ -1,6 +1,6 @@
 import streamlit as st
-import fitz  # PyMuPDF
-import pdfplumber
+import fitz  # PyMuPDF (App 1)
+import pdfplumber # (App 2)
 import re
 import pandas as pd
 import numpy as np
@@ -13,29 +13,26 @@ from typing import Dict, List, Optional, Any
 # ==============================================================================
 # CONFIGURAÇÃO GERAL
 # ==============================================================================
-st.set_page_config(page_title="Sistema Integrado DUIMP 2026 (Cálculo Automático)", layout="wide")
+st.set_page_config(page_title="Sistema Integrado DUIMP 2026 (Cálculo Base)", layout="wide")
 
 st.markdown("""
 <style>
     .main-header { font-size: 2rem; color: #1E3A8A; font-weight: bold; border-bottom: 2px solid #1E3A8A; margin-bottom: 1rem; }
     .stButton>button { width: 100%; border-radius: 5px; height: 3em; background-color: #1E3A8A; color: white; font-weight: bold;}
     .success-box { background-color: #d1fae5; color: #065f46; padding: 1rem; border-radius: 5px; border: 1px solid #10b981; }
-    .warning-box { background-color: #fffbeb; color: #92400e; padding: 1rem; border-radius: 5px; border: 1px solid #f59e0b; }
+    .info-box { background-color: #eff6ff; color: #1e3a8a; padding: 1rem; border-radius: 5px; border: 1px solid #3b82f6; }
 </style>
 """, unsafe_allow_html=True)
 
+# Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==============================================================================
-# 1. PARSER APP 2 (HÄFELE) - FOCO NO VALOR ADUANEIRO
+# 1. PARSER APP 2 (HÄFELE) - FOCO NO LOCAL ADUANEIRO
 # ==============================================================================
 
 class HafelePDFParser:
-    """
-    Parser simplificado e robusto. 
-    Foca em extrair identidade do item e o Valor Aduaneiro para base de cálculo.
-    """
     def __init__(self):
         self.documento = {'itens': []}
         
@@ -43,7 +40,7 @@ class HafelePDFParser:
         with pdfplumber.open(pdf_path) as pdf:
             all_text = ""
             for page in pdf.pages:
-                # layout=True mantém a estrutura visual para facilitar a regex
+                # layout=True é essencial para manter a ordem visual (label ao lado do valor)
                 text = page.extract_text(layout=True)
                 if text: all_text += text + "\n"
             
@@ -51,7 +48,7 @@ class HafelePDFParser:
             return self.documento
             
     def _process_full_text(self, text: str):
-        # Separa por itens
+        # Separador mestre dos itens
         chunks = re.split(r"ITENS DA DUIMP-(\d+)", text)
         
         items = []
@@ -74,7 +71,7 @@ class HafelePDFParser:
             'descricao_complementar': '',
             'frete_internacional': 0.0,
             'seguro_internacional': 0.0,
-            'local_aduaneiro': 0.0, # Este será a base de cálculo principal
+            'local_aduaneiro': 0.0, # AQUI ESTÁ O FOCO
         }
 
         # 1. CÓDIGO INTERNO
@@ -88,19 +85,21 @@ class HafelePDFParser:
             raw_desc = desc_match.group(1).strip()
             item['descricao_complementar'] = re.sub(r'\s+', ' ', raw_desc)
 
-        # 3. VALORES MONETÁRIOS
-        # Regex flexível para pegar valor após o rótulo, ignorando sujeira
+        # 3. VALORES (FRETE, SEGURO E LOCAL ADUANEIRO)
+        # Regex Robusta: Busca o Label -> Ignora sujeira -> Pega o Número
         def get_val(label):
+            # Procura Label ... (qualquer coisa que não seja numero) ... (Numero 1.000,00)
             regex = label + r'[^\d\n]*?([\d\.]*,\d+)'
             match = re.search(regex, text, re.IGNORECASE | re.DOTALL)
             if match:
                 return self._parse_valor(match.group(1))
             return 0.0
 
-        item['frete_internacional'] = get_val(r'Frete Internac\.')
-        item['seguro_internacional'] = get_val(r'Seguro Internac\.')
+        item['frete_internacional'] = get_val(r'Frete Internac')
+        item['seguro_internacional'] = get_val(r'Seguro Internac')
         
-        # O Valor Aduaneiro é a chave para o cálculo dos impostos
+        # CAMPO CHAVE: LOCAL ADUANEIRO
+        # No seu PDF aparece como: "Local Aduaneiro (R$) 3.318,72"
         item['local_aduaneiro'] = get_val(r'Local Aduaneiro')
 
         return item
@@ -184,6 +183,13 @@ class DataFormatter:
         return re.sub(r'\s+', ' ', text).strip()
 
     @staticmethod
+    def format_number(value, length=15):
+        if not value: return "0" * length
+        clean = re.sub(r'\D', '', str(value))
+        if not clean: return "0" * length
+        return clean.zfill(length)
+    
+    @staticmethod
     def format_ncm(value):
         if not value: return "00000000"
         return re.sub(r'\D', '', value)[:8]
@@ -250,8 +256,7 @@ class DataFormatter:
 
 # LAYOUT 8686 - MANTIDO
 ADICAO_FIELDS_ORDER = [
-    # ... (Mantido igual aos anteriores para economizar espaço, o código completo tem todas as tags)
-     {"tag": "acrescimo", "type": "complex", "children": [
+    {"tag": "acrescimo", "type": "complex", "children": [
         {"tag": "codigoAcrescimo", "default": "17"},
         {"tag": "denominacao", "default": "OUTROS ACRESCIMOS AO VALOR ADUANEIRO"},
         {"tag": "moedaNegociadaCodigo", "default": "978"},
@@ -310,10 +315,7 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "fornecedorLogradouro", "default": ""},
     {"tag": "fornecedorNome", "default": ""},
     {"tag": "fornecedorNumero", "default": ""},
-    {"tag": "freteMoedaNegociadaCodigo", "default": "978"},
-    {"tag": "freteMoedaNegociadaNome", "default": "EURO/COM.EUROPEIA"},
-    {"tag": "freteValorMoedaNegociada", "default": "000000000000000"},
-    {"tag": "freteValorReais", "default": "000000000000000"},
+    {"freteMoedaNegociadaCodigo": "978", "freteMoedaNegociadaNome": "EURO/COM.EUROPEIA", "freteValorMoedaNegociada": "000000000000000", "freteValorReais": "000000000000000"},
     {"tag": "iiAcordoTarifarioTipoCodigo", "default": "0"},
     {"tag": "iiAliquotaAcordo", "default": "00000"},
     {"tag": "iiAliquotaAdValorem", "default": "00000"},
@@ -483,7 +485,6 @@ class XMLBuilder:
         h = self.p.header
         duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
         
-        # Totais baseados nos dados processados
         totals = {"frete": 0.0, "seguro": 0.0, "ii": 0.0, "ipi": 0.0, "pis": 0.0, "cofins": 0.0}
 
         def get_float(val):
@@ -492,12 +493,34 @@ class XMLBuilder:
                 return float(val)
             except: return 0.0
 
+        # Calcular totais baseados no DataFrame editado/processado
         for it in self.items_to_use:
+            # Calcular o imposto real se tivermos base e aliquota
+            def calc_val(base_key, rate_key):
+                try:
+                    b = get_float(it.get(base_key, 0))
+                    r = get_float(it.get(rate_key, 0))
+                    return b * (r / 100.0)
+                except: return 0.0
+
+            # Se o usuário preencheu as alíquotas na interface, recalcula
+            ii_val = calc_val("II Base (R$)", "II Alíq. (%)")
+            ipi_val = calc_val("IPI Base (R$)", "IPI Alíq. (%)")
+            pis_val = calc_val("PIS Base (R$)", "PIS Alíq. (%)")
+            cofins_val = calc_val("COFINS Base (R$)", "COFINS Alíq. (%)")
+
+            # Atualiza os valores no dicionário do item para usar no XML
+            it["II (R$)"] = ii_val
+            it["IPI (R$)"] = ipi_val
+            it["PIS (R$)"] = pis_val
+            it["COFINS (R$)"] = cofins_val
+
             totals["frete"] += get_float(it.get("Frete (R$)", 0))
             totals["seguro"] += get_float(it.get("Seguro (R$)", 0))
-            # O código calcula automaticamente baseado nas taxas agora
-            # Mas vamos manter a soma se o valor já vier preenchido
-            pass 
+            totals["ii"] += ii_val
+            totals["ipi"] += ipi_val
+            totals["pis"] += pis_val
+            totals["cofins"] += cofins_val
 
         for it in self.items_to_use:
             adicao = etree.SubElement(self.duimp, "adicao")
@@ -512,52 +535,27 @@ class XMLBuilder:
             peso_liq_fmt = DataFormatter.format_quantity(it.get("pesoLiq"), 15)
             base_total_reais_fmt = DataFormatter.format_input_fiscal(it.get("valorTotal", "0"), 15)
             
-            raw_frete = get_float(it.get("Frete (R$)", 0))
-            raw_seguro = get_float(it.get("Seguro (R$)", 0))
-            raw_aduaneiro = get_float(it.get("Aduaneiro (R$)", 0))
-            
-            frete_fmt = DataFormatter.format_input_fiscal(raw_frete)
-            seguro_fmt = DataFormatter.format_input_fiscal(raw_seguro)
-            aduaneiro_fmt = DataFormatter.format_input_fiscal(raw_aduaneiro)
-            
-            # --- CÁLCULO AUTOMÁTICO DE IMPOSTOS ---
-            # Se o usuário preencheu a Alíquota e a Base, calculamos o valor
-            
-            def calc_tax(base_key, rate_key):
-                try:
-                    b = get_float(it.get(base_key, 0))
-                    r = get_float(it.get(rate_key, 0))
-                    return b * (r / 100.0)
-                except: return 0.0
+            # Valores calculados/extraídos
+            frete_fmt = DataFormatter.format_input_fiscal(it.get("Frete (R$)", 0))
+            seguro_fmt = DataFormatter.format_input_fiscal(it.get("Seguro (R$)", 0))
+            aduaneiro_fmt = DataFormatter.format_input_fiscal(it.get("Aduaneiro (R$)", 0))
 
-            ii_val = calc_tax("II Base (R$)", "II Alíq. (%)")
-            ipi_val = calc_tax("IPI Base (R$)", "IPI Alíq. (%)")
-            pis_val = calc_tax("PIS Base (R$)", "PIS Alíq. (%)")
-            cofins_val = calc_tax("COFINS Base (R$)", "COFINS Alíq. (%)")
-            
-            # Acumula totais
-            totals["ii"] += ii_val
-            totals["ipi"] += ipi_val
-            totals["pis"] += pis_val
-            totals["cofins"] += cofins_val
-
-            # Formata para XML
             ii_base_fmt = DataFormatter.format_input_fiscal(it.get("II Base (R$)", 0))
             ii_aliq_fmt = DataFormatter.format_input_fiscal(it.get("II Alíq. (%)", 0), 5, True)
-            ii_val_fmt = DataFormatter.format_input_fiscal(ii_val)
+            ii_val_fmt = DataFormatter.format_input_fiscal(it.get("II (R$)", 0))
 
             ipi_aliq_fmt = DataFormatter.format_input_fiscal(it.get("IPI Alíq. (%)", 0), 5, True)
-            ipi_val_fmt = DataFormatter.format_input_fiscal(ipi_val)
+            ipi_val_fmt = DataFormatter.format_input_fiscal(it.get("IPI (R$)", 0))
 
             pis_base_fmt = DataFormatter.format_input_fiscal(it.get("PIS Base (R$)", 0))
             pis_aliq_fmt = DataFormatter.format_input_fiscal(it.get("PIS Alíq. (%)", 0), 5, True)
-            pis_val_fmt = DataFormatter.format_input_fiscal(pis_val)
+            pis_val_fmt = DataFormatter.format_input_fiscal(it.get("PIS (R$)", 0))
 
             cofins_aliq_fmt = DataFormatter.format_input_fiscal(it.get("COFINS Alíq. (%)", 0), 5, True)
-            cofins_val_fmt = DataFormatter.format_input_fiscal(cofins_val)
+            cofins_val_fmt = DataFormatter.format_input_fiscal(it.get("COFINS (R$)", 0))
 
             icms_base_valor = ii_base_fmt if int(ii_base_fmt) > 0 else base_total_reais_fmt
-            cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(get_float(it.get("II Base (R$)", 0)) or get_float(it.get("valorTotal", 0)))
+            cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(get_float(it.get("II Base (R$)", 0)))
             
             supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"), it.get("endereco_raw"))
 
@@ -666,7 +664,6 @@ class XMLBuilder:
                 val = footer_map.get(tag, default_val)
                 etree.SubElement(self.duimp, tag).text = val
         
-        # --- HEADER XML EXATO ---
         xml_content = etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=False)
         header = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         return header + xml_content
@@ -676,7 +673,7 @@ class XMLBuilder:
 # ==============================================================================
 
 def main():
-    st.markdown('<div class="main-header">Sistema Unificado: DUIMP + Häfele (Final Automático)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">Sistema Integrado DUIMP 2026 (Calculation Mode)</div>', unsafe_allow_html=True)
 
     if "parsed_duimp" not in st.session_state: st.session_state["parsed_duimp"] = None
     if "parsed_hafele" not in st.session_state: st.session_state["parsed_hafele"] = None
@@ -726,7 +723,7 @@ def main():
                 
                 qtd_itens = len(doc_h['itens'])
                 if qtd_itens > 0:
-                    st.success(f"Häfele: {qtd_itens} itens extraídos corretamente!")
+                    st.success(f"Häfele: {qtd_itens} itens extraídos (Local Aduaneiro).")
                 else:
                     st.warning("Atenção: Nenhum item foi extraído do PDF Häfele.")
                     
@@ -770,7 +767,7 @@ def main():
                         except: continue
                     
                     st.session_state["merged_df"] = df_dest
-                    st.success(f"Vinculação concluída! {count} itens atualizados com Bases de Cálculo.")
+                    st.markdown(f'<div class="success-box">✅ Vinculação concluída! {count} itens atualizados com Bases de Cálculo.</div>', unsafe_allow_html=True)
                     st.info("Agora vá para a aba 'Conferência' e preencha as ALÍQUOTAS.")
                 except Exception as e: st.error(f"Erro na vinculação: {e}")
             else:
@@ -803,15 +800,19 @@ def main():
             )
             
             # Atualiza o dataframe principal com as edições
-            if not edited_df.equals(st.session_state["merged_df"][cols_show]):
-                st.session_state["merged_df"].update(edited_df)
-                
+            # Nota: Isso funciona se o índice for preservado
+            for idx, row in edited_df.iterrows():
+                st.session_state["merged_df"].at[idx, "II Alíq. (%)"] = row["II Alíq. (%)"]
+                st.session_state["merged_df"].at[idx, "IPI Alíq. (%)"] = row["IPI Alíq. (%)"]
+                st.session_state["merged_df"].at[idx, "PIS Alíq. (%)"] = row["PIS Alíq. (%)"]
+                st.session_state["merged_df"].at[idx, "COFINS Alíq. (%)"] = row["COFINS Alíq. (%)"]
+
         else:
             st.info("Aguardando dados...")
 
     with tab3:
         st.header("💾 Exportar XML (Cálculo Automático)")
-        st.caption("O sistema calculará automaticamente: Valor Imposto = Base (Vlr Aduaneiro) * Alíquota")
+        st.markdown('<div class="info-box">O sistema calculará automaticamente: <strong>Valor Imposto = Base (Vlr Aduaneiro) * Alíquota</strong></div>', unsafe_allow_html=True)
         
         if st.session_state["merged_df"] is not None:
             if st.button("Gerar XML Final", type="primary"):
@@ -835,7 +836,6 @@ def main():
                         file_name=file_name,
                         mime="text/xml"
                     )
-                    st.balloons()
                     st.success("Arquivo gerado com sucesso!")
                     
                 except Exception as e:
