@@ -13,14 +13,13 @@ from typing import Dict, List, Optional, Any
 # ==============================================================================
 # CONFIGURAÇÃO GERAL
 # ==============================================================================
-st.set_page_config(page_title="Sistema Integrado DUIMP 2026 (Cálculo Base)", layout="wide")
+st.set_page_config(page_title="Sistema Integrado DUIMP 2026 (Final Pro)", layout="wide")
 
 st.markdown("""
 <style>
-    .main-header { font-size: 2rem; color: #1E3A8A; font-weight: bold; border-bottom: 2px solid #1E3A8A; margin-bottom: 1rem; }
-    .stButton>button { width: 100%; border-radius: 5px; height: 3em; background-color: #1E3A8A; color: white; font-weight: bold;}
-    .success-box { background-color: #d1fae5; color: #065f46; padding: 1rem; border-radius: 5px; border: 1px solid #10b981; }
-    .info-box { background-color: #eff6ff; color: #1e3a8a; padding: 1rem; border-radius: 5px; border: 1px solid #3b82f6; }
+    .main-header { font-size: 2.2rem; color: #003366; font-weight: bold; margin-bottom: 1rem; border-bottom: 2px solid #003366; }
+    .stButton>button { width: 100%; border-radius: 5px; font-weight: bold; background-color: #003366; color: white; height: 3em; }
+    .success-box { background-color: #d4edda; color: #155724; padding: 15px; border-radius: 5px; margin: 10px 0; border: 1px solid #c3e6cb; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -29,10 +28,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==============================================================================
-# 1. PARSER APP 2 (HÄFELE) - FOCO NO LOCAL ADUANEIRO
+# 1. PARSER APP 2 (HÄFELE) - ENGINE HÍBRIDA (REVERSE & FORWARD)
 # ==============================================================================
 
 class HafelePDFParser:
+    """
+    Parser avançado para PDFs da Häfele.
+    Resolve o problema de 'Left-Shifted Values' (Valor antes do Rótulo) nos impostos.
+    """
+    
     def __init__(self):
         self.documento = {'itens': []}
         
@@ -40,15 +44,18 @@ class HafelePDFParser:
         with pdfplumber.open(pdf_path) as pdf:
             all_text = ""
             for page in pdf.pages:
-                # layout=True é essencial para manter a ordem visual (label ao lado do valor)
+                # layout=True mantém a estrutura visual (essencial para tabelas invertidas)
                 text = page.extract_text(layout=True)
-                if text: all_text += text + "\n"
+                if text: 
+                    # Remove rodapés para limpar a leitura contínua
+                    text = re.sub(r'--- PAGE \d+ ---', '', text)
+                    all_text += text + "\n"
             
             self._process_full_text(all_text)
             return self.documento
             
     def _process_full_text(self, text: str):
-        # Separador mestre dos itens
+        # O arquivo usa "ITENS DA DUIMP-XXXXX" como separador mestre
         chunks = re.split(r"ITENS DA DUIMP-(\d+)", text)
         
         items = []
@@ -60,7 +67,7 @@ class HafelePDFParser:
                     item_data = self._parse_item_content(content, item_num)
                     items.append(item_data)
                 except Exception as e:
-                    logger.error(f"Erro item {i}: {e}")
+                    logger.error(f"Erro processando item {i}: {e}")
         
         self.documento['itens'] = items
     
@@ -71,38 +78,119 @@ class HafelePDFParser:
             'descricao_complementar': '',
             'frete_internacional': 0.0,
             'seguro_internacional': 0.0,
-            'local_aduaneiro': 0.0, # AQUI ESTÁ O FOCO
+            'local_aduaneiro': 0.0,
+            # Impostos
+            'ii_valor_devido': 0.0, 'ii_base_calculo': 0.0, 'ii_aliquota': 0.0,
+            'ipi_valor_devido': 0.0, 'ipi_base_calculo': 0.0, 'ipi_aliquota': 0.0,
+            'pis_valor_devido': 0.0, 'pis_base_calculo': 0.0, 'pis_aliquota': 0.0,
+            'cofins_valor_devido': 0.0, 'cofins_base_calculo': 0.0, 'cofins_aliquota': 0.0
         }
 
         # 1. CÓDIGO INTERNO
+        # Procura "Código interno" seguido de quebras e o número
         code_match = re.search(r'Código interno[^\d\n]*([\d\.]+)', text, re.IGNORECASE)
         if code_match:
             item['codigo_interno'] = code_match.group(1).strip()
 
         # 2. DESCRIÇÃO COMPLEMENTAR
+        # Captura até encontrar uma palavra chave de parada
         desc_match = re.search(r'DESCRIÇÃO COMPLEMENTAR DA MERCADORIA\s*\n?(.*?)(?=\n|CONDIÇÃO|NCM)', text, re.IGNORECASE | re.DOTALL)
         if desc_match:
             raw_desc = desc_match.group(1).strip()
             item['descricao_complementar'] = re.sub(r'\s+', ' ', raw_desc)
 
-        # 3. VALORES (FRETE, SEGURO E LOCAL ADUANEIRO)
-        # Regex Robusta: Busca o Label -> Ignora sujeira -> Pega o Número
-        def get_val(label):
-            # Procura Label ... (qualquer coisa que não seja numero) ... (Numero 1.000,00)
-            regex = label + r'[^\d\n]*?([\d\.]*,\d+)'
-            match = re.search(regex, text, re.IGNORECASE | re.DOTALL)
+        # 3. VALORES LOGÍSTICOS (Estes geralmente seguem o padrão Label -> Valor)
+        item['frete_internacional'] = self._extract_standard(r'Frete Internac\.', text)
+        item['seguro_internacional'] = self._extract_standard(r'Seguro Internac\.', text)
+        item['local_aduaneiro'] = self._extract_standard(r'Local Aduaneiro', text)
+
+        # 4. IMPOSTOS (Lógica de Blocos + Busca Reversa)
+        
+        # Identifica o início de cada bloco para isolamento
+        idx_ii = -1
+        match_ii = re.search(r'\b(II|11)\b[\s\n]', text) # II ou 11 (OCR)
+        if match_ii: idx_ii = match_ii.start()
+        
+        match_ipi = re.search(r'\bIPI\b[\s\n]', text)
+        idx_ipi = match_ipi.start() if match_ipi else -1
+        
+        # PIS pode confundir com outros textos, buscamos contexto
+        match_pis = re.search(r'\bPIS\b[\s\n-]', text)
+        idx_pis = match_pis.start() if match_pis else -1
+        
+        match_cofins = re.search(r'\bCOFINS\b[\s\n]', text)
+        idx_cofins = match_cofins.start() if match_cofins else -1
+
+        def get_block(start, potential_ends):
+            if start == -1: return ""
+            valid_ends = [x for x in potential_ends if x > start]
+            end = min(valid_ends) if valid_ends else len(text)
+            return text[start:end]
+
+        # Recorta o texto
+        block_ii = get_block(idx_ii, [idx_ipi, idx_pis, idx_cofins])
+        block_ipi = get_block(idx_ipi, [idx_pis, idx_cofins])
+        block_pis = get_block(idx_pis, [idx_cofins])
+        block_cofins = text[idx_cofins:] if idx_cofins != -1 else ""
+
+        # Preenche os dados usando a lógica REVERSA (Valor antes do Rótulo)
+        self._populate_tax(item, 'ii', block_ii)
+        self._populate_tax(item, 'ipi', block_ipi)
+        self._populate_tax(item, 'pis', block_pis)
+        self._populate_tax(item, 'cofins', block_cofins)
+
+        return item
+
+    def _populate_tax(self, item: Dict, prefix: str, block: str):
+        if not block: return
+        
+        # --- ESTRATÉGIA REVERSA (Valor ... Rótulo) ---
+        # No seu PDF: "3.318,72 ... Base de Cálculo"
+        
+        # Valor Devido
+        val = self._extract_reverse(r'Valor Devido', block)
+        if val == 0: val = self._extract_reverse(r'Valor A Recolher', block)
+        if val == 0: val = self._extract_reverse(r'Valor Calculado', block)
+        # Fallback padrão
+        if val == 0: val = self._extract_standard(r'Valor Devido', block)
+        
+        # Base de Cálculo
+        base = self._extract_reverse(r'Base de Cálculo', block)
+        if base == 0: base = self._extract_reverse(r'Base de Calculo', block)
+        
+        # Alíquota
+        aliq = self._extract_reverse(r'% Alíquota', block)
+        if aliq == 0: aliq = self._extract_reverse(r'Ad Valorem', block)
+        if aliq == 0: aliq = self._extract_standard(r'% Alíquota', block)
+
+        item[f'{prefix}_valor_devido'] = val
+        item[f'{prefix}_base_calculo'] = base
+        item[f'{prefix}_aliquota'] = aliq
+
+    def _extract_reverse(self, label_pattern: str, text_block: str) -> float:
+        """
+        Regex Invertida: Procura um número no INÍCIO da linha que contém o Rótulo.
+        Ex: "531,00 ... Valor Devido"
+        """
+        try:
+            # Procura: (Numero) ... (Lixo) ... (Label)
+            regex = r'([\d\.]*,\d+)[^\n]*?' + label_pattern
+            match = re.search(regex, text_block, re.IGNORECASE)
+            
             if match:
                 return self._parse_valor(match.group(1))
             return 0.0
+        except: return 0.0
 
-        item['frete_internacional'] = get_val(r'Frete Internac')
-        item['seguro_internacional'] = get_val(r'Seguro Internac')
-        
-        # CAMPO CHAVE: LOCAL ADUANEIRO
-        # No seu PDF aparece como: "Local Aduaneiro (R$) 3.318,72"
-        item['local_aduaneiro'] = get_val(r'Local Aduaneiro')
-
-        return item
+    def _extract_standard(self, label_pattern: str, text_block: str) -> float:
+        """Regex Padrão: Label ... (Numero)"""
+        try:
+            regex = label_pattern + r'[^\d\n]*?([\d\.]*,\d+)'
+            match = re.search(regex, text_block, re.IGNORECASE | re.DOTALL)
+            if match:
+                return self._parse_valor(match.group(1))
+            return 0.0
+        except: return 0.0
 
     def _parse_valor(self, valor_str: str) -> float:
         if not valor_str: return 0.0
@@ -111,8 +199,14 @@ class HafelePDFParser:
             return float(clean)
         except: return 0.0
 
+class FinancialAnalyzer:
+    def __init__(self, documento: Dict):
+        self.documento = documento
+    def prepare_dataframe(self):
+        return pd.DataFrame(self.documento['itens'])
+
 # ==============================================================================
-# 2. PARSER APP 1 (DUIMP SISCOMEX) - INTACTO
+# 2. PARSER APP 1 (DUIMP SISCOMEX) - MANTIDO
 # ==============================================================================
 
 class DuimpPDFParser:
@@ -130,6 +224,7 @@ class DuimpPDFParser:
             for line in lines:
                 l_strip = line.strip()
                 if "Extrato da DUIMP" in l_strip: continue
+                if "Data, hora e responsável" in l_strip: continue
                 if re.match(r'^\d+\s*/\s*\d+$', l_strip): continue
                 clean_lines.append(line)
         self.full_text = "\n".join(clean_lines)
@@ -172,7 +267,7 @@ class DuimpPDFParser:
         return match.group(1).strip() if match else ""
 
 # ==============================================================================
-# 3. XML BUILDER E UTILS
+# 3. XML BUILDER E UTILS (APP 1)
 # ==============================================================================
 
 class DataFormatter:
@@ -195,8 +290,11 @@ class DataFormatter:
         return re.sub(r'\D', '', value)[:8]
 
     @staticmethod
-    def format_input_fiscal(value, length=15):
+    def format_input_fiscal(value, length=15, is_percent=False):
         try:
+            if isinstance(value, str):
+                value = value.replace('.', '')
+                value = value.replace(',', '.')
             val_float = float(value)
             val_int = int(round(val_float * 100))
             return str(val_int).zfill(length)
@@ -205,7 +303,9 @@ class DataFormatter:
     @staticmethod
     def format_high_precision(value, length=15):
         try:
-            if isinstance(value, str): value = value.replace('.', '').replace(',', '.')
+            if isinstance(value, str):
+                value = value.replace('.', '')
+                value = value.replace(',', '.')
             val_float = float(value)
             val_int = int(round(val_float * 10000000))
             return str(val_int).zfill(length)
@@ -214,15 +314,19 @@ class DataFormatter:
     @staticmethod
     def format_quantity(value, length=14):
         try:
-            if isinstance(value, str): value = value.replace('.', '').replace(',', '.')
+            if isinstance(value, str):
+                value = value.replace('.', '')
+                value = value.replace(',', '.')
             val_float = float(value)
             val_int = int(round(val_float * 100000))
             return str(val_int).zfill(length)
         except: return "0" * length
 
     @staticmethod
-    def calculate_cbs_ibs(base_float):
+    def calculate_cbs_ibs(base_xml_string):
         try:
+            base_int = int(base_xml_string)
+            base_float = base_int / 100.0
             cbs_val = base_float * 0.009
             cbs_str = str(int(round(cbs_val * 100))).zfill(14)
             ibs_val = base_float * 0.001
@@ -254,7 +358,7 @@ class DataFormatter:
                 data["fornecedorLogradouro"] = street_part
         return data
 
-# LAYOUT 8686 - MANTIDO
+# LAYOUT OBRIGATÓRIO 8686
 ADICAO_FIELDS_ORDER = [
     {"tag": "acrescimo", "type": "complex", "children": [
         {"tag": "codigoAcrescimo", "default": "17"},
@@ -474,206 +578,12 @@ FOOTER_TAGS = {
     "viaTransportePaisTransportadorNome": "CINGAPURA"
 }
 
-class XMLBuilder:
-    def __init__(self, parser, edited_items=None):
-        self.p = parser
-        self.items_to_use = edited_items if edited_items else self.p.items
-        self.root = etree.Element("ListaDeclaracoes")
-        self.duimp = etree.SubElement(self.root, "duimp")
-
-    def build(self):
-        h = self.p.header
-        duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
-        
-        totals = {"frete": 0.0, "seguro": 0.0, "ii": 0.0, "ipi": 0.0, "pis": 0.0, "cofins": 0.0}
-
-        def get_float(val):
-            try: 
-                if isinstance(val, str): val = val.replace('.', '').replace(',', '.')
-                return float(val)
-            except: return 0.0
-
-        # Calcular totais baseados no DataFrame editado/processado
-        for it in self.items_to_use:
-            # Calcular o imposto real se tivermos base e aliquota
-            def calc_val(base_key, rate_key):
-                try:
-                    b = get_float(it.get(base_key, 0))
-                    r = get_float(it.get(rate_key, 0))
-                    return b * (r / 100.0)
-                except: return 0.0
-
-            # Se o usuário preencheu as alíquotas na interface, recalcula
-            ii_val = calc_val("II Base (R$)", "II Alíq. (%)")
-            ipi_val = calc_val("IPI Base (R$)", "IPI Alíq. (%)")
-            pis_val = calc_val("PIS Base (R$)", "PIS Alíq. (%)")
-            cofins_val = calc_val("COFINS Base (R$)", "COFINS Alíq. (%)")
-
-            # Atualiza os valores no dicionário do item para usar no XML
-            it["II (R$)"] = ii_val
-            it["IPI (R$)"] = ipi_val
-            it["PIS (R$)"] = pis_val
-            it["COFINS (R$)"] = cofins_val
-
-            totals["frete"] += get_float(it.get("Frete (R$)", 0))
-            totals["seguro"] += get_float(it.get("Seguro (R$)", 0))
-            totals["ii"] += ii_val
-            totals["ipi"] += ipi_val
-            totals["pis"] += pis_val
-            totals["cofins"] += cofins_val
-
-        for it in self.items_to_use:
-            adicao = etree.SubElement(self.duimp, "adicao")
-            
-            input_number = str(it.get("NUMBER", "")).strip()
-            original_desc = DataFormatter.clean_text(it.get("descricao", ""))
-            final_desc = f"{input_number} - {original_desc}" if input_number else original_desc
-
-            val_total_venda_fmt = DataFormatter.format_high_precision(it.get("valorTotal", "0"), 11)
-            val_unit_fmt = DataFormatter.format_high_precision(it.get("valorUnit", "0"), 20)
-            qtd_fmt = DataFormatter.format_quantity(it.get("quantidade"), 14)
-            peso_liq_fmt = DataFormatter.format_quantity(it.get("pesoLiq"), 15)
-            base_total_reais_fmt = DataFormatter.format_input_fiscal(it.get("valorTotal", "0"), 15)
-            
-            # Valores calculados/extraídos
-            frete_fmt = DataFormatter.format_input_fiscal(it.get("Frete (R$)", 0))
-            seguro_fmt = DataFormatter.format_input_fiscal(it.get("Seguro (R$)", 0))
-            aduaneiro_fmt = DataFormatter.format_input_fiscal(it.get("Aduaneiro (R$)", 0))
-
-            ii_base_fmt = DataFormatter.format_input_fiscal(it.get("II Base (R$)", 0))
-            ii_aliq_fmt = DataFormatter.format_input_fiscal(it.get("II Alíq. (%)", 0), 5, True)
-            ii_val_fmt = DataFormatter.format_input_fiscal(it.get("II (R$)", 0))
-
-            ipi_aliq_fmt = DataFormatter.format_input_fiscal(it.get("IPI Alíq. (%)", 0), 5, True)
-            ipi_val_fmt = DataFormatter.format_input_fiscal(it.get("IPI (R$)", 0))
-
-            pis_base_fmt = DataFormatter.format_input_fiscal(it.get("PIS Base (R$)", 0))
-            pis_aliq_fmt = DataFormatter.format_input_fiscal(it.get("PIS Alíq. (%)", 0), 5, True)
-            pis_val_fmt = DataFormatter.format_input_fiscal(it.get("PIS (R$)", 0))
-
-            cofins_aliq_fmt = DataFormatter.format_input_fiscal(it.get("COFINS Alíq. (%)", 0), 5, True)
-            cofins_val_fmt = DataFormatter.format_input_fiscal(it.get("COFINS (R$)", 0))
-
-            icms_base_valor = ii_base_fmt if int(ii_base_fmt) > 0 else base_total_reais_fmt
-            cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(get_float(it.get("II Base (R$)", 0)))
-            
-            supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"), it.get("endereco_raw"))
-
-            extracted_map = {
-                "numeroAdicao": str(it["numeroAdicao"])[-3:],
-                "numeroDUIMP": duimp_fmt,
-                "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
-                "dadosMercadoriaMedidaEstatisticaQuantidade": qtd_fmt,
-                "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "").upper(),
-                "dadosMercadoriaPesoLiquido": peso_liq_fmt,
-                "condicaoVendaMoedaNome": it.get("moeda", "").upper(),
-                "valorTotalCondicaoVenda": val_total_venda_fmt,
-                "valorUnitario": val_unit_fmt,
-                "condicaoVendaValorMoeda": base_total_reais_fmt,
-                "condicaoVendaValorReais": aduaneiro_fmt if int(aduaneiro_fmt) > 0 else base_total_reais_fmt,
-                "paisOrigemMercadoriaNome": it.get("paisOrigem", "").upper(),
-                "paisAquisicaoMercadoriaNome": it.get("paisOrigem", "").upper(),
-                "descricaoMercadoria": final_desc,
-                "quantidade": qtd_fmt,
-                "unidadeMedida": it.get("unidade", "").upper(),
-                "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800"),
-                "fornecedorNome": supplier_data["fornecedorNome"][:60],
-                "fornecedorLogradouro": supplier_data["fornecedorLogradouro"][:60],
-                "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
-                "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
-                "freteValorReais": frete_fmt,
-                "seguroValorReais": seguro_fmt,
-                "iiBaseCalculo": ii_base_fmt,
-                "iiAliquotaAdValorem": ii_aliq_fmt,
-                "iiAliquotaValorDevido": ii_val_fmt,
-                "iiAliquotaValorRecolher": ii_val_fmt,
-                "ipiAliquotaAdValorem": ipi_aliq_fmt,
-                "ipiAliquotaValorDevido": ipi_val_fmt,
-                "ipiAliquotaValorRecolher": ipi_val_fmt,
-                "pisCofinsBaseCalculoValor": pis_base_fmt,
-                "pisPasepAliquotaAdValorem": pis_aliq_fmt,
-                "pisPasepAliquotaValorDevido": pis_val_fmt,
-                "pisPasepAliquotaValorRecolher": pis_val_fmt,
-                "cofinsAliquotaAdValorem": cofins_aliq_fmt,
-                "cofinsAliquotaValorDevido": cofins_val_fmt,
-                "cofinsAliquotaValorRecolher": cofins_val_fmt,
-                "icmsBaseCalculoValor": icms_base_valor,
-                "icmsBaseCalculoAliquota": "01800",
-                "cbsIbsClasstrib": "000001",
-                "cbsBaseCalculoValor": icms_base_valor,
-                "cbsBaseCalculoAliquota": "00090",
-                "cbsBaseCalculoValorImposto": cbs_imposto,
-                "ibsBaseCalculoValor": icms_base_valor,
-                "ibsBaseCalculoAliquota": "00010",
-                "ibsBaseCalculoValorImposto": ibs_imposto
-            }
-
-            for field in ADICAO_FIELDS_ORDER:
-                tag_name = field["tag"]
-                if field.get("type") == "complex":
-                    parent = etree.SubElement(adicao, tag_name)
-                    for child in field["children"]:
-                        c_tag = child["tag"]
-                        val = extracted_map.get(c_tag, child["default"])
-                        etree.SubElement(parent, c_tag).text = val
-                else:
-                    val = extracted_map.get(tag_name, field["default"])
-                    etree.SubElement(adicao, tag_name).text = val
-
-        peso_bruto_fmt = DataFormatter.format_quantity(h.get("pesoBruto"), 15)
-        peso_liq_total_fmt = DataFormatter.format_quantity(h.get("pesoLiquido"), 15)
-
-        footer_map = {
-            "numeroDUIMP": duimp_fmt,
-            "importadorNome": h.get("nomeImportador", ""),
-            "importadorNumero": DataFormatter.format_number(h.get("cnpj"), 14),
-            "cargaPesoBruto": peso_bruto_fmt,
-            "cargaPesoLiquido": peso_liq_total_fmt,
-            "cargaPaisProcedenciaNome": h.get("paisProcedencia", "").upper(),
-            "totalAdicoes": str(len(self.items_to_use)).zfill(3),
-            "freteTotalReais": DataFormatter.format_input_fiscal(totals["frete"]),
-            "seguroTotalReais": DataFormatter.format_input_fiscal(totals["seguro"]),
-        }
-
-        receita_codes = [
-            {"code": "0086", "val": totals["ii"]},
-            {"code": "1038", "val": totals["ipi"]},
-            {"code": "5602", "val": totals["pis"]},
-            {"code": "5629", "val": totals["cofins"]}
-        ]
-
-        for tag, default_val in FOOTER_TAGS.items():
-            if tag == "pagamento":
-                for rec in receita_codes:
-                    if rec["val"] > 0:
-                        pag = etree.SubElement(self.duimp, "pagamento")
-                        etree.SubElement(pag, "agenciaPagamento").text = "3715"
-                        etree.SubElement(pag, "bancoPagamento").text = "341"
-                        etree.SubElement(pag, "codigoReceita").text = rec["code"]
-                        etree.SubElement(pag, "valorReceita").text = DataFormatter.format_input_fiscal(rec["val"])
-                continue
-
-            if isinstance(default_val, list):
-                parent = etree.SubElement(self.duimp, tag)
-                for subfield in default_val:
-                    etree.SubElement(parent, subfield["tag"]).text = subfield["default"]
-            elif isinstance(default_val, dict):
-                parent = etree.SubElement(self.duimp, tag)
-                etree.SubElement(parent, default_val["tag"]).text = default_val["default"]
-            else:
-                val = footer_map.get(tag, default_val)
-                etree.SubElement(self.duimp, tag).text = val
-        
-        xml_content = etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=False)
-        header = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-        return header + xml_content
-
 # ==============================================================================
 # MAIN APP
 # ==============================================================================
 
 def main():
-    st.markdown('<div class="main-header">Sistema Integrado DUIMP 2026 (Calculation Mode)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">Sistema Unificado: DUIMP + Häfele (Final Pro)</div>', unsafe_allow_html=True)
 
     if "parsed_duimp" not in st.session_state: st.session_state["parsed_duimp"] = None
     if "parsed_hafele" not in st.session_state: st.session_state["parsed_hafele"] = None
@@ -701,12 +611,7 @@ def main():
                     st.session_state["last_duimp"] = file_duimp
                     
                     df = pd.DataFrame(p.items)
-                    # Colunas para edição manual de alíquotas
-                    cols_fiscais = ["NUMBER", "Frete (R$)", "Seguro (R$)", "Aduaneiro (R$)", 
-                                    "II Base (R$)", "II Alíq. (%)", 
-                                    "IPI Base (R$)", "IPI Alíq. (%)",
-                                    "PIS Base (R$)", "PIS Alíq. (%)",
-                                    "COFINS Base (R$)", "COFINS Alíq. (%)"]
+                    cols_fiscais = ["NUMBER", "Frete (R$)", "Seguro (R$)", "II (R$)", "II Base (R$)", "II Alíq. (%)", "IPI (R$)", "IPI Base (R$)", "IPI Alíq. (%)", "PIS (R$)", "PIS Base (R$)", "PIS Alíq. (%)", "COFINS (R$)", "COFINS Base (R$)", "COFINS Alíq. (%)", "Aduaneiro (R$)"]
                     for col in cols_fiscais: df[col] = 0.00 if col != "NUMBER" else ""
                     st.session_state["merged_df"] = df
                     st.success("DUIMP processada com sucesso!")
@@ -723,7 +628,7 @@ def main():
                 
                 qtd_itens = len(doc_h['itens'])
                 if qtd_itens > 0:
-                    st.success(f"Häfele: {qtd_itens} itens extraídos (Local Aduaneiro).")
+                    st.success(f"Häfele: {qtd_itens} itens extraídos corretamente!")
                 else:
                     st.warning("Atenção: Nenhum item foi extraído do PDF Häfele.")
                     
@@ -733,7 +638,7 @@ def main():
                 if os.path.exists(tmp_path): os.unlink(tmp_path)
 
         st.markdown("---")
-        if st.button("🔗 VINCULAR DADOS (Usar Valor Aduaneiro como Base)", type="primary", use_container_width=True):
+        if st.button("🔗 VINCULAR DADOS (Cruzamento Automático)", type="primary", use_container_width=True):
             if st.session_state["merged_df"] is not None and st.session_state["parsed_hafele"] is not None:
                 try:
                     df_dest = st.session_state["merged_df"].copy()
@@ -745,7 +650,7 @@ def main():
                             if item_num in src_map:
                                 src = src_map[item_num]
                                 
-                                # CONCATENAÇÃO
+                                # CONCATENAÇÃO OBRIGATÓRIA (CÓDIGO + DESCRIÇÃO)
                                 cod_interno = src.get('codigo_interno', '')
                                 desc_comp = src.get('descricao_complementar', '')
                                 final_number = f"{cod_interno} - {desc_comp}" if desc_comp else cod_interno
@@ -753,69 +658,53 @@ def main():
                                 df_dest.at[idx, 'NUMBER'] = final_number
                                 df_dest.at[idx, 'Frete (R$)'] = src.get('frete_internacional', 0.0)
                                 df_dest.at[idx, 'Seguro (R$)'] = src.get('seguro_internacional', 0.0)
+                                df_dest.at[idx, 'Aduaneiro (R$)'] = src.get('local_aduaneiro', 0.0)
                                 
-                                # AQUI ESTA A MAGICA: USAR LOCAL ADUANEIRO COMO BASE
-                                val_aduaneiro = src.get('local_aduaneiro', 0.0)
-                                df_dest.at[idx, 'Aduaneiro (R$)'] = val_aduaneiro
+                                df_dest.at[idx, 'II (R$)'] = src.get('ii_valor_devido', 0.0)
+                                df_dest.at[idx, 'II Base (R$)'] = src.get('ii_base_calculo', 0.0)
+                                df_dest.at[idx, 'II Alíq. (%)'] = src.get('ii_aliquota', 0.0)
                                 
-                                df_dest.at[idx, 'II Base (R$)'] = val_aduaneiro
-                                df_dest.at[idx, 'IPI Base (R$)'] = val_aduaneiro
-                                df_dest.at[idx, 'PIS Base (R$)'] = val_aduaneiro
-                                df_dest.at[idx, 'COFINS Base (R$)'] = val_aduaneiro
+                                df_dest.at[idx, 'IPI (R$)'] = src.get('ipi_valor_devido', 0.0)
+                                df_dest.at[idx, 'IPI Base (R$)'] = src.get('ipi_base_calculo', 0.0)
+                                df_dest.at[idx, 'IPI Alíq. (%)'] = src.get('ipi_aliquota', 0.0)
+                                
+                                df_dest.at[idx, 'PIS (R$)'] = src.get('pis_valor_devido', 0.0)
+                                df_dest.at[idx, 'PIS Base (R$)'] = src.get('pis_base_calculo', 0.0)
+                                df_dest.at[idx, 'PIS Alíq. (%)'] = src.get('pis_aliquota', 0.0)
+                                
+                                df_dest.at[idx, 'COFINS (R$)'] = src.get('cofins_valor_devido', 0.0)
+                                df_dest.at[idx, 'COFINS Base (R$)'] = src.get('cofins_base_calculo', 0.0)
+                                df_dest.at[idx, 'COFINS Alíq. (%)'] = src.get('cofins_aliquota', 0.0)
                                 
                                 count += 1
                         except: continue
                     
                     st.session_state["merged_df"] = df_dest
-                    st.markdown(f'<div class="success-box">✅ Vinculação concluída! {count} itens atualizados com Bases de Cálculo.</div>', unsafe_allow_html=True)
-                    st.info("Agora vá para a aba 'Conferência' e preencha as ALÍQUOTAS.")
+                    st.success(f"Vinculação concluída! {count} itens foram cruzados e atualizados.")
                 except Exception as e: st.error(f"Erro na vinculação: {e}")
             else:
                 st.warning("Por favor, carregue os dois arquivos antes de vincular.")
 
     with tab2:
-        st.header("📋 Preencha as Alíquotas (%)")
+        st.header("📋 Conferência e Edição")
         if st.session_state["merged_df"] is not None:
             col_config = {
                 "numeroAdicao": st.column_config.TextColumn("Item", width="small", disabled=True),
-                "NUMBER": st.column_config.TextColumn("Código Interno", width="large", disabled=True),
-                "Aduaneiro (R$)": st.column_config.NumberColumn("Valor Aduaneiro (Base)", format="R$ %.2f", disabled=True),
-                
-                "II Alíq. (%)": st.column_config.NumberColumn("II %", min_value=0, max_value=100, step=0.1, format="%.1f%%"),
-                "IPI Alíq. (%)": st.column_config.NumberColumn("IPI %", min_value=0, max_value=100, step=0.1, format="%.1f%%"),
-                "PIS Alíq. (%)": st.column_config.NumberColumn("PIS %", min_value=0, max_value=100, step=0.1, format="%.1f%%"),
-                "COFINS Alíq. (%)": st.column_config.NumberColumn("COFINS %", min_value=0, max_value=100, step=0.1, format="%.1f%%"),
+                "NUMBER": st.column_config.TextColumn("Código Interno + Descrição", width="large"),
+                "Frete (R$)": st.column_config.NumberColumn(format="R$ %.2f"),
+                "Seguro (R$)": st.column_config.NumberColumn(format="R$ %.2f"),
+                "II (R$)": st.column_config.NumberColumn(label="II Vlr", format="R$ %.2f"),
+                "II Base (R$)": st.column_config.NumberColumn(label="II Base", format="R$ %.2f"),
             }
-            
-            # Mostra apenas colunas relevantes para edição
-            cols_show = ["numeroAdicao", "NUMBER", "Aduaneiro (R$)", "II Alíq. (%)", "IPI Alíq. (%)", "PIS Alíq. (%)", "COFINS Alíq. (%)"]
-            
-            edited_df = st.data_editor(
-                st.session_state["merged_df"][cols_show], 
-                hide_index=True, 
-                column_config=col_config, 
-                use_container_width=True, 
-                height=600,
-                key="editor"
-            )
-            
-            # Atualiza o dataframe principal com as edições
-            # Nota: Isso funciona se o índice for preservado
-            for idx, row in edited_df.iterrows():
-                st.session_state["merged_df"].at[idx, "II Alíq. (%)"] = row["II Alíq. (%)"]
-                st.session_state["merged_df"].at[idx, "IPI Alíq. (%)"] = row["IPI Alíq. (%)"]
-                st.session_state["merged_df"].at[idx, "PIS Alíq. (%)"] = row["PIS Alíq. (%)"]
-                st.session_state["merged_df"].at[idx, "COFINS Alíq. (%)"] = row["COFINS Alíq. (%)"]
-
+            edited_df = st.data_editor(st.session_state["merged_df"], hide_index=True, column_config=col_config, use_container_width=True, height=600)
+            st.session_state["merged_df"] = edited_df
         else:
             st.info("Aguardando dados...")
 
     with tab3:
-        st.header("💾 Exportar XML (Cálculo Automático)")
-        st.markdown('<div class="info-box">O sistema calculará automaticamente: <strong>Valor Imposto = Base (Vlr Aduaneiro) * Alíquota</strong></div>', unsafe_allow_html=True)
-        
+        st.header("💾 Exportar XML")
         if st.session_state["merged_df"] is not None:
-            if st.button("Gerar XML Final", type="primary"):
+            if st.button("Gerar XML (Layout 8686)", type="primary"):
                 try:
                     p = st.session_state["parsed_duimp"]
                     records = st.session_state["merged_df"].to_dict("records")
@@ -828,7 +717,7 @@ def main():
                     xml_bytes = builder.build()
                     
                     duimp_num = p.header.get("numeroDUIMP", "0000").replace("/", "-")
-                    file_name = f"DUIMP_{duimp_num}_CALCULADO.xml"
+                    file_name = f"DUIMP_{duimp_num}_INTEGRADO.xml"
                     
                     st.download_button(
                         label="⬇️ Baixar XML Final",
@@ -836,12 +725,12 @@ def main():
                         file_name=file_name,
                         mime="text/xml"
                     )
-                    st.success("Arquivo gerado com sucesso!")
+                    st.success("Arquivo gerado com sucesso! Cabeçalho validado.")
                     
                 except Exception as e:
                     st.error(f"Erro na geração do XML: {e}")
         else:
-            st.warning("Realize a vinculação primeiro.")
+            st.warning("Realize a vinculação e conferência antes de exportar.")
 
 if __name__ == "__main__":
     main()
