@@ -1,6 +1,6 @@
 import streamlit as st
-import fitz  # PyMuPDF (App 1 - DUIMP)
-import pdfplumber # (App 2 - Häfele)
+import fitz  # PyMuPDF (App 1)
+import pdfplumber # (App 2)
 import re
 import pandas as pd
 import numpy as np
@@ -8,75 +8,78 @@ from lxml import etree
 import tempfile
 import os
 import logging
-import unicodedata
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 # ==============================================================================
-# CONFIGURAÇÃO GERAL
+# CONFIGURAÇÃO E LOGGING
 # ==============================================================================
-st.set_page_config(page_title="Sistema Integrado DUIMP 2026 (Senior Edition)", layout="wide")
-
-st.markdown("""
-<style>
-    .main-header { font-size: 2.5rem; color: #1E3A8A; font-weight: 800; margin-bottom: 1rem; border-bottom: 3px solid #1E3A8A; }
-    .stButton>button { width: 100%; border-radius: 6px; font-weight: bold; height: 3.5em; background-color: #1E3A8A; color: white; border: none; transition: all 0.3s; }
-    .stButton>button:hover { background-color: #1e40af; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    .success-box { background-color: #ecfdf5; color: #065f46; padding: 15px; border-radius: 8px; border-left: 5px solid #10b981; }
-    .info-box { background-color: #eff6ff; color: #1e3a8a; padding: 15px; border-radius: 8px; border-left: 5px solid #3b82f6; }
-</style>
-""", unsafe_allow_html=True)
-
-# Configurar logging
+st.set_page_config(page_title="Sistema Integrado DUIMP 2026 (Enterprise)", layout="wide")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+st.markdown("""
+<style>
+    .main-header { font-size: 2.2rem; color: #1E3A8A; font-weight: 800; border-bottom: 3px solid #1E3A8A; margin-bottom: 1rem; }
+    .success-box { background-color: #ecfdf5; border: 1px solid #10b981; color: #065f46; padding: 15px; border-radius: 8px; }
+    .warning-box { background-color: #fffbeb; border: 1px solid #f59e0b; color: #92400e; padding: 15px; border-radius: 8px; }
+    .stButton>button { width: 100%; border-radius: 6px; height: 3em; font-weight: bold; }
+</style>
+""", unsafe_allow_html=True)
+
 # ==============================================================================
-# 1. PARSER APP 2 (HÄFELE) - ENGINE SÊNIOR (REVERSE LOOKUP)
+# 1. ENGINE DE EXTRAÇÃO APP 2 (HÄFELE) - SENIOR LEVEL
 # ==============================================================================
 
 class HafelePDFParser:
     """
-    Parser Sênior desenvolvido para layouts PDFs com 'Left-Shifted Values' (Valor antes do Rótulo).
+    Parser de alta precisão para relatórios Häfele/DUIMP.
+    Utiliza segmentação de blocos e busca bidirecional para resolver layouts flutuantes.
     """
     
     def __init__(self):
         self.documento = {'itens': []}
         
     def parse_pdf(self, pdf_path: str) -> Dict:
-        with pdfplumber.open(pdf_path) as pdf:
-            # Estratégia de Consolidação de Texto
-            all_content = []
-            for page in pdf.pages:
-                # layout=True é mandatório para manter a integridade da linha horizontal
-                text = page.extract_text(layout=True)
-                if text:
-                    # Remove rodapés/cabeçalhos recorrentes que poluem a leitura
-                    text = re.sub(r'--- PAGE \d+ ---', '', text)
-                    all_content.append(text)
-            
-            full_text = "\n".join(all_content)
-            self._process_full_text(full_text)
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                # Estratégia: Merge de todo o conteúdo textual para tratamento contínuo
+                full_text_content = []
+                for page in pdf.pages:
+                    # layout=True é mandatório para preservar a proximidade visual dos dados
+                    text = page.extract_text(layout=True)
+                    if text: full_text_content.append(text)
+                
+                raw_text = "\n".join(full_text_content)
+                self._process_full_text(raw_text)
+                
             return self.documento
-            
+        except Exception as e:
+            logger.error(f"Erro fatal no parser: {e}")
+            return {'itens': []}
+
     def _process_full_text(self, text: str):
-        # Separador Mestre
-        chunks = re.split(r"ITENS DA DUIMP-(\d+)", text)
+        # Regex para identificar o cabeçalho de cada item no PDF (ex: ITENS DA DUIMP-00001)
+        # O split cria uma lista onde índices ímpares são o número do item e pares são o conteúdo
+        chunks = re.split(r"(?:ITENS DA DUIMP-|Item Integracao)\s*0*(\d+)", text)
         
         items = []
         if len(chunks) > 1:
-            # chunks[1]=ID, chunks[2]=Content ...
+            # Pula o preâmbulo (chunk 0) e itera em pares (Numero, Conteudo)
             for i in range(1, len(chunks), 2):
                 try:
-                    item_num = int(chunks[i])
-                    content = chunks[i+1]
-                    item_data = self._parse_item_content(content, item_num)
+                    item_num_str = chunks[i]
+                    content_block = chunks[i+1]
+                    
+                    # Processa o bloco isolado deste item
+                    item_data = self._parse_single_item(content_block, int(item_num_str))
                     items.append(item_data)
                 except Exception as e:
-                    logger.error(f"Erro ao processar item {i}: {e}")
-        
+                    logger.warning(f"Falha ao processar bloco {i}: {e}")
+
         self.documento['itens'] = items
-    
-    def _parse_item_content(self, text: str, item_num: int) -> Dict:
+
+    def _parse_single_item(self, block: str, item_num: int) -> Dict:
+        """Extrai dados de um único bloco de item usando janelas de contexto."""
         item = {
             'numero_item': item_num,
             'codigo_interno': '',
@@ -92,103 +95,114 @@ class HafelePDFParser:
         }
 
         # --- 1. DADOS CADASTRAIS ---
-        # Código Interno: "Código interno" ... [quebra] ... "342.79.301"
-        code_match = re.search(r'Código interno[^\d\n]*([\d\.]+)', text, re.IGNORECASE)
+        # Código Interno: Busca "Código interno" seguido de quebras e números
+        code_match = re.search(r'Código interno[^\d\n]*([\d\.]+)', block, re.IGNORECASE)
         if code_match:
             item['codigo_interno'] = code_match.group(1).strip()
 
-        # Descrição Complementar
-        desc_match = re.search(r'DESCRIÇÃO COMPLEMENTAR DA MERCADORIA\s*\n?(.*?)(?=\n|CONDIÇÃO|NCM)', text, re.IGNORECASE | re.DOTALL)
+        # Descrição Complementar: Busca texto entre o título e a próxima seção (CONDIÇÃO ou NCM)
+        desc_match = re.search(r'DESCRIÇÃO COMPLEMENTAR DA MERCADORIA\s*\n?(.*?)(?=\n\s*(?:CONDIÇÃO|NCM|M[ée]todo))', block, re.IGNORECASE | re.DOTALL)
         if desc_match:
             raw_desc = desc_match.group(1).strip()
             item['descricao_complementar'] = re.sub(r'\s+', ' ', raw_desc)
 
-        # --- 2. VALORES LOGÍSTICOS (Estes costumam ser Padrão: Label -> Valor) ---
-        item['frete_internacional'] = self._extract_value_smart([r'Frete Internac\.'], text, direction='forward')
-        item['seguro_internacional'] = self._extract_value_smart([r'Seguro Internac\.'], text, direction='forward')
-        item['local_aduaneiro'] = self._extract_value_smart([r'Local Aduaneiro'], text, direction='forward')
+        # --- 2. VALORES LOGÍSTICOS ---
+        # Estes geralmente seguem o padrão Label -> Valor
+        item['frete_internacional'] = self._extract_bidirectional(r'Frete Internac', block)
+        item['seguro_internacional'] = self._extract_bidirectional(r'Seguro Internac', block)
+        item['local_aduaneiro'] = self._extract_bidirectional(r'Local Aduaneiro', block)
 
-        # --- 3. IMPOSTOS (Lógica Reversa para Tabelas Quebradas) ---
+        # --- 3. ENGINE DE IMPOSTOS (ISOLAMENTO DE BLOCOS) ---
+        # Precisamos cortar o texto para que o parser não confunda II com IPI
         
-        # Segmentação de Blocos (Crucial)
+        # Mapa de posições
         idx_ii = -1
-        # Procura II ou 11 (OCR comum)
-        match_ii = re.search(r'\b(II|11)\b', text)
+        # Tenta achar II (com ou sem acento, ou erro de OCR '11')
+        match_ii = re.search(r'\b(II|11)\b[\s\n]', block)
         if match_ii: idx_ii = match_ii.start()
         
-        match_ipi = re.search(r'\bIPI\b', text)
+        match_ipi = re.search(r'\bIPI\b[\s\n]', block)
         idx_ipi = match_ipi.start() if match_ipi else -1
         
-        match_pis = re.search(r'\bPIS\b[\s\n-]', text) # Contexto para não pegar PIS em frases
+        match_pis = re.search(r'\bPIS\b[\s\n-]', block) # PIS isolado ou com hífen
         idx_pis = match_pis.start() if match_pis else -1
         
-        match_cofins = re.search(r'\bCOFINS\b', text)
+        match_cofins = re.search(r'\bCOFINS\b[\s\n]', block)
         idx_cofins = match_cofins.start() if match_cofins else -1
 
-        def get_block(start, potential_ends):
+        # Função de recorte seguro
+        def get_slice(start, breakpoints):
             if start == -1: return ""
-            valid_ends = [x for x in potential_ends if x > start]
-            end = min(valid_ends) if valid_ends else len(text)
-            return text[start:end]
+            valid_breaks = [b for b in breakpoints if b > start]
+            end = min(valid_breaks) if valid_breaks else len(block)
+            return block[start:end]
 
-        block_ii = get_block(idx_ii, [idx_ipi, idx_pis, idx_cofins])
-        block_ipi = get_block(idx_ipi, [idx_pis, idx_cofins])
-        block_pis = get_block(idx_pis, [idx_cofins])
-        block_cofins = text[idx_cofins:] if idx_cofins != -1 else ""
+        # Recorta os sub-blocos
+        sub_ii = get_slice(idx_ii, [idx_ipi, idx_pis, idx_cofins])
+        sub_ipi = get_slice(idx_ipi, [idx_pis, idx_cofins])
+        sub_pis = get_slice(idx_pis, [idx_cofins])
+        sub_cofins = block[idx_cofins:] if idx_cofins != -1 else ""
 
-        # Preenchimento usando a engine smart
-        self._populate_tax(item, 'ii', block_ii)
-        self._populate_tax(item, 'ipi', block_ipi)
-        self._populate_tax(item, 'pis', block_pis)
-        self._populate_tax(item, 'cofins', block_cofins)
+        # Extrai dados de cada sub-bloco
+        self._populate_tax(item, 'ii', sub_ii)
+        self._populate_tax(item, 'ipi', sub_ipi)
+        self._populate_tax(item, 'pis', sub_pis)
+        self._populate_tax(item, 'cofins', sub_cofins)
 
         return item
 
-    def _populate_tax(self, item: Dict, prefix: str, block: str):
-        if not block: return
+    def _populate_tax(self, item: Dict, prefix: str, text_block: str):
+        if not text_block: return
         
-        # Labels possíveis para cada campo (mapeado do seu PDF)
-        labels_valor = [r'Valor Devido', r'Valor A Recolher', r'Valor Calculado']
-        labels_base = [r'Base de Cálculo', r'Base de Calculo']
-        labels_aliq = [r'% Alíquota', r'Ad Valorem']
+        # Regex flexíveis para os rótulos (baseado no dump do PDF)
+        # Valor Devido
+        val = self._extract_bidirectional(r'Valor Devido', text_block)
+        if val == 0: val = self._extract_bidirectional(r'Valor A Recolher', text_block)
+        if val == 0: val = self._extract_bidirectional(r'Valor Calculado', text_block)
+        
+        # Base de Cálculo
+        base = self._extract_bidirectional(r'Base de C[áa]lculo', text_block)
+        
+        # Alíquota
+        aliq = self._extract_bidirectional(r'% Al[íi]quota', text_block)
+        if aliq == 0: aliq = self._extract_bidirectional(r'Ad Valorem', text_block)
 
-        # Extração com preferência REVERSA (Valor antes do Label)
-        item[f'{prefix}_valor_devido'] = self._extract_value_smart(labels_valor, block, direction='reverse')
-        item[f'{prefix}_base_calculo'] = self._extract_value_smart(labels_base, block, direction='reverse')
-        item[f'{prefix}_aliquota'] = self._extract_value_smart(labels_aliq, block, direction='reverse')
+        item[f'{prefix}_valor_devido'] = val
+        item[f'{prefix}_base_calculo'] = base
+        item[f'{prefix}_aliquota'] = aliq
 
-    def _extract_value_smart(self, labels: List[str], text: str, direction: str = 'reverse') -> float:
+    def _extract_bidirectional(self, label_pattern: str, text: str) -> float:
         """
-        Engine de Extração Sênior.
-        Tenta todas as labels. Se direction='reverse', procura: (Numero)...(Label).
-        Se falhar ou direction='forward', procura: (Label)...(Numero).
+        Algoritmo de Busca Sênior:
+        Procura valores numéricos próximos ao rótulo, tanto à frente quanto atrás.
+        Isso resolve o problema de layout onde "531,00" aparece antes de "Valor Devido".
         """
-        for label in labels:
-            val = 0.0
-            
-            # 1. TENTATIVA REVERSA (Prioridade para esse PDF)
-            # Regex: (Numero 1.000,0000) ... (Lixo não quebra de linha) ... (Label)
-            if direction == 'reverse':
-                # Captura números com ou sem milhar, virgula obrigatoria, e muitos decimais
-                regex_rev = r'([\d\.]*,\d+)[^\n]*?' + label
-                match = re.search(regex_rev, text, re.IGNORECASE)
-                if match:
-                    return self._parse_valor(match.group(1))
-            
-            # 2. TENTATIVA PADRÃO (Fallback)
-            # Regex: (Label) ... (Lixo) ... (Numero)
-            regex_fwd = label + r'[^\d\n]*?([\d\.]*,\d+)'
-            match = re.search(regex_fwd, text, re.IGNORECASE | re.DOTALL)
-            if match:
-                return self._parse_valor(match.group(1))
-                
-        return 0.0
-
-    def _parse_valor(self, valor_str: str) -> float:
-        if not valor_str: return 0.0
         try:
-            # Remove pontos de milhar, mantém vírgula
-            clean = valor_str.replace('.', '').replace(',', '.')
+            # 1. Tentativa Padrão (Label -> Valor)
+            # Procura Label + (lixo não numérico) + Numero
+            regex_fwd = label_pattern + r'[^\d\n-]*?(\d{1,3}(?:\.\d{3})*,\d+)'
+            match_fwd = re.search(regex_fwd, text, re.IGNORECASE | re.DOTALL)
+            
+            # 2. Tentativa Reversa (Valor -> Label)
+            # Procura Numero + (lixo não quebra de linha) + Label
+            # (?m) multiline mode não é necessário se tratarmos o bloco como string única
+            regex_rev = r'(\d{1,3}(?:\.\d{3})*,\d+)[^\d\n-]*?' + label_pattern
+            match_rev = re.search(regex_rev, text, re.IGNORECASE)
+
+            val_fwd = self._parse_br_float(match_fwd.group(1)) if match_fwd else 0.0
+            val_rev = self._parse_br_float(match_rev.group(1)) if match_rev else 0.0
+
+            # Retorna o que for maior que zero (priorizando reverso se ambos existirem, comum nesse PDF)
+            return val_rev if val_rev > 0 else val_fwd
+            
+        except Exception:
+            return 0.0
+
+    def _parse_br_float(self, val_str: str) -> float:
+        if not val_str: return 0.0
+        try:
+            # Remove pontos de milhar e troca vírgula decimal por ponto
+            clean = val_str.replace('.', '').replace(',', '.')
             return float(clean)
         except: return 0.0
 
@@ -199,7 +213,7 @@ class FinancialAnalyzer:
         return pd.DataFrame(self.documento['itens'])
 
 # ==============================================================================
-# 2. PARSER APP 1 (DUIMP SISCOMEX) - MANTIDO
+# 2. PARSER APP 1 (DUIMP SISCOMEX) - INTACTO
 # ==============================================================================
 
 class DuimpPDFParser:
@@ -260,7 +274,7 @@ class DuimpPDFParser:
         return match.group(1).strip() if match else ""
 
 # ==============================================================================
-# 3. XML BUILDER E UTILS (APP 1)
+# 3. UTILS E XML BUILDER (APP 1)
 # ==============================================================================
 
 class DataFormatter:
@@ -573,6 +587,183 @@ FOOTER_TAGS = {
     "viaTransportePaisTransportadorCodigo": "741",
     "viaTransportePaisTransportadorNome": "CINGAPURA"
 }
+
+class XMLBuilder:
+    def __init__(self, parser, edited_items=None):
+        self.p = parser
+        self.items_to_use = edited_items if edited_items else self.p.items
+        self.root = etree.Element("ListaDeclaracoes")
+        self.duimp = etree.SubElement(self.root, "duimp")
+
+    def build(self):
+        h = self.p.header
+        duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
+        
+        totals = {"frete": 0.0, "seguro": 0.0, "ii": 0.0, "ipi": 0.0, "pis": 0.0, "cofins": 0.0}
+
+        def get_float(val):
+            try: 
+                if isinstance(val, str): val = val.replace('.', '').replace(',', '.')
+                return float(val)
+            except: return 0.0
+
+        for it in self.items_to_use:
+            totals["frete"] += get_float(it.get("Frete (R$)", 0))
+            totals["seguro"] += get_float(it.get("Seguro (R$)", 0))
+            totals["ii"] += get_float(it.get("II (R$)", 0))
+            totals["ipi"] += get_float(it.get("IPI (R$)", 0))
+            totals["pis"] += get_float(it.get("PIS (R$)", 0))
+            totals["cofins"] += get_float(it.get("COFINS (R$)", 0))
+
+        for it in self.items_to_use:
+            adicao = etree.SubElement(self.duimp, "adicao")
+            
+            input_number = str(it.get("NUMBER", "")).strip()
+            original_desc = DataFormatter.clean_text(it.get("descricao", ""))
+            final_desc = f"{input_number} - {original_desc}" if input_number else original_desc
+
+            val_total_venda_fmt = DataFormatter.format_high_precision(it.get("valorTotal", "0"), 11)
+            val_unit_fmt = DataFormatter.format_high_precision(it.get("valorUnit", "0"), 20)
+            qtd_fmt = DataFormatter.format_quantity(it.get("quantidade"), 14)
+            peso_liq_fmt = DataFormatter.format_quantity(it.get("pesoLiq"), 15)
+            base_total_reais_fmt = DataFormatter.format_input_fiscal(it.get("valorTotal", "0"), 15)
+            
+            raw_frete = get_float(it.get("Frete (R$)", 0))
+            raw_seguro = get_float(it.get("Seguro (R$)", 0))
+            raw_aduaneiro = get_float(it.get("Aduaneiro (R$)", 0))
+            
+            frete_fmt = DataFormatter.format_input_fiscal(raw_frete)
+            seguro_fmt = DataFormatter.format_input_fiscal(raw_seguro)
+            aduaneiro_fmt = DataFormatter.format_input_fiscal(raw_aduaneiro)
+
+            ii_base_fmt = DataFormatter.format_input_fiscal(it.get("II Base (R$)", 0))
+            ii_aliq_fmt = DataFormatter.format_input_fiscal(it.get("II Alíq. (%)", 0), 5, True)
+            ii_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("II (R$)", 0)))
+
+            ipi_aliq_fmt = DataFormatter.format_input_fiscal(it.get("IPI Alíq. (%)", 0), 5, True)
+            ipi_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("IPI (R$)", 0)))
+
+            pis_base_fmt = DataFormatter.format_input_fiscal(it.get("PIS Base (R$)", 0))
+            pis_aliq_fmt = DataFormatter.format_input_fiscal(it.get("PIS Alíq. (%)", 0), 5, True)
+            pis_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("PIS (R$)", 0)))
+
+            cofins_aliq_fmt = DataFormatter.format_input_fiscal(it.get("COFINS Alíq. (%)", 0), 5, True)
+            cofins_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("COFINS (R$)", 0)))
+
+            icms_base_valor = ii_base_fmt if int(ii_base_fmt) > 0 else base_total_reais_fmt
+            cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
+            
+            supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"), it.get("endereco_raw"))
+
+            extracted_map = {
+                "numeroAdicao": str(it["numeroAdicao"])[-3:],
+                "numeroDUIMP": duimp_fmt,
+                "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
+                "dadosMercadoriaMedidaEstatisticaQuantidade": qtd_fmt,
+                "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "").upper(),
+                "dadosMercadoriaPesoLiquido": peso_liq_fmt,
+                "condicaoVendaMoedaNome": it.get("moeda", "").upper(),
+                "valorTotalCondicaoVenda": val_total_venda_fmt,
+                "valorUnitario": val_unit_fmt,
+                "condicaoVendaValorMoeda": base_total_reais_fmt,
+                "condicaoVendaValorReais": aduaneiro_fmt if int(aduaneiro_fmt) > 0 else base_total_reais_fmt,
+                "paisOrigemMercadoriaNome": it.get("paisOrigem", "").upper(),
+                "paisAquisicaoMercadoriaNome": it.get("paisOrigem", "").upper(),
+                "descricaoMercadoria": final_desc,
+                "quantidade": qtd_fmt,
+                "unidadeMedida": it.get("unidade", "").upper(),
+                "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800"),
+                "fornecedorNome": supplier_data["fornecedorNome"][:60],
+                "fornecedorLogradouro": supplier_data["fornecedorLogradouro"][:60],
+                "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
+                "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
+                "freteValorReais": frete_fmt,
+                "seguroValorReais": seguro_fmt,
+                "iiBaseCalculo": ii_base_fmt,
+                "iiAliquotaAdValorem": ii_aliq_fmt,
+                "iiAliquotaValorDevido": ii_val_fmt,
+                "iiAliquotaValorRecolher": ii_val_fmt,
+                "ipiAliquotaAdValorem": ipi_aliq_fmt,
+                "ipiAliquotaValorDevido": ipi_val_fmt,
+                "ipiAliquotaValorRecolher": ipi_val_fmt,
+                "pisCofinsBaseCalculoValor": pis_base_fmt,
+                "pisPasepAliquotaAdValorem": pis_aliq_fmt,
+                "pisPasepAliquotaValorDevido": pis_val_fmt,
+                "pisPasepAliquotaValorRecolher": pis_val_fmt,
+                "cofinsAliquotaAdValorem": cofins_aliq_fmt,
+                "cofinsAliquotaValorDevido": cofins_val_fmt,
+                "cofinsAliquotaValorRecolher": cofins_val_fmt,
+                "icmsBaseCalculoValor": icms_base_valor,
+                "icmsBaseCalculoAliquota": "01800",
+                "cbsIbsClasstrib": "000001",
+                "cbsBaseCalculoValor": icms_base_valor,
+                "cbsBaseCalculoAliquota": "00090",
+                "cbsBaseCalculoValorImposto": cbs_imposto,
+                "ibsBaseCalculoValor": icms_base_valor,
+                "ibsBaseCalculoAliquota": "00010",
+                "ibsBaseCalculoValorImposto": ibs_imposto
+            }
+
+            for field in ADICAO_FIELDS_ORDER:
+                tag_name = field["tag"]
+                if field.get("type") == "complex":
+                    parent = etree.SubElement(adicao, tag_name)
+                    for child in field["children"]:
+                        c_tag = child["tag"]
+                        val = extracted_map.get(c_tag, child["default"])
+                        etree.SubElement(parent, c_tag).text = val
+                else:
+                    val = extracted_map.get(tag_name, field["default"])
+                    etree.SubElement(adicao, tag_name).text = val
+
+        peso_bruto_fmt = DataFormatter.format_quantity(h.get("pesoBruto"), 15)
+        peso_liq_total_fmt = DataFormatter.format_quantity(h.get("pesoLiquido"), 15)
+
+        footer_map = {
+            "numeroDUIMP": duimp_fmt,
+            "importadorNome": h.get("nomeImportador", ""),
+            "importadorNumero": DataFormatter.format_number(h.get("cnpj"), 14),
+            "cargaPesoBruto": peso_bruto_fmt,
+            "cargaPesoLiquido": peso_liq_total_fmt,
+            "cargaPaisProcedenciaNome": h.get("paisProcedencia", "").upper(),
+            "totalAdicoes": str(len(self.items_to_use)).zfill(3),
+            "freteTotalReais": DataFormatter.format_input_fiscal(totals["frete"]),
+            "seguroTotalReais": DataFormatter.format_input_fiscal(totals["seguro"]),
+        }
+
+        receita_codes = [
+            {"code": "0086", "val": totals["ii"]},
+            {"code": "1038", "val": totals["ipi"]},
+            {"code": "5602", "val": totals["pis"]},
+            {"code": "5629", "val": totals["cofins"]}
+        ]
+
+        for tag, default_val in FOOTER_TAGS.items():
+            if tag == "pagamento":
+                for rec in receita_codes:
+                    if rec["val"] > 0:
+                        pag = etree.SubElement(self.duimp, "pagamento")
+                        etree.SubElement(pag, "agenciaPagamento").text = "3715"
+                        etree.SubElement(pag, "bancoPagamento").text = "341"
+                        etree.SubElement(pag, "codigoReceita").text = rec["code"]
+                        etree.SubElement(pag, "valorReceita").text = DataFormatter.format_input_fiscal(rec["val"])
+                continue
+
+            if isinstance(default_val, list):
+                parent = etree.SubElement(self.duimp, tag)
+                for subfield in default_val:
+                    etree.SubElement(parent, subfield["tag"]).text = subfield["default"]
+            elif isinstance(default_val, dict):
+                parent = etree.SubElement(self.duimp, tag)
+                etree.SubElement(parent, default_val["tag"]).text = default_val["default"]
+            else:
+                val = footer_map.get(tag, default_val)
+                etree.SubElement(self.duimp, tag).text = val
+        
+        # --- HEADER XML EXATO ---
+        xml_content = etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=False)
+        header = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        return header + xml_content
 
 # ==============================================================================
 # MAIN APP
