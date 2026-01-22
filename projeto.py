@@ -1,1290 +1,734 @@
 import streamlit as st
+import fitz  # PyMuPDF (Para leitura do DUIMP - App 1)
+import pdfplumber # (Para leitura avançada do Häfele - App 2)
+import re
 import pandas as pd
 import numpy as np
-from datetime import datetime
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import pdfplumber
-import re
-import json
-from typing import Dict, List, Tuple, Optional, Any
+from lxml import etree
 import tempfile
 import os
-import io
-from dataclasses import dataclass
-from collections import defaultdict
 import logging
+from typing import Dict, List, Optional, Any
+
+# ==============================================================================
+# CONFIGURAÇÃO GERAL
+# ==============================================================================
+st.set_page_config(page_title="Sistema Integrado DUIMP 2026 (Professional)", layout="wide")
+
+st.markdown("""
+<style>
+    .main-header { font-size: 2.2rem; color: #003366; font-weight: bold; margin-bottom: 1rem; border-bottom: 2px solid #003366; }
+    .stButton>button { width: 100%; border-radius: 5px; font-weight: bold; height: 3em; background-color: #003366; color: white; }
+    .success-box { background-color: #d4edda; color: #155724; padding: 10px; border-radius: 5px; border: 1px solid #c3e6cb; }
+</style>
+""", unsafe_allow_html=True)
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configuração da página
-st.set_page_config(
-    page_title="Sistema Completo de Análise Häfele - PDF APP2",
-    page_icon="🏭",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Estilos CSS personalizados
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.8rem;
-        color: #1E3A8A;
-        font-weight: bold;
-        margin-bottom: 1rem;
-        text-align: center;
-    }
-    .sub-header {
-        font-size: 1.8rem;
-        color: #2563EB;
-        margin-top: 2rem;
-        margin-bottom: 1rem;
-        border-bottom: 3px solid #E5E7EB;
-        padding-bottom: 0.5rem;
-        font-weight: 600;
-    }
-    .section-card {
-        background: #FFFFFF;
-        border-radius: 12px;
-        padding: 1.5rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        margin-bottom: 1.5rem;
-        border: 1px solid #E5E7EB;
-    }
-    .metric-value {
-        font-size: 2.2rem;
-        font-weight: bold;
-        color: #1E3A8A;
-        line-height: 1;
-    }
-    .metric-label {
-        font-size: 1rem;
-        color: #6B7280;
-        margin-top: 0.5rem;
-        font-weight: 500;
-    }
-    .info-box {
-        background-color: #F0F9FF;
-        border-left: 4px solid #1E3A8A;
-        padding: 1rem;
-        margin: 1rem 0;
-        border-radius: 8px;
-    }
-    .warning-box {
-        background-color: #FEF3C7;
-        border-left: 4px solid #D97706;
-        padding: 1rem;
-        margin: 1rem 0;
-        border-radius: 8px;
-    }
-    .success-box {
-        background-color: #D1FAE5;
-        border-left: 4px solid #059669;
-        padding: 1rem;
-        margin: 1rem 0;
-        border-radius: 8px;
-    }
-    .table-header {
-        background-color: #1E3A8A;
-        color: white;
-        font-weight: bold;
-        padding: 8px;
-    }
-</style>
-""", unsafe_allow_html=True)
+# ==============================================================================
+# 1. PARSER APP 2 (HÄFELE) - ENGINE AVANÇADA COM CONTEXTO
+# ==============================================================================
 
 class HafelePDFParser:
-    """Parser robusto para PDFs da Häfele (Layout APP2.pdf)"""
+    """
+    Parser avançado para PDFs da Häfele.
+    Utiliza estratégia de segmentação de texto por Item e por Tributo para garantir precisão.
+    """
     
     def __init__(self):
-        self.documento = {
-            'cabecalho': {},
-            'itens': [],
-            'totais': {},
-            'carga': {},
-            'transporte': {},
-            'moedas': {}
-        }
+        self.documento = {'itens': []}
         
     def parse_pdf(self, pdf_path: str) -> Dict:
-        """Parse completo do PDF"""
-        try:
-            logger.info(f"Iniciando parsing do PDF: {pdf_path}")
+        with pdfplumber.open(pdf_path) as pdf:
+            # Estratégia: Juntar todo o texto mantendo o layout visual
+            # Isso resolve o problema de tabelas que quebram de página
+            all_text_content = []
+            for page in pdf.pages:
+                # layout=True é CRUCIAL para tabelas complexas como a do seu PDF
+                text = page.extract_text(layout=True)
+                if text:
+                    # Remove rodapés de página para não sujar a regex
+                    text = re.sub(r'--- PAGE \d+ ---', '', text)
+                    all_text_content.append(text)
             
-            with pdfplumber.open(pdf_path) as pdf:
-                total_pages = len(pdf.pages)
-                logger.info(f"PDF com {total_pages} páginas")
-                
-                all_text = ""
-                for page_num, page in enumerate(pdf.pages, 1):
-                    logger.info(f"Processando página {page_num}/{total_pages}")
-                    text = page.extract_text()
-                    if text:
-                        all_text += text + "\n--- PAGE BREAK ---\n"
-            
-            # Processar todo o texto
-            self._process_full_text(all_text)
-            
-            logger.info(f"Parsing concluído. {len(self.documento['itens'])} itens processados.")
+            full_text = "\n".join(all_text_content)
+            self._process_full_text(full_text)
             return self.documento
             
-        except Exception as e:
-            logger.error(f"Erro no parsing: {str(e)}")
-            raise
-    
     def _process_full_text(self, text: str):
-        """Processa todo o texto do PDF"""
-        # Extrair informações do cabeçalho
-        self._extract_header_info(text)
+        # O arquivo usa "ITENS DA DUIMP-XXXXX" como separador mestre dos itens
+        chunks = re.split(r"ITENS DA DUIMP-(\d+)", text)
         
-        # Extrair informações de moedas
-        self._extract_currency_info(text)
+        items = []
+        if len(chunks) > 1:
+            # chunks[0] = Cabeçalho geral
+            # chunks[1] = Numero Item 1, chunks[2] = Texto Item 1
+            # chunks[3] = Numero Item 2, chunks[4] = Texto Item 2...
+            for i in range(1, len(chunks), 2):
+                try:
+                    item_num_str = chunks[i]
+                    content = chunks[i+1]
+                    
+                    item_num = int(item_num_str)
+                    item_data = self._parse_item_content(content, item_num)
+                    items.append(item_data)
+                except Exception as e:
+                    logger.error(f"Erro processando bloco de item {i}: {e}")
         
-        # Extrair informações de carga
-        self._extract_carga_info(text)
-        
-        # Encontrar todos os itens
-        items = self._find_all_items(text)
         self.documento['itens'] = items
-        
-        # Extrair informações de transporte
-        self._extract_transporte_info(text)
-        
-        # Extrair totais
-        self._extract_totais(text)
-        
-        # Calcular totais
-        self._calculate_totals()
     
-    def _extract_header_info(self, text: str):
-        """Extrai informações do cabeçalho"""
-        header_info = {}
-        
-        # Processo
-        processo_match = re.search(r'PROCESSO\s*#(\d+)', text)
-        if processo_match:
-            header_info['processo'] = processo_match.group(1)
-        
-        # Importador
-        importador_match = re.search(r'IMPORTADOR\s+(.+?)\s+CNPJ', text, re.DOTALL)
-        if importador_match:
-            header_info['importador'] = importador_match.group(1).strip()
-        
-        cnpj_match = re.search(r'CNPJ\s+([\d\.\/\-]+)', text)
-        if cnpj_match:
-            header_info['cnpj'] = cnpj_match.group(1)
-        
-        # Identificação
-        ident_match = re.search(r'Identificacao\s+(.+?)\s+Data de Cadastro', text)
-        if ident_match:
-            header_info['identificacao'] = ident_match.group(1).strip()
-        
-        data_cad_match = re.search(r'Data de Cadastro\s+(\d{2}/\d{2}/\d{4})', text)
-        if data_cad_match:
-            header_info['data_cadastro'] = data_cad_match.group(1)
-        
-        # Responsável
-        responsavel_match = re.search(r'Responsavel Legal\s+(.+)', text)
-        if responsavel_match:
-            header_info['responsavel'] = responsavel_match.group(1).strip()
-        
-        self.documento['cabecalho'] = header_info
-    
-    def _extract_currency_info(self, text: str):
-        """Extrai informações de moedas e cotações"""
-        moedas_info = {}
-        
-        # Padrão para moedas
-        moeda_patterns = [
-            r'Moeda Negociada\s+(\d+)\s+-\s+(.+?)\s+Cotacao\s+([\d,\.]+)',
-            r'Moeda Frete\s+(\d+)\s+-\s+(.+?)\s+Cotacao\s+([\d,\.]+)',
-            r'Moeda Seguro\s+(\d+)\s+-\s+(.+?)\s+Cotacao\s+([\d,\.]+)'
-        ]
-        
-        for pattern in moeda_patterns:
-            matches = re.findall(pattern, text)
-            for match in matches:
-                codigo, nome, cotacao = match
-                moedas_info[f"{nome.strip()}"] = {
-                    'codigo': codigo,
-                    'cotacao': self._parse_valor(cotacao)
-                }
-        
-        # Data das cotações
-        data_match = re.search(r'MOEDAS/COTACOES - \((\d{2}/\d{2}/\d{4})\)', text)
-        if data_match:
-            moedas_info['data_cotacao'] = data_match.group(1)
-        
-        self.documento['moedas'] = moedas_info
-    
-    def _extract_carga_info(self, text: str):
-        """Extrai informações da carga"""
-        carga_info = {}
-        
-        # Via de transporte
-        via_match = re.search(r'Via de Transporte\s+(.+?)\s+Num.', text)
-        if via_match:
-            carga_info['via_transporte'] = via_match.group(1).strip()
-        
-        # Identificação
-        ident_match = re.search(r'Num\. Identificacao\s+(\d+)', text)
-        if ident_match:
-            carga_info['identificacao_carga'] = ident_match.group(1)
-        
-        # Datas
-        embarque_match = re.search(r'Data de Embarque\s+(\d{2}/\d{2}/\d{4})', text)
-        if embarque_match:
-            carga_info['data_embarque'] = embarque_match.group(1)
-        
-        chegada_match = re.search(r'Data de Chegada\s+(\d{2}/\d{2}/\d{4})', text)
-        if chegada_match:
-            carga_info['data_chegada'] = chegada_match.group(1)
-        
-        # Pesos
-        peso_bruto_match = re.search(r'Peso Bruto\s+([\d\.,]+)', text)
-        if peso_bruto_match:
-            carga_info['peso_bruto'] = self._parse_valor(peso_bruto_match.group(1))
-        
-        peso_liquido_match = re.search(r'Peso Liquido\s+([\d\.,]+)', text)
-        if peso_liquido_match:
-            carga_info['peso_liquido'] = self._parse_valor(peso_liquido_match.group(1))
-        
-        # Países
-        procedencia_match = re.search(r'Pais de Procedencia\s+(.+?)\s*\(', text)
-        if procedencia_match:
-            carga_info['pais_procedencia'] = procedencia_match.group(1).strip()
-        
-        # Unidades
-        unidade_match = re.search(r'Unidade de Despacho\s+(.+?)\s+Recinto', text)
-        if unidade_match:
-            carga_info['unidade_despacho'] = unidade_match.group(1).strip()
-        
-        recinto_match = re.search(r'Recinto\s+(.+?)\s+Unid', text)
-        if recinto_match:
-            carga_info['recinto'] = recinto_match.group(1).strip()
-        
-        self.documento['carga'] = carga_info
-    
-    def _extract_transporte_info(self, text: str):
-        """Extrai informações de transporte"""
-        transporte_info = {}
-        
-        # Conhecimento
-        conhecimento_match = re.search(r'Tipo Conhecimento\s+(\d+)\s+-\s+(.+)', text)
-        if conhecimento_match:
-            transporte_info['tipo_conhecimento'] = {
-                'codigo': conhecimento_match.group(1),
-                'descricao': conhecimento_match.group(2).strip()
-            }
-        
-        # Bandeira/Embarcação
-        bandeira_match = re.search(r'Bandeira Embarcacao\s+(.+?)\s+Local', text)
-        if bandeira_match:
-            transporte_info['bandeira'] = bandeira_match.group(1).strip()
-        
-        # Local de embarque
-        local_emb_match = re.search(r'Local Embarque\s+(.+)', text)
-        if local_emb_match:
-            transporte_info['local_embarque'] = local_emb_match.group(1).strip()
-        
-        # Frete
-        frete_match = re.search(r'FRETE.*?Total \(Moeda\)\s+([\d\.,]+).*?Total \(R\$\)\s+([\d\.,]+)', text, re.DOTALL)
-        if frete_match:
-            transporte_info['frete'] = {
-                'valor_moeda': self._parse_valor(frete_match.group(1)),
-                'valor_real': self._parse_valor(frete_match.group(2))
-            }
-        
-        # Seguro
-        seguro_match = re.search(r'SEGURO.*?Total \(Moeda\)\s+([\d\.,]+).*?Total \(R\$\)\s+([\d\.,]+)', text, re.DOTALL)
-        if seguro_match:
-            transporte_info['seguro'] = {
-                'valor_moeda': self._parse_valor(seguro_match.group(1)),
-                'valor_real': self._parse_valor(seguro_match.group(2))
-            }
-        
-        self.documento['transporte'] = transporte_info
-    
-    def _extract_totais(self, text: str):
-        """Extrai totais do documento"""
-        totais_info = {}
-        
-        # Valores CIF
-        cif_match = re.search(r'CIF \(US\$\)\s+([\d\.,]+).*?CIF \(R\$\)\s+([\d\.,]+)', text, re.DOTALL)
-        if cif_match:
-            totais_info['cif'] = {
-                'usd': self._parse_valor(cif_match.group(1)),
-                'brl': self._parse_valor(cif_match.group(2))
-            }
-        
-        # Valores VMLE
-        vmle_match = re.search(r'VMLE \(US\$\)\s+([\d\.,]+).*?VMLE \(R\$\)\s+([\d\.,]+)', text, re.DOTALL)
-        if vmle_match:
-            totais_info['vmle'] = {
-                'usd': self._parse_valor(vmle_match.group(1)),
-                'brl': self._parse_valor(vmle_match.group(2))
-            }
-        
-        # Valores VMLD
-        vmld_match = re.search(r'VMLD \(US\$\)\s+([\d\.,]+).*?VMLD \(R\$\)\s+([\d\.,]+)', text, re.DOTALL)
-        if vmld_match:
-            totais_info['vmld'] = {
-                'usd': self._parse_valor(vmld_match.group(1)),
-                'brl': self._parse_valor(vmld_match.group(2))
-            }
-        
-        # Impostos totais
-        impostos_section = self._find_impostos_section(text)
-        if impostos_section:
-            self._parse_total_impostos(impostos_section, totais_info)
-        
-        self.documento['totais_extraidos'] = totais_info
-    
-    def _find_all_items(self, text: str) -> List[Dict]:
-        """Encontra todos os itens no texto do layout APP2.pdf"""
-        items = []
-        
-        # Encontrar blocos de itens usando padrões específicos do APP2
-        sections = text.split('--- PAGE BREAK ---')
-        
-        for section_num, section in enumerate(sections):
-            # Procurar por padrões de itens no layout APP2
-            item_matches = self._find_item_patterns_app2(section)
-            
-            if item_matches:
-                for item_text in item_matches:
-                    item_data = self._parse_item_app2(item_text, section_num)
-                    if item_data:
-                        items.append(item_data)
-        
-        return items
-    
-    def _find_item_patterns_app2(self, text: str) -> List[str]:
-        """Encontra padrões de itens específicos do layout APP2.pdf"""
-        patterns = [
-            r'ITENS DA DUIMP - (\d+).*?(?=ITENS DA DUIMP|\*\*\*|\-{3,}|$)',  # Para múltiplos itens
-            r'Item\s+Integracao\s+NCM.*?(?=Item\s+Integracao|\*\*\*|\-{3,}|$)',  # Para cabeçalhos de tabela
-        ]
-        
-        items = []
-        for pattern in patterns:
-            matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
-            for match in matches:
-                if match and len(match.strip()) > 100:  # Garantir que não é apenas ruído
-                    items.append(match.strip())
-        
-        return items
-    
-    def _parse_item_app2(self, text: str, section_num: int) -> Optional[Dict]:
-        """Parse de um item individual do layout APP2.pdf"""
-        try:
-            item = {
-                'numero_item': '',
-                'ncm': '',
-                'codigo_produto': '',
-                'nome_produto': '',
-                'descricao_produto': '',
-                'codigo_interno': '',
-                'pais_origem': '',
-                'fabricante_conhecido': '',
-                'caracterizacao_importacao': '',
-                'exportador': '',
-                'fabricante_produtor': '',
-                'vinculacao': '',
-                'aplicacao': '',
-                'condicao_mercadoria': '',
-                'quantidade_estatistica': 0,
-                'unidade_estatistica': '',
-                'quantidade_comercial': 0,
-                'unidade_comercial': '',
-                'peso_liquido_kg': 0,
-                'moeda_negociada': '',
-                'valor_unitario_cond_venda': 0,
-                'valor_total_cond_venda': 0,
-                'cfop': '',
-                'descricao_complementar': '',
-                'metodo_valoracao': '',
-                'valor_cond_venda_moeda': 0,
-                'valor_cond_venda_real': 0,
-                'frete_internacional_real': 0,
-                'seguro_internacional_real': 0,
-                'local_embarque_real': 0,
-                'local_aduaneiro_real': 0,
-                'cobertura_cambial': '',
-                
-                # Impostos
-                'ii_base_calculo': 0,
-                'ii_aliquota': 0,
-                'ii_valor_devido': 0,
-                'ipi_base_calculo': 0,
-                'ipi_aliquota': 0,
-                'ipi_valor_devido': 0,
-                'pis_base_calculo': 0,
-                'pis_aliquota': 0,
-                'pis_valor_devido': 0,
-                'cofins_base_calculo': 0,
-                'cofins_aliquota': 0,
-                'cofins_valor_devido': 0,
-                
-                # ICMS
-                'icms_regime': '',
-                'icms_aliquota': 0,
-                'icms_base_calculo': 0,
-                'icms_valor_devido': 0,
-                
-                'total_impostos': 0,
-                'valor_total_com_impostos': 0
-            }
-            
-            # Número do item
-            item_num_match = re.search(r'ITENS DA DUIMP - (\d{5})', text)
-            if item_num_match:
-                item['numero_item'] = item_num_match.group(1)
-            
-            # NCM e código do produto
-            ncm_match = re.search(r'(\d{4}\.\d{2}\.\d{2})\s+(\d+)', text)
-            if ncm_match:
-                item['ncm'] = ncm_match.group(1)
-                item['codigo_produto'] = ncm_match.group(2)
-            
-            # Nome do produto
-            nome_match = re.search(r'DENOMINACAO DO PRODUTO\s*\n(.*?)(?:\nDESCRICAO|\nCÓDIGO|\nFABRICANTE|\n\*\*\*)', 
-                                  text, re.DOTALL | re.IGNORECASE)
-            if nome_match:
-                item['nome_produto'] = nome_match.group(1).replace('\n', ' ').strip()
-            
-            # Descrição do produto
-            desc_match = re.search(r'DESCRICAO DO PRODUTO\s*\n(.*?)(?:\nCÓDIGO|\nFABRICANTE|\n\*\*\*|\nDADOS)', 
-                                  text, re.DOTALL | re.IGNORECASE)
-            if desc_match:
-                item['descricao_produto'] = desc_match.group(1).replace('\n', ' ').strip()
-            
-            # Código interno
-            codigo_match = re.search(r'Código interno\s*(\d+\.\d+\.\d+)', text)
-            if codigo_match:
-                item['codigo_interno'] = codigo_match.group(1)
-            
-            # Fabricante/Produtor
-            fabricante_match = re.search(r'FABRICANTE/PRODUTOR.*?Conhecido\s+(SIM|NAO)', text, re.DOTALL | re.IGNORECASE)
-            if fabricante_match:
-                item['fabricante_conhecido'] = fabricante_match.group(1)
-            
-            # País de origem
-            pais_match = re.search(r'Pais Origem\s+(IT ITALIA|.+?)($|\n|CARACTERIZAÇÃO)', text)
-            if pais_match:
-                item['pais_origem'] = pais_match.group(1).strip()
-            
-            # Caracterização da importação
-            import_match = re.search(r'CARACTERIZAÇÃO DA IMPORTAÇÃO.*?Importação\s+(.+?)\n', text, re.DOTALL | re.IGNORECASE)
-            if import_match:
-                item['caracterizacao_importacao'] = import_match.group(1).strip()
-            
-            # Dados da mercadoria
-            mercadoria_section = self._extract_mercadoria_section(text)
-            if mercadoria_section:
-                item.update(mercadoria_section)
-            
+    def _parse_item_content(self, text: str, item_num: int) -> Dict:
+        """Extrai dados de um único item isolado"""
+        item = {
+            'numero_item': item_num,
+            'codigo_interno': '',
+            'descricao_complementar': '',
+            'frete_internacional': 0.0,
+            'seguro_internacional': 0.0,
+            'local_aduaneiro': 0.0,
             # Impostos
-            impostos_section = self._find_impostos_section_item(text)
-            if impostos_section:
-                tax_data = self._parse_taxes_app2(impostos_section)
-                item.update(tax_data)
-            
-            # ICMS
-            icms_section = self._find_icms_section(text)
-            if icms_section:
-                icms_data = self._parse_icms_app2(icms_section)
-                item.update(icms_data)
-            
-            # Calcular totais
-            item['total_impostos'] = (
-                item['ii_valor_devido'] + 
-                item['ipi_valor_devido'] + 
-                item['pis_valor_devido'] + 
-                item['cofins_valor_devido']
-            )
-            
-            item['valor_total_com_impostos'] = item['valor_total_cond_venda'] + item['total_impostos']
-            
-            return item
-            
-        except Exception as e:
-            logger.error(f"Erro ao parsear item na seção {section_num}: {str(e)}")
-            return None
-    
-    def _extract_mercadoria_section(self, text: str) -> Dict:
-        """Extrai dados da mercadoria"""
-        data = {}
-        
-        # Aplicação
-        app_match = re.search(r'Aplicação\s+(.+?)\n', text)
-        if app_match:
-            data['aplicacao'] = app_match.group(1).strip()
-        
-        # Quantidade comercial
-        qtd_match = re.search(r'Qtde Unid\. Comercial\s+([\d\.,]+)', text)
-        if qtd_match:
-            data['quantidade_comercial'] = self._parse_valor(qtd_match.group(1))
-        
-        # Unidade comercial
-        unid_match = re.search(r'Unidade Comercial\s+(.+?)\n', text)
-        if unid_match:
-            data['unidade_comercial'] = unid_match.group(1).strip()
-        
-        # Peso líquido
-        peso_match = re.search(r'Peso Líquido \(KG\)\s+([\d\.,]+)', text)
-        if peso_match:
-            data['peso_liquido_kg'] = self._parse_valor(peso_match.group(1))
-        
-        # Valor unitário
-        valor_unit_match = re.search(r'Valor Unit Cond Venda\s+([\d\.,]+)', text)
-        if valor_unit_match:
-            data['valor_unitario_cond_venda'] = self._parse_valor(valor_unit_match.group(1))
-        
-        # Valor total
-        valor_total_match = re.search(r'Valor Tot\. Cond Venda\s+([\d\.,]+)', text)
-        if valor_total_match:
-            data['valor_total_cond_venda'] = self._parse_valor(valor_total_match.group(1))
-        
-        # CFOP
-        cfop_match = re.search(r'CFOP\s+(\d+)\s+-\s+(.+?)\n', text)
-        if cfop_match:
-            data['cfop'] = f"{cfop_match.group(1)} - {cfop_match.group(2).strip()}"
-        
-        # Local aduaneiro
-        local_adu_match = re.search(r'Local Aduaneiro \(R\$\)\s+([\d\.,]+)', text)
-        if local_adu_match:
-            data['local_aduaneiro_real'] = self._parse_valor(local_adu_match.group(1))
-        
-        # Frete internacional
-        frete_match = re.search(r'Frete Internac\. \(R\$\)\s+([\d\.,]+)', text)
-        if frete_match:
-            data['frete_internacional_real'] = self._parse_valor(frete_match.group(1))
-        
-        # Seguro internacional
-        seguro_match = re.search(r'Seguro Internac\. \(R\$\)\s+([\d\.,]+)', text)
-        if seguro_match:
-            data['seguro_internacional_real'] = self._parse_valor(seguro_match.group(1))
-        
-        return data
-    
-    def _find_impostos_section_item(self, text: str) -> Optional[str]:
-        """Encontra seção de impostos do item"""
-        # Procura por blocos de cálculo de impostos
-        patterns = [
-            r'CALCULOS DOS TRIBUTOS - MERCADORIA.*?(?=INFORMAÇÕES DO ICMS|ITENS DA DUIMP|\*\*\*|\-{3,}|$)',
-            r'TRIBUTOS DA MERCADORIA - TRIBUTAÇÃO.*?(?=INFORMAÇÕES DO ICMS|ITENS DA DUIMP|\*\*\*|\-{3,}|$)'
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-            if match:
-                return match.group(0)
-        
-        return None
-    
-    def _parse_taxes_app2(self, text: str) -> Dict:
-        """Parse de impostos específico do APP2"""
-        taxes = {
-            'ii_base_calculo': 0, 'ii_aliquota': 0, 'ii_valor_devido': 0,
-            'ipi_base_calculo': 0, 'ipi_aliquota': 0, 'ipi_valor_devido': 0,
-            'pis_base_calculo': 0, 'pis_aliquota': 0, 'pis_valor_devido': 0,
-            'cofins_base_calculo': 0, 'cofins_aliquota': 0, 'cofins_valor_devido': 0
+            'ii_valor_devido': 0.0, 'ii_base_calculo': 0.0, 'ii_aliquota': 0.0,
+            'ipi_valor_devido': 0.0, 'ipi_base_calculo': 0.0, 'ipi_aliquota': 0.0,
+            'pis_valor_devido': 0.0, 'pis_base_calculo': 0.0, 'pis_aliquota': 0.0,
+            'cofins_valor_devido': 0.0, 'cofins_base_calculo': 0.0, 'cofins_aliquota': 0.0
         }
+
+        # 1. CÓDIGO INTERNO
+        # Procura por "Código interno" seguido de qualquer caractere até achar números/pontos
+        code_match = re.search(r'Código interno[^\d\n]*([\d\.]+)', text, re.IGNORECASE)
+        if code_match:
+            item['codigo_interno'] = code_match.group(1).strip()
+
+        # 2. DESCRIÇÃO COMPLEMENTAR
+        # Captura até encontrar uma palavra chave de parada (NCM, CONDIÇÃO, etc)
+        desc_match = re.search(r'DESCRIÇÃO COMPLEMENTAR DA MERCADORIA\s*\n?(.*?)(?=\n|CONDIÇÃO|NCM)', text, re.IGNORECASE | re.DOTALL)
+        if desc_match:
+            raw_desc = desc_match.group(1).strip()
+            item['descricao_complementar'] = re.sub(r'\s+', ' ', raw_desc)
+
+        # 3. VALORES LOGÍSTICOS
+        # Regex robusta: Label + (lixo opcional) + Valor
+        item['frete_internacional'] = self._extract_value_robust(r'Frete Internac\.', text)
+        item['seguro_internacional'] = self._extract_value_robust(r'Seguro Internac\.', text)
+        item['local_aduaneiro'] = self._extract_value_robust(r'Local Aduaneiro', text)
+
+        # 4. IMPOSTOS (Lógica de Blocos Isolados)
+        # Recorta janelas de texto para garantir que dados não se misturem
         
-        # Padrões para cada imposto
-        patterns = {
-            'ii': r'II.*?Base de Cálculo \(R\$\)\s*([\d\.,]+).*?% Alíquota\s*([\d\.,]+).*?Valor Devido \(R\$\)\s*([\d\.,]+)',
-            'ipi': r'IPI.*?Base de Cálculo \(R\$\)\s*([\d\.,]+).*?% Alíquota\s*([\d\.,]+).*?Valor Devido \(R\$\)\s*([\d\.,]+)',
-            'pis': r'PIS.*?Base de Cálculo \(R\$\)\s*([\d\.,]+).*?% Alíquota\s*([\d\.,]+).*?Valor Devido \(R\$\)\s*([\d\.,]+)',
-            'cofins': r'COFINS.*?Base de Cálculo \(R\$\)\s*([\d\.,]+).*?% Alíquota\s*([\d\.,]+).*?Valor Devido \(R\$\)\s*([\d\.,]+)'
-        }
+        # Encontra índices iniciais (Suporta '11' como erro de OCR para 'II')
+        idx_ii = -1
+        match_ii = re.search(r'\b(II|11)\b', text) 
+        if match_ii: idx_ii = match_ii.start()
         
-        for tax, pattern in patterns.items():
-            match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-            if match:
-                taxes[f'{tax}_base_calculo'] = self._parse_valor(match.group(1))
-                taxes[f'{tax}_aliquota'] = self._parse_valor(match.group(2))
-                taxes[f'{tax}_valor_devido'] = self._parse_valor(match.group(3))
+        match_ipi = re.search(r'\bIPI\b', text)
+        idx_ipi = match_ipi.start() if match_ipi else -1
         
-        return taxes
-    
-    def _find_icms_section(self, text: str) -> Optional[str]:
-        """Encontra seção de ICMS"""
-        pattern = r'INFORMAÇÕES DO ICMS.*?(?=ITENS DA DUIMP|\*\*\*|\-{3,}|$)'
-        match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-        if match:
-            return match.group(0)
-        return None
-    
-    def _parse_icms_app2(self, text: str) -> Dict:
-        """Parse de ICMS específico do APP2"""
-        icms = {
-            'icms_regime': '',
-            'icms_aliquota': 0,
-            'icms_base_calculo': 0,
-            'icms_valor_devido': 0
-        }
+        # PIS pode confundir com outros textos ("PIS-IMPORTAÇÃO"), buscamos PIS isolado ou no contexto certo
+        match_pis = re.search(r'\bPIS\b[\s\n-]', text)
+        idx_pis = match_pis.start() if match_pis else -1
         
-        regime_match = re.search(r'Regime de Tributacao\s+(.+?)\n', text)
-        if regime_match:
-            icms['icms_regime'] = regime_match.group(1).strip()
+        match_cofins = re.search(r'\bCOFINS\b', text)
+        idx_cofins = match_cofins.start() if match_cofins else -1
+
+        # Função para recortar o bloco de texto
+        def get_block(start, potential_ends):
+            if start == -1: return ""
+            valid_ends = [x for x in potential_ends if x > start]
+            end = min(valid_ends) if valid_ends else len(text)
+            return text[start:end]
+
+        # Define as janelas de texto para cada imposto
+        block_ii = get_block(idx_ii, [idx_ipi, idx_pis, idx_cofins])
+        block_ipi = get_block(idx_ipi, [idx_pis, idx_cofins])
+        block_pis = get_block(idx_pis, [idx_cofins])
+        block_cofins = text[idx_cofins:] if idx_cofins != -1 else ""
+
+        # Preenche os dados usando apenas o texto do bloco específico
+        self._populate_tax_from_block(item, 'ii', block_ii)
+        self._populate_tax_from_block(item, 'ipi', block_ipi)
+        self._populate_tax_from_block(item, 'pis', block_pis)
+        self._populate_tax_from_block(item, 'cofins', block_cofins)
+
+        return item
+
+    def _populate_tax_from_block(self, item: Dict, prefix: str, block: str):
+        if not block: return
         
-        aliquota_match = re.search(r'% Alíquota Ad Valorem\s+([\d\.,]+)', text)
-        if aliquota_match:
-            icms['icms_aliquota'] = self._parse_valor(aliquota_match.group(1))
+        # Busca Valor (Prioridade: Devido -> Recolher -> Calculado)
+        val = self._extract_value_robust(r'Valor Devido', block)
+        if val == 0: val = self._extract_value_robust(r'Valor A Recolher', block)
+        if val == 0: val = self._extract_value_robust(r'Valor Calculado', block)
         
-        base_match = re.search(r'Base de Cálculo\s+([\d\.,]+)', text)
-        if base_match:
-            icms['icms_base_calculo'] = self._parse_valor(base_match.group(1))
+        # Busca Base e Alíquota
+        base = self._extract_value_robust(r'Base de Cálculo', block)
+        if base == 0: base = self._extract_value_robust(r'Base de Calculo', block)
         
-        valor_match = re.search(r'Valor Devido\s+([\d\.,]+)', text)
-        if valor_match:
-            icms['icms_valor_devido'] = self._parse_valor(valor_match.group(1))
-        
-        return icms
-    
-    def _find_impostos_section(self, text: str) -> Optional[str]:
-        """Encontra seção de impostos totais"""
-        pattern = r'CÁLCULOS DOS TRIBUTOS.*?(?=RECEITA|TRANSPORTE|$)'
-        match = re.search(pattern, text, re.DOTALL)
-        if match:
-            return match.group(0)
-        return None
-    
-    def _parse_total_impostos(self, text: str, totais_info: Dict):
-        """Parse de impostos totais"""
-        # Padrões para impostos
-        imposto_patterns = {
-            'ii': r'II.*?A Recolher\s+([\d\.,]+)',
-            'ipi': r'IPI.*?A Recolher\s+([\d\.,]+)',
-            'pis': r'PIS.*?A Recolher\s+([\d\.,]+)',
-            'cofins': r'COFINS.*?A Recolher\s+([\d\.,]+)',
-            'taxa': r'TAXA DE UTILIZACAO.*?A Recolher\s+([\d\.,]+)'
-        }
-        
-        for imposto, pattern in imposto_patterns.items():
-            match = re.search(pattern, text, re.DOTALL)
-            if match:
-                totais_info[f'{imposto}_total'] = self._parse_valor(match.group(1))
-    
-    def _calculate_totals(self):
-        """Calcula totais do documento"""
-        totais = {
-            'valor_total_mercadoria': 0,
-            'peso_total': 0,
-            'quantidade_total': 0,
-            'total_impostos': 0,
-            'ii_total': 0,
-            'ipi_total': 0,
-            'pis_total': 0,
-            'cofins_total': 0,
-            'valor_total_com_impostos': 0
-        }
-        
-        for item in self.documento['itens']:
-            totais['valor_total_mercadoria'] += item.get('valor_total_cond_venda', 0)
-            totais['peso_total'] += item.get('peso_liquido_kg', 0)
-            totais['quantidade_total'] += item.get('quantidade_comercial', 0)
-            totais['ii_total'] += item.get('ii_valor_devido', 0)
-            totais['ipi_total'] += item.get('ipi_valor_devido', 0)
-            totais['pis_total'] += item.get('pis_valor_devido', 0)
-            totais['cofins_total'] += item.get('cofins_valor_devido', 0)
-            totais['total_impostos'] += item.get('total_impostos', 0)
-            totais['valor_total_com_impostos'] += item.get('valor_total_com_impostos', 0)
-        
-        self.documento['totais'] = totais
-    
-    def _parse_valor(self, valor_str: str) -> float:
-        """Converte string de valor para float"""
+        aliq = self._extract_value_robust(r'% Alíquota', block)
+        if aliq == 0: aliq = self._extract_value_robust(r'Ad Valorem', block)
+
+        item[f'{prefix}_valor_devido'] = val
+        item[f'{prefix}_base_calculo'] = base
+        item[f'{prefix}_aliquota'] = aliq
+
+    def _extract_value_robust(self, label_pattern: str, text_block: str) -> float:
+        """
+        Regex Profissional de Alta Permeabilidade:
+        Procura o Label, ignora qualquer caractere que não seja digito (quebras de linha, vírgulas soltas),
+        e captura o primeiro formato numérico válido (1.000,00 ou 1000,00).
+        """
         try:
-            if not valor_str or valor_str.strip() == '':
-                return 0.0
-            valor_limpo = valor_str.replace('.', '').replace(',', '.')
-            return float(valor_limpo)
+            # Pattern: Label ... (lixo, newlines, chars) ... (Numero)
+            # [^\d\n]*? -> Ignora caracteres não-digito de forma 'lazy'
+            # ([\d\.]*,\d+) -> Captura 1.234,56
+            regex = label_pattern + r'[^\d]*?([\d\.]*,\d+)'
+            match = re.search(regex, text_block, re.IGNORECASE | re.DOTALL)
+            
+            if match:
+                val_str = match.group(1)
+                # Limpeza: remove pontos de milhar, troca vírgula decimal por ponto
+                clean_val = val_str.replace('.', '').replace(',', '.')
+                return float(clean_val)
+            return 0.0
         except:
             return 0.0
 
-
 class FinancialAnalyzer:
-    """Analisador financeiro para APP2"""
-    
     def __init__(self, documento: Dict):
         self.documento = documento
-        self.itens_df = None
-        
     def prepare_dataframe(self):
-        """Prepara DataFrame para análise"""
-        itens_data = []
-        
-        for item in self.documento['itens']:
-            itens_data.append({
-                'Item': item.get('numero_item', ''),
-                'NCM': item.get('ncm', ''),
-                'Código Produto': item.get('codigo_produto', ''),
-                'Código Interno': item.get('codigo_interno', ''),
-                'Produto': item.get('nome_produto', ''),
-                'Descrição': item.get('descricao_produto', ''),
-                'País Origem': item.get('pais_origem', ''),
-                'Aplicação': item.get('aplicacao', ''),
-                'Fabricante Conhecido': item.get('fabricante_conhecido', ''),
-                'CFOP': item.get('cfop', ''),
-                'Quantidade': item.get('quantidade_comercial', 0),
-                'Unidade': item.get('unidade_comercial', ''),
-                'Peso (kg)': item.get('peso_liquido_kg', 0),
-                'Valor Unit. (R$)': item.get('valor_unitario_cond_venda', 0),
-                'Valor Total (R$)': item.get('valor_total_cond_venda', 0),
-                'Local Aduaneiro (R$)': item.get('local_aduaneiro_real', 0),
-                'Frete (R$)': item.get('frete_internacional_real', 0),
-                'Seguro (R$)': item.get('seguro_internacional_real', 0),
-                
-                # Impostos - Bases
-                'II Base (R$)': item.get('ii_base_calculo', 0),
-                'IPI Base (R$)': item.get('ipi_base_calculo', 0),
-                'PIS Base (R$)': item.get('pis_base_calculo', 0),
-                'COFINS Base (R$)': item.get('cofins_base_calculo', 0),
-                
-                # Impostos - Alíquotas
-                'II Alíq. (%)': item.get('ii_aliquota', 0),
-                'IPI Alíq. (%)': item.get('ipi_aliquota', 0),
-                'PIS Alíq. (%)': item.get('pis_aliquota', 0),
-                'COFINS Alíq. (%)': item.get('cofins_aliquota', 0),
-                
-                # Impostos - Valores
-                'II (R$)': item.get('ii_valor_devido', 0),
-                'IPI (R$)': item.get('ipi_valor_devido', 0),
-                'PIS (R$)': item.get('pis_valor_devido', 0),
-                'COFINS (R$)': item.get('cofins_valor_devido', 0),
-                
-                # ICMS
-                'ICMS Regime': item.get('icms_regime', ''),
-                'ICMS Alíq. (%)': item.get('icms_aliquota', 0),
-                'ICMS Base (R$)': item.get('icms_base_calculo', 0),
-                'ICMS (R$)': item.get('icms_valor_devido', 0),
-                
-                'Total Impostos (R$)': item.get('total_impostos', 0),
-                'Valor c/ Impostos (R$)': item.get('valor_total_com_impostos', 0),
-                'Descrição Complementar': item.get('descricao_complementar', '')
-            })
-        
-        self.itens_df = pd.DataFrame(itens_data)
-        return self.itens_df
-    
-    def create_summary_metrics(self):
-        """Cria métricas resumidas"""
-        metrics = {}
-        
-        if self.documento.get('totais'):
-            metrics.update(self.documento['totais'])
-        
-        if self.documento.get('carga'):
-            metrics['peso_bruto'] = self.documento['carga'].get('peso_bruto', 0)
-            metrics['data_embarque'] = self.documento['carga'].get('data_embarque', '')
-            metrics['data_chegada'] = self.documento['carga'].get('data_chegada', '')
-        
-        if self.documento.get('transporte'):
-            if 'frete' in self.documento['transporte']:
-                metrics['frete_total'] = self.documento['transporte']['frete'].get('valor_real', 0)
-            if 'seguro' in self.documento['transporte']:
-                metrics['seguro_total'] = self.documento['transporte']['seguro'].get('valor_real', 0)
-        
-        return metrics
+        return pd.DataFrame(self.documento['itens'])
 
+# ==============================================================================
+# 2. PARSER APP 1 (DUIMP SISCOMEX) - MANTIDO INTACTO
+# ==============================================================================
 
-def display_header_info(cabecalho: Dict):
-    """Exibe informações do cabeçalho"""
-    st.markdown('<h2 class="sub-header">📋 Informações do Processo</h2>', unsafe_allow_html=True)
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.info(f"**Processo:** {cabecalho.get('processo', 'N/A')}")
-    
-    with col2:
-        st.info(f"**Importador:** {cabecalho.get('importador', 'N/A')}")
-    
-    with col3:
-        st.info(f"**CNPJ:** {cabecalho.get('cnpj', 'N/A')}")
-    
-    with col4:
-        st.info(f"**Responsável:** {cabecalho.get('responsavel', 'N/A')}")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.info(f"**Identificação:** {cabecalho.get('identificacao', 'N/A')}")
-    
-    with col2:
-        st.info(f"**Data Cadastro:** {cabecalho.get('data_cadastro', 'N/A')}")
+class DuimpPDFParser:
+    def __init__(self, file_stream):
+        self.doc = fitz.open(stream=file_stream, filetype="pdf")
+        self.full_text = ""
+        self.header = {}
+        self.items = []
 
+    def preprocess(self):
+        clean_lines = []
+        for page in self.doc:
+            text = page.get_text("text")
+            lines = text.split('\n')
+            for line in lines:
+                l_strip = line.strip()
+                if "Extrato da DUIMP" in l_strip: continue
+                if "Data, hora e responsável" in l_strip: continue
+                if re.match(r'^\d+\s*/\s*\d+$', l_strip): continue
+                clean_lines.append(line)
+        self.full_text = "\n".join(clean_lines)
 
-def display_carga_info(carga: Dict):
-    """Exibe informações da carga"""
-    st.markdown('<h2 class="sub-header">📦 Informações da Carga</h2>', unsafe_allow_html=True)
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.info(f"**Via Transporte:** {carga.get('via_transporte', 'N/A')}")
-        st.info(f"**Data Embarque:** {carga.get('data_embarque', 'N/A')}")
-    
-    with col2:
-        st.info(f"**Identificação:** {carga.get('identificacao_carga', 'N/A')}")
-        st.info(f"**Data Chegada:** {carga.get('data_chegada', 'N/A')}")
-    
-    with col3:
-        st.info(f"**Peso Bruto:** {carga.get('peso_bruto', 0):,.2f} kg")
-        st.info(f"**Peso Líquido:** {carga.get('peso_liquido', 0):,.2f} kg")
-    
-    with col4:
-        st.info(f"**País Procedência:** {carga.get('pais_procedencia', 'N/A')}")
-        st.info(f"**Unidade Despacho:** {carga.get('unidade_despacho', 'N/A')}")
+    def extract_header(self):
+        txt = self.full_text
+        self.header["numeroDUIMP"] = self._regex(r"Extrato da Duimp\s+([\w\-\/]+)", txt)
+        self.header["cnpj"] = self._regex(r"CNPJ do importador:\s*([\d\.\/\-]+)", txt)
+        self.header["nomeImportador"] = self._regex(r"Nome do importador:\s*\n?(.+)", txt)
+        self.header["pesoBruto"] = self._regex(r"Peso Bruto \(kg\):\s*([\d\.,]+)", txt)
+        self.header["pesoLiquido"] = self._regex(r"Peso Liquido \(kg\):\s*([\d\.,]+)", txt)
+        self.header["urf"] = self._regex(r"Unidade de despacho:\s*([\d]+)", txt)
+        self.header["paisProcedencia"] = self._regex(r"País de Procedência:\s*\n?(.+)", txt)
 
+    def extract_items(self):
+        chunks = re.split(r"Item\s+(\d+)", self.full_text)
+        if len(chunks) > 1:
+            for i in range(1, len(chunks), 2):
+                num = chunks[i]
+                content = chunks[i+1]
+                item = {"numeroAdicao": num}
+                item["ncm"] = self._regex(r"NCM:\s*([\d\.]+)", content)
+                item["paisOrigem"] = self._regex(r"País de origem:\s*\n?(.+)", content)
+                item["quantidade"] = self._regex(r"Quantidade na unidade estatística:\s*([\d\.,]+)", content)
+                item["unidade"] = self._regex(r"Unidade estatística:\s*(.+)", content)
+                item["pesoLiq"] = self._regex(r"Peso líquido \(kg\):\s*([\d\.,]+)", content)
+                item["valorUnit"] = self._regex(r"Valor unitário na condição de venda:\s*([\d\.,]+)", content)
+                item["valorTotal"] = self._regex(r"Valor total na condição de venda:\s*([\d\.,]+)", content)
+                item["moeda"] = self._regex(r"Moeda negociada:\s*(.+)", content)
+                exp_match = re.search(r"Código do Exportador Estrangeiro:\s*(.+?)(?=\n\s*(?:Endereço|Dados))", content, re.DOTALL)
+                item["fornecedor_raw"] = exp_match.group(1).strip() if exp_match else ""
+                addr_match = re.search(r"Endereço:\s*(.+?)(?=\n\s*(?:Dados da Mercadoria|Aplicação))", content, re.DOTALL)
+                item["endereco_raw"] = addr_match.group(1).strip() if addr_match else ""
+                desc_match = re.search(r"Detalhamento do Produto:\s*(.+?)(?=\n\s*(?:Número de Identificação|Versão|Código de Class|Descrição complementar))", content, re.DOTALL)
+                item["descricao"] = desc_match.group(1).strip() if desc_match else ""
+                self.items.append(item)
 
-def display_transporte_info(transporte: Dict):
-    """Exibe informações de transporte"""
-    st.markdown('<h2 class="sub-header">🚢 Informações de Transporte</h2>', unsafe_allow_html=True)
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        if transporte.get('tipo_conhecimento'):
-            tipo = transporte['tipo_conhecimento']
-            st.info(f"**Conhecimento:** {tipo.get('codigo', '')} - {tipo.get('descricao', '')}")
-    
-    with col2:
-        st.info(f"**Bandeira:** {transporte.get('bandeira', 'N/A')}")
-    
-    with col3:
-        st.info(f"**Local Embarque:** {transporte.get('local_embarque', 'N/A')}")
-    
-    with col4:
-        if transporte.get('frete'):
-            frete = transporte['frete']
-            st.info(f"**Frete:** R$ {frete.get('valor_real', 0):,.2f}")
-        
-        if transporte.get('seguro'):
-            seguro = transporte['seguro']
-            st.info(f"**Seguro:** R$ {seguro.get('valor_real', 0):,.2f}")
+    def _regex(self, pattern, text):
+        match = re.search(pattern, text)
+        return match.group(1).strip() if match else ""
 
+# ==============================================================================
+# 3. XML BUILDER E UTILS (APP 1)
+# ==============================================================================
 
-def display_moedas_info(moedas: Dict):
-    """Exibe informações de moedas"""
-    st.markdown('<h2 class="sub-header">💰 Cotações de Moedas</h2>', unsafe_allow_html=True)
-    
-    if moedas.get('data_cotacao'):
-        st.info(f"**Data das Cotações:** {moedas['data_cotacao']}")
-    
-    currency_data = []
-    for key, value in moedas.items():
-        if key != 'data_cotacao' and isinstance(value, dict):
-            currency_data.append({
-                'Moeda': key,
-                'Código': value.get('codigo', ''),
-                'Cotação': f"R$ {value.get('cotacao', 0):,.4f}"
-            })
-    
-    if currency_data:
-        df_currency = pd.DataFrame(currency_data)
-        st.dataframe(df_currency, use_container_width=True)
+class DataFormatter:
+    @staticmethod
+    def clean_text(text):
+        if not text: return ""
+        text = text.replace('\n', ' ').replace('\r', '')
+        return re.sub(r'\s+', ' ', text).strip()
 
+    @staticmethod
+    def format_number(value, length=15):
+        if not value: return "0" * length
+        clean = re.sub(r'\D', '', str(value))
+        if not clean: return "0" * length
+        return clean.zfill(length)
+    
+    @staticmethod
+    def format_ncm(value):
+        if not value: return "00000000"
+        return re.sub(r'\D', '', value)[:8]
 
-def display_totais_info(totais_extraidos: Dict):
-    """Exibe totais extraídos"""
-    st.markdown('<h2 class="sub-header">🧮 Totais Extraídos</h2>', unsafe_allow_html=True)
-    
-    if 'cif' in totais_extraidos:
-        cif = totais_extraidos['cif']
-        col1, col2 = st.columns(2)
-        with col1:
-            st.info(f"**CIF (USD):** $ {cif.get('usd', 0):,.2f}")
-        with col2:
-            st.info(f"**CIF (R$):** R$ {cif.get('brl', 0):,.2f}")
-    
-    if 'vmle' in totais_extraidos:
-        vmle = totais_extraidos['vmle']
-        col1, col2 = st.columns(2)
-        with col1:
-            st.info(f"**VMLE (USD):** $ {vmle.get('usd', 0):,.2f}")
-        with col2:
-            st.info(f"**VMLE (R$):** R$ {vmle.get('brl', 0):,.2f}")
-    
-    if 'vmld' in totais_extraidos:
-        vmld = totais_extraidos['vmld']
-        col1, col2 = st.columns(2)
-        with col1:
-            st.info(f"**VMLD (USD):** $ {vmld.get('usd', 0):,.2f}")
-        with col2:
-            st.info(f"**VMLD (R$):** R$ {vmld.get('brl', 0):,.2f}")
+    @staticmethod
+    def format_input_fiscal(value, length=15, is_percent=False):
+        try:
+            if isinstance(value, str):
+                value = value.replace('.', '')
+                value = value.replace(',', '.')
+            val_float = float(value)
+            val_int = int(round(val_float * 100))
+            return str(val_int).zfill(length)
+        except: return "0" * length
 
+    @staticmethod
+    def format_high_precision(value, length=15):
+        try:
+            if isinstance(value, str):
+                value = value.replace('.', '')
+                value = value.replace(',', '.')
+            val_float = float(value)
+            val_int = int(round(val_float * 10000000))
+            return str(val_int).zfill(length)
+        except: return "0" * length
 
-def display_impostos_totais(totais_extraidos: Dict):
-    """Exibe totais de impostos"""
-    st.markdown('<h2 class="sub-header">🏛️ Totais de Impostos</h2>', unsafe_allow_html=True)
-    
-    impostos_keys = ['ii_total', 'ipi_total', 'pis_total', 'cofins_total', 'taxa_total']
-    impostos_labels = {
-        'ii_total': 'Imposto de Importação',
-        'ipi_total': 'IPI',
-        'pis_total': 'PIS',
-        'cofins_total': 'COFINS',
-        'taxa_total': 'Taxa de Utilização'
-    }
-    
-    cols = st.columns(len([k for k in impostos_keys if k in totais_extraidos]))
-    col_idx = 0
-    
-    for key in impostos_keys:
-        if key in totais_extraidos and totais_extraidos[key] > 0:
-            with cols[col_idx]:
-                st.markdown(f"""
-                <div class="section-card">
-                    <div class="metric-value">R$ {totais_extraidos[key]:,.2f}</div>
-                    <div class="metric-label">{impostos_labels[key]}</div>
-                </div>
-                """, unsafe_allow_html=True)
-                col_idx += 1
+    @staticmethod
+    def format_quantity(value, length=14):
+        try:
+            if isinstance(value, str):
+                value = value.replace('.', '')
+                value = value.replace(',', '.')
+            val_float = float(value)
+            val_int = int(round(val_float * 100000))
+            return str(val_int).zfill(length)
+        except: return "0" * length
 
+    @staticmethod
+    def calculate_cbs_ibs(base_xml_string):
+        try:
+            base_int = int(base_xml_string)
+            base_float = base_int / 100.0
+            cbs_val = base_float * 0.009
+            cbs_str = str(int(round(cbs_val * 100))).zfill(14)
+            ibs_val = base_float * 0.001
+            ibs_str = str(int(round(ibs_val * 100))).zfill(14)
+            return cbs_str, ibs_str
+        except: return "0".zfill(14), "0".zfill(14)
+
+    @staticmethod
+    def parse_supplier_info(raw_name, raw_addr):
+        data = {"fornecedorNome": "", "fornecedorLogradouro": "", "fornecedorNumero": "S/N", "fornecedorCidade": ""}
+        if raw_name:
+            parts = raw_name.split('-', 1)
+            data["fornecedorNome"] = parts[-1].strip() if len(parts) > 1 else raw_name.strip()
+        if raw_addr:
+            clean_addr = DataFormatter.clean_text(raw_addr)
+            parts_dash = clean_addr.rsplit('-', 1)
+            if len(parts_dash) > 1:
+                data["fornecedorCidade"] = parts_dash[1].strip()
+                street_part = parts_dash[0].strip()
+            else:
+                data["fornecedorCidade"] = "EXTERIOR"
+                street_part = clean_addr
+            comma_split = street_part.rsplit(',', 1)
+            if len(comma_split) > 1:
+                data["fornecedorLogradouro"] = comma_split[0].strip()
+                num_match = re.search(r'\d+', comma_split[1])
+                if num_match: data["fornecedorNumero"] = num_match.group(0)
+            else:
+                data["fornecedorLogradouro"] = street_part
+        return data
+
+# LAYOUT OBRIGATÓRIO 8686 - MANTIDO
+ADICAO_FIELDS_ORDER = [
+    {"tag": "acrescimo", "type": "complex", "children": [
+        {"tag": "codigoAcrescimo", "default": "17"},
+        {"tag": "denominacao", "default": "OUTROS ACRESCIMOS AO VALOR ADUANEIRO"},
+        {"tag": "moedaNegociadaCodigo", "default": "978"},
+        {"tag": "moedaNegociadaNome", "default": "EURO/COM.EUROPEIA"},
+        {"tag": "valorMoedaNegociada", "default": "000000000000000"},
+        {"tag": "valorReais", "default": "000000000000000"}
+    ]},
+    {"tag": "cideValorAliquotaEspecifica", "default": "00000000000"},
+    {"tag": "cideValorDevido", "default": "000000000000000"},
+    {"tag": "cideValorRecolher", "default": "000000000000000"},
+    {"tag": "codigoRelacaoCompradorVendedor", "default": "3"},
+    {"tag": "codigoVinculoCompradorVendedor", "default": "1"},
+    {"tag": "cofinsAliquotaAdValorem", "default": "00965"},
+    {"tag": "cofinsAliquotaEspecificaQuantidadeUnidade", "default": "000000000"},
+    {"tag": "cofinsAliquotaEspecificaValor", "default": "0000000000"},
+    {"tag": "cofinsAliquotaReduzida", "default": "00000"},
+    {"tag": "cofinsAliquotaValorDevido", "default": "000000000000000"},
+    {"tag": "cofinsAliquotaValorRecolher", "default": "000000000000000"},
+    {"tag": "condicaoVendaIncoterm", "default": "FCA"},
+    {"tag": "condicaoVendaLocal", "default": ""},
+    {"tag": "condicaoVendaMetodoValoracaoCodigo", "default": "01"},
+    {"tag": "condicaoVendaMetodoValoracaoNome", "default": "METODO 1 - ART. 1 DO ACORDO (DECRETO 92930/86)"},
+    {"tag": "condicaoVendaMoedaCodigo", "default": "978"},
+    {"tag": "condicaoVendaMoedaNome", "default": "EURO/COM.EUROPEIA"},
+    {"tag": "condicaoVendaValorMoeda", "default": "000000000000000"},
+    {"tag": "condicaoVendaValorReais", "default": "000000000000000"},
+    {"tag": "dadosCambiaisCoberturaCambialCodigo", "default": "1"},
+    {"tag": "dadosCambiaisCoberturaCambialNome", "default": "COM COBERTURA CAMBIAL E PAGAMENTO FINAL A PRAZO DE ATE' 180"},
+    {"tag": "dadosCambiaisInstituicaoFinanciadoraCodigo", "default": "00"},
+    {"tag": "dadosCambiaisInstituicaoFinanciadoraNome", "default": "N/I"},
+    {"tag": "dadosCambiaisMotivoSemCoberturaCodigo", "default": "00"},
+    {"tag": "dadosCambiaisMotivoSemCoberturaNome", "default": "N/I"},
+    {"tag": "dadosCambiaisValorRealCambio", "default": "000000000000000"},
+    {"tag": "dadosCargaPaisProcedenciaCodigo", "default": "000"},
+    {"tag": "dadosCargaUrfEntradaCodigo", "default": "0000000"},
+    {"tag": "dadosCargaViaTransporteCodigo", "default": "01"},
+    {"tag": "dadosCargaViaTransporteNome", "default": "MARÍTIMA"},
+    {"tag": "dadosMercadoriaAplicacao", "default": "REVENDA"},
+    {"tag": "dadosMercadoriaCodigoNaladiNCCA", "default": "0000000"},
+    {"tag": "dadosMercadoriaCodigoNaladiSH", "default": "00000000"},
+    {"tag": "dadosMercadoriaCodigoNcm", "default": "00000000"},
+    {"tag": "dadosMercadoriaCondicao", "default": "NOVA"},
+    {"tag": "dadosMercadoriaDescricaoTipoCertificado", "default": "Sem Certificado"},
+    {"tag": "dadosMercadoriaIndicadorTipoCertificado", "default": "1"},
+    {"tag": "dadosMercadoriaMedidaEstatisticaQuantidade", "default": "00000000000000"},
+    {"tag": "dadosMercadoriaMedidaEstatisticaUnidade", "default": "UNIDADE"},
+    {"tag": "dadosMercadoriaNomeNcm", "default": "DESCRIÇÃO PADRÃO NCM"},
+    {"tag": "dadosMercadoriaPesoLiquido", "default": "000000000000000"},
+    {"tag": "dcrCoeficienteReducao", "default": "00000"},
+    {"tag": "dcrIdentificacao", "default": "00000000"},
+    {"tag": "dcrValorDevido", "default": "000000000000000"},
+    {"tag": "dcrValorDolar", "default": "000000000000000"},
+    {"tag": "dcrValorReal", "default": "000000000000000"},
+    {"tag": "dcrValorRecolher", "default": "000000000000000"},
+    {"tag": "fornecedorCidade", "default": ""},
+    {"tag": "fornecedorLogradouro", "default": ""},
+    {"tag": "fornecedorNome", "default": ""},
+    {"tag": "fornecedorNumero", "default": ""},
+    {"tag": "freteMoedaNegociadaCodigo", "default": "978"},
+    {"tag": "freteMoedaNegociadaNome", "default": "EURO/COM.EUROPEIA"},
+    {"tag": "freteValorMoedaNegociada", "default": "000000000000000"},
+    {"tag": "freteValorReais", "default": "000000000000000"},
+    {"tag": "iiAcordoTarifarioTipoCodigo", "default": "0"},
+    {"tag": "iiAliquotaAcordo", "default": "00000"},
+    {"tag": "iiAliquotaAdValorem", "default": "00000"},
+    {"tag": "iiAliquotaPercentualReducao", "default": "00000"},
+    {"tag": "iiAliquotaReduzida", "default": "00000"},
+    {"tag": "iiAliquotaValorCalculado", "default": "000000000000000"},
+    {"tag": "iiAliquotaValorDevido", "default": "000000000000000"},
+    {"tag": "iiAliquotaValorRecolher", "default": "000000000000000"},
+    {"tag": "iiAliquotaValorReduzido", "default": "000000000000000"},
+    {"tag": "iiBaseCalculo", "default": "000000000000000"},
+    {"tag": "iiFundamentoLegalCodigo", "default": "00"},
+    {"tag": "iiMotivoAdmissaoTemporariaCodigo", "default": "00"},
+    {"tag": "iiRegimeTributacaoCodigo", "default": "1"},
+    {"tag": "iiRegimeTributacaoNome", "default": "RECOLHIMENTO INTEGRAL"},
+    {"tag": "ipiAliquotaAdValorem", "default": "00000"},
+    {"tag": "ipiAliquotaEspecificaCapacidadeRecipciente", "default": "00000"},
+    {"tag": "ipiAliquotaEspecificaQuantidadeUnidadeMedida", "default": "000000000"},
+    {"tag": "ipiAliquotaEspecificaTipoRecipienteCodigo", "default": "00"},
+    {"tag": "ipiAliquotaEspecificaValorUnidadeMedida", "default": "0000000000"},
+    {"tag": "ipiAliquotaNotaComplementarTIPI", "default": "00"},
+    {"tag": "ipiAliquotaReduzida", "default": "00000"},
+    {"tag": "ipiAliquotaValorDevido", "default": "000000000000000"},
+    {"tag": "ipiAliquotaValorRecolher", "default": "000000000000000"},
+    {"tag": "ipiRegimeTributacaoCodigo", "default": "4"},
+    {"tag": "ipiRegimeTributacaoNome", "default": "SEM BENEFICIO"},
+    {"tag": "mercadoria", "type": "complex", "children": [
+        {"tag": "descricaoMercadoria", "default": ""},
+        {"tag": "numeroSequencialItem", "default": "01"},
+        {"tag": "quantidade", "default": "00000000000000"},
+        {"tag": "unidadeMedida", "default": "UNIDADE"},
+        {"tag": "valorUnitario", "default": "00000000000000000000"}
+    ]},
+    {"tag": "numeroAdicao", "default": "001"},
+    {"tag": "numeroDUIMP", "default": ""},
+    {"tag": "numeroLI", "default": "0000000000"},
+    {"tag": "paisAquisicaoMercadoriaCodigo", "default": "000"},
+    {"tag": "paisAquisicaoMercadoriaNome", "default": ""},
+    {"tag": "paisOrigemMercadoriaCodigo", "default": "000"},
+    {"tag": "paisOrigemMercadoriaNome", "default": ""},
+    {"tag": "pisCofinsBaseCalculoAliquotaICMS", "default": "00000"},
+    {"tag": "pisCofinsBaseCalculoFundamentoLegalCodigo", "default": "00"},
+    {"tag": "pisCofinsBaseCalculoPercentualReducao", "default": "00000"},
+    {"tag": "pisCofinsBaseCalculoValor", "default": "000000000000000"},
+    {"tag": "pisCofinsFundamentoLegalReducaoCodigo", "default": "00"},
+    {"tag": "pisCofinsRegimeTributacaoCodigo", "default": "1"},
+    {"tag": "pisCofinsRegimeTributacaoNome", "default": "RECOLHIMENTO INTEGRAL"},
+    {"tag": "pisPasepAliquotaAdValorem", "default": "00000"},
+    {"tag": "pisPasepAliquotaEspecificaQuantidadeUnidade", "default": "000000000"},
+    {"tag": "pisPasepAliquotaEspecificaValor", "default": "0000000000"},
+    {"tag": "pisPasepAliquotaReduzida", "default": "00000"},
+    {"tag": "pisPasepAliquotaValorDevido", "default": "000000000000000"},
+    {"tag": "pisPasepAliquotaValorRecolher", "default": "000000000000000"},
+    {"tag": "icmsBaseCalculoValor", "default": "000000000000000"},
+    {"tag": "icmsBaseCalculoAliquota", "default": "00000"},
+    {"tag": "icmsBaseCalculoValorImposto", "default": "00000000000000"},
+    {"tag": "icmsBaseCalculoValorDiferido", "default": "00000000000000"},
+    {"tag": "cbsIbsCst", "default": "000"},
+    {"tag": "cbsIbsClasstrib", "default": "000001"},
+    {"tag": "cbsBaseCalculoValor", "default": "000000000000000"},
+    {"tag": "cbsBaseCalculoAliquota", "default": "00000"},
+    {"tag": "cbsBaseCalculoAliquotaReducao", "default": "00000"},
+    {"tag": "cbsBaseCalculoValorImposto", "default": "00000000000000"},
+    {"tag": "ibsBaseCalculoValor", "default": "000000000000000"},
+    {"tag": "ibsBaseCalculoAliquota", "default": "00000"},
+    {"tag": "ibsBaseCalculoAliquotaReducao", "default": "00000"},
+    {"tag": "ibsBaseCalculoValorImposto", "default": "00000000000000"},
+    {"tag": "relacaoCompradorVendedor", "default": "Fabricante é desconhecido"},
+    {"tag": "seguroMoedaNegociadaCodigo", "default": "220"},
+    {"tag": "seguroMoedaNegociadaNome", "default": "DOLAR DOS EUA"},
+    {"tag": "seguroValorMoedaNegociada", "default": "000000000000000"},
+    {"tag": "seguroValorReais", "default": "000000000000000"},
+    {"tag": "sequencialRetificacao", "default": "00"},
+    {"tag": "valorMultaARecolher", "default": "000000000000000"},
+    {"tag": "valorMultaARecolherAjustado", "default": "000000000000000"},
+    {"tag": "valorReaisFreteInternacional", "default": "000000000000000"},
+    {"tag": "valorReaisSeguroInternacional", "default": "000000000000000"},
+    {"tag": "valorTotalCondicaoVenda", "default": "00000000000"},
+    {"tag": "vinculoCompradorVendedor", "default": "Não há vinculação entre comprador e vendedor."}
+]
+
+FOOTER_TAGS = {
+    "armazem": {"tag": "nomeArmazem", "default": "TCP"},
+    "armazenamentoRecintoAduaneiroCodigo": "9801303",
+    "armazenamentoRecintoAduaneiroNome": "TCP - TERMINAL",
+    "armazenamentoSetor": "002",
+    "canalSelecaoParametrizada": "001",
+    "caracterizacaoOperacaoCodigoTipo": "1",
+    "caracterizacaoOperacaoDescricaoTipo": "Importação Própria",
+    "cargaDataChegada": "20251120",
+    "cargaNumeroAgente": "N/I",
+    "cargaPaisProcedenciaCodigo": "386",
+    "cargaPaisProcedenciaNome": "",
+    "cargaPesoBruto": "000000000000000",
+    "cargaPesoLiquido": "000000000000000",
+    "cargaUrfEntradaCodigo": "0917800",
+    "cargaUrfEntradaNome": "PORTO DE PARANAGUA",
+    "conhecimentoCargaEmbarqueData": "20251025",
+    "conhecimentoCargaEmbarqueLocal": "EXTERIOR",
+    "conhecimentoCargaId": "CE123456",
+    "conhecimentoCargaIdMaster": "CE123456",
+    "conhecimentoCargaTipoCodigo": "12",
+    "conhecimentoCargaTipoNome": "HBL - House Bill of Lading",
+    "conhecimentoCargaUtilizacao": "1",
+    "conhecimentoCargaUtilizacaoNome": "Total",
+    "dataDesembaraco": "20251124",
+    "dataRegistro": "20251124",
+    "documentoChegadaCargaCodigoTipo": "1",
+    "documentoChegadaCargaNome": "Manifesto da Carga",
+    "documentoChegadaCargaNumero": "1625502058594",
+    "embalagem": [{"tag": "codigoTipoEmbalagem", "default": "60"}, {"tag": "nomeEmbalagem", "default": "PALLETS"}, {"tag": "quantidadeVolume", "default": "00001"}],
+    "freteCollect": "000000000000000",
+    "freteEmTerritorioNacional": "000000000000000",
+    "freteMoedaNegociadaCodigo": "978",
+    "freteMoedaNegociadaNome": "EURO/COM.EUROPEIA",
+    "fretePrepaid": "000000000000000",
+    "freteTotalDolares": "000000000000000",
+    "freteTotalMoeda": "000000000000000",
+    "freteTotalReais": "000000000000000",
+    "icms": [{"tag": "agenciaIcms", "default": "00000"}, {"tag": "codigoTipoRecolhimentoIcms", "default": "3"}, {"tag": "nomeTipoRecolhimentoIcms", "default": "Exoneração do ICMS"}, {"tag": "numeroSequencialIcms", "default": "001"}, {"tag": "ufIcms", "default": "PR"}, {"tag": "valorTotalIcms", "default": "000000000000000"}],
+    "importadorCodigoTipo": "1",
+    "importadorCpfRepresentanteLegal": "00000000000",
+    "importadorEnderecoBairro": "CENTRO",
+    "importadorEnderecoCep": "00000000",
+    "importadorEnderecoComplemento": "",
+    "importadorEnderecoLogradouro": "RUA PRINCIPAL",
+    "importadorEnderecoMunicipio": "CIDADE",
+    "importadorEnderecoNumero": "00",
+    "importadorEnderecoUf": "PR",
+    "importadorNome": "",
+    "importadorNomeRepresentanteLegal": "REPRESENTANTE",
+    "importadorNumero": "",
+    "importadorNumeroTelefone": "0000000000",
+    "informacaoComplementar": "Informações extraídas do Extrato DUIMP.",
+    "localDescargaTotalDolares": "000000000000000",
+    "localDescargaTotalReais": "000000000000000",
+    "localEmbarqueTotalDolares": "000000000000000",
+    "localEmbarqueTotalReais": "000000000000000",
+    "modalidadeDespachoCodigo": "1",
+    "modalidadeDespachoNome": "Normal",
+    "numeroDUIMP": "",
+    "operacaoFundap": "N",
+    "pagamento": [], 
+    "seguroMoedaNegociadaCodigo": "220",
+    "seguroMoedaNegociadaNome": "DOLAR DOS EUA",
+    "seguroTotalDolares": "000000000000000",
+    "seguroTotalMoedaNegociada": "000000000000000",
+    "seguroTotalReais": "000000000000000",
+    "sequencialRetificacao": "00",
+    "valorTotalMultaARecolherAjustado": "000000000000000",
+    "viaTransporteCodigo": "01",
+    "viaTransporteMultimodal": "N",
+    "viaTransporteNome": "MARÍTIMA",
+    "viaTransporteNomeTransportador": "MAERSK A/S",
+    "viaTransporteNomeVeiculo": "MAERSK",
+    "viaTransportePaisTransportadorCodigo": "741",
+    "viaTransportePaisTransportadorNome": "CINGAPURA"
+}
+
+# ==============================================================================
+# MAIN APP
+# ==============================================================================
 
 def main():
-    """Função principal"""
-    
-    st.markdown('<h1 class="main-header">🏭 Sistema de Análise de Extratos Häfele - APP2</h1>', unsafe_allow_html=True)
-    
-    st.markdown("""
-    <div class="info-box">
-        <strong>📄 Especificação:</strong> Este sistema foi ajustado especificamente para o layout do arquivo APP2.pdf.
-        <br><strong>🔍 Funcionalidades:</strong> Extração completa de cabeçalho, carga, transporte, moedas, itens e impostos.
-    </div>
-    """, unsafe_allow_html=True)
-    
-    with st.sidebar:
-        st.markdown("### 📁 Upload do Documento APP2")
-        
-        uploaded_file = st.file_uploader(
-            "Selecione o arquivo PDF (Formato APP2)",
-            type=['pdf'],
-            help="Documento PDF no formato padrão APP2.pdf da Häfele"
-        )
-        
-        st.markdown("---")
-        st.markdown("### ⚙️ Opções de Análise")
-        
-        show_details = st.checkbox("Mostrar detalhes completos", value=True)
-        show_raw_data = st.checkbox("Mostrar dados brutos", value=False)
-        
-        st.markdown("---")
-        
-        if uploaded_file:
-            file_size = uploaded_file.size / (1024 * 1024)
-            st.success(f"📄 Arquivo: {uploaded_file.name}")
-            st.info(f"📊 Tamanho: {file_size:.2f} MB")
-    
-    if uploaded_file is not None:
-        try:
-            # Criar arquivo temporário
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                tmp_file.write(uploaded_file.getvalue())
-                tmp_path = tmp_file.name
-            
-            # Barra de progresso
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            # Etapa 1: Análise do documento
-            status_text.text("📄 Analisando documento PDF (Layout APP2)...")
-            progress_bar.progress(20)
-            
-            parser = HafelePDFParser()
-            documento = parser.parse_pdf(tmp_path)
-            
-            # Etapa 2: Processamento dos dados
-            status_text.text("📊 Processando dados...")
-            progress_bar.progress(50)
-            
-            analyser = FinancialAnalyzer(documento)
-            df = analyser.prepare_dataframe()
-            metrics = analyser.create_summary_metrics()
-            
-            # Etapa 3: Cálculos finais
-            status_text.text("🔢 Calculando métricas...")
-            progress_bar.progress(80)
-            
-            # Limpar arquivo temporário
-            try:
-                os.unlink(tmp_path)
-            except:
-                pass
-            
-            progress_bar.progress(100)
-            status_text.text("✅ Processamento concluído!")
-            
-            # Exibir informações gerais
-            st.success(f"✅ **{len(documento['itens'])} itens** extraídos com sucesso do documento APP2!")
-            
-            # Métricas principais
-            st.markdown('<h2 class="sub-header">📊 Métricas Principais</h2>', unsafe_allow_html=True)
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.markdown(f"""
-                <div class="section-card">
-                    <div class="metric-value">R$ {metrics.get('valor_total_mercadoria', 0):,.2f}</div>
-                    <div class="metric-label">Valor Mercadoria</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col2:
-                st.markdown(f"""
-                <div class="section-card">
-                    <div class="metric-value">R$ {metrics.get('total_impostos', 0):,.2f}</div>
-                    <div class="metric-label">Total Impostos</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col3:
-                st.markdown(f"""
-                <div class="section-card">
-                    <div class="metric-value">R$ {metrics.get('valor_total_com_impostos', 0):,.2f}</div>
-                    <div class="metric-label">Valor c/ Impostos</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col4:
-                st.markdown(f"""
-                <div class="section-card">
-                    <div class="metric-value">{metrics.get('quantidade_total', 0):,.0f}</div>
-                    <div class="metric-label">Quantidade Total</div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # Abas para diferentes seções
-            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-                "📋 Cabeçalho", "📦 Carga", "🚢 Transporte", "💰 Moedas", "📊 Itens", "📈 Análises"
-            ])
-            
-            with tab1:
-                if documento.get('cabecalho'):
-                    display_header_info(documento['cabecalho'])
-            
-            with tab2:
-                if documento.get('carga'):
-                    display_carga_info(documento['carga'])
-            
-            with tab3:
-                if documento.get('transporte'):
-                    display_transporte_info(documento['transporte'])
-            
-            with tab4:
-                if documento.get('moedas'):
-                    display_moedas_info(documento['moedas'])
-            
-            with tab5:
-                st.markdown('<h2 class="sub-header">📦 Lista de Itens Detalhada</h2>', unsafe_allow_html=True)
-                
-                # Configurar colunas para exibição
-                if not df.empty:
-                    # Ordenar colunas para melhor visualização
-                    col_order = [
-                        'Item', 'Código Interno', 'Produto', 'Descrição',
-                        'Quantidade', 'Unidade', 'Peso (kg)',
-                        'Valor Unit. (R$)', 'Valor Total (R$)',
-                        'II Base (R$)', 'II Alíq. (%)', 'II (R$)',
-                        'IPI Base (R$)', 'IPI Alíq. (%)', 'IPI (R$)',
-                        'PIS Base (R$)', 'PIS Alíq. (%)', 'PIS (R$)',
-                        'COFINS Base (R$)', 'COFINS Alíq. (%)', 'COFINS (R$)',
-                        'Total Impostos (R$)', 'Valor c/ Impostos (R$)'
-                    ]
-                    
-                    display_cols = [c for c in col_order if c in df.columns]
-                    remaining_cols = [c for c in df.columns if c not in display_cols]
-                    final_cols = display_cols + remaining_cols
-                    
-                    display_df = df[final_cols].copy()
-                    
-                    # Formatação de moeda
-                    currency_cols = [col for col in display_df.columns if '(R$)' in col]
-                    for col in currency_cols:
-                        display_df[col] = display_df[col].apply(lambda x: f"R$ {x:,.2f}" if pd.notnull(x) else "")
-                    
-                    # Formatação de porcentagem
-                    pct_cols = [col for col in display_df.columns if '(%)' in col]
-                    for col in pct_cols:
-                        display_df[col] = display_df[col].apply(lambda x: f"{x:,.2f}%" if pd.notnull(x) else "")
-                    
-                    st.dataframe(
-                        display_df,
-                        use_container_width=True,
-                        height=600
-                    )
-                else:
-                    st.warning("Nenhum item encontrado no documento.")
-            
-            with tab6:
-                st.markdown('<h2 class="sub-header">📈 Análises Financeiras</h2>', unsafe_allow_html=True)
-                
-                if not df.empty:
-                    # Análise de impostos por item
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown("##### 💰 Distribuição de Impostos por Item")
-                        impostos_items = df[['Produto', 'II (R$)', 'IPI (R$)', 'PIS (R$)', 'COFINS (R$)']].copy()
-                        for col in ['II (R$)', 'IPI (R$)', 'PIS (R$)', 'COFINS (R$)']:
-                            impostos_items[col] = impostos_items[col].replace(r'[R\$, ]', '', regex=True).astype(float)
-                        
-                        impostos_sum = impostos_items[['II (R$)', 'IPI (R$)', 'PIS (R$)', 'COFINS (R$)']].sum()
-                        
-                        fig1 = px.pie(
-                            values=impostos_sum.values,
-                            names=impostos_sum.index,
-                            title="Distribuição dos Impostos Totais",
-                            color_discrete_sequence=px.colors.qualitative.Set3
-                        )
-                        st.plotly_chart(fig1, use_container_width=True)
-                    
-                    with col2:
-                        st.markdown("##### 📊 Valores por Produto")
-                        valores_items = df[['Produto', 'Valor Total (R$)', 'Total Impostos (R$)']].copy()
-                        valores_items['Valor Total (R$)'] = valores_items['Valor Total (R$)'].replace(r'[R\$, ]', '', regex=True).astype(float)
-                        valores_items['Total Impostos (R$)'] = valores_items['Total Impostos (R$)'].replace(r'[R\$, ]', '', regex=True).astype(float)
-                        
-                        fig2 = px.bar(
-                            valores_items.nlargest(10, 'Valor Total (R$)'),
-                            x='Produto',
-                            y=['Valor Total (R$)', 'Total Impostos (R$)'],
-                            title="Top 10 Produtos por Valor",
-                            barmode='group',
-                            color_discrete_sequence=['#1E3A8A', '#2563EB']
-                        )
-                        fig2.update_layout(xaxis_tickangle=-45)
-                        st.plotly_chart(fig2, use_container_width=True)
-                    
-                    # Tabela de resumo
-                    st.markdown("##### 📋 Resumo por Tipo de Imposto")
-                    resumo_impostos = pd.DataFrame({
-                        'Imposto': ['II', 'IPI', 'PIS', 'COFINS', 'Total'],
-                        'Valor Total (R$)': [
-                            metrics.get('ii_total', 0),
-                            metrics.get('ipi_total', 0),
-                            metrics.get('pis_total', 0),
-                            metrics.get('cofins_total', 0),
-                            metrics.get('total_impostos', 0)
-                        ],
-                        '% sobre Mercadoria': [
-                            (metrics.get('ii_total', 0) / metrics.get('valor_total_mercadoria', 1) * 100) if metrics.get('valor_total_mercadoria', 0) > 0 else 0,
-                            (metrics.get('ipi_total', 0) / metrics.get('valor_total_mercadoria', 1) * 100) if metrics.get('valor_total_mercadoria', 0) > 0 else 0,
-                            (metrics.get('pis_total', 0) / metrics.get('valor_total_mercadoria', 1) * 100) if metrics.get('valor_total_mercadoria', 0) > 0 else 0,
-                            (metrics.get('cofins_total', 0) / metrics.get('valor_total_mercadoria', 1) * 100) if metrics.get('valor_total_mercadoria', 0) > 0 else 0,
-                            (metrics.get('total_impostos', 0) / metrics.get('valor_total_mercadoria', 1) * 100) if metrics.get('valor_total_mercadoria', 0) > 0 else 0
-                        ]
-                    })
-                    
-                    # Formatar a tabela
-                    resumo_impostos['Valor Total (R$)'] = resumo_impostos['Valor Total (R$)'].apply(lambda x: f"R$ {x:,.2f}")
-                    resumo_impostos['% sobre Mercadoria'] = resumo_impostos['% sobre Mercadoria'].apply(lambda x: f"{x:,.2f}%")
-                    
-                    st.dataframe(resumo_impostos, use_container_width=True)
-            
-            # Exportação de dados
-            st.markdown('<h2 class="sub-header">💾 Exportação de Dados</h2>', unsafe_allow_html=True)
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                # Exportar CSV completo
-                csv_data = df.to_csv(index=False, encoding='utf-8-sig', sep=';')
-                st.download_button(
-                    label="📥 Baixar CSV (Completo)",
-                    data=csv_data,
-                    file_name="app2_hafele_completo.csv",
-                    mime="text/csv",
-                    help="Baixar todos os dados em formato CSV"
-                )
-            
-            with col2:
-                # Exportar Excel
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    # Dados principais
-                    df.to_excel(writer, sheet_name='Itens', index=False)
-                    
-                    # Resumo
-                    resumo_data = {
-                        'Métrica': [
-                            'Valor Total Mercadoria',
-                            'Total Impostos',
-                            'Valor com Impostos',
-                            'Quantidade Total',
-                            'Peso Total (kg)',
-                            'II Total',
-                            'IPI Total',
-                            'PIS Total',
-                            'COFINS Total'
-                        ],
-                        'Valor (R$)': [
-                            metrics.get('valor_total_mercadoria', 0),
-                            metrics.get('total_impostos', 0),
-                            metrics.get('valor_total_com_impostos', 0),
-                            metrics.get('quantidade_total', 0),
-                            metrics.get('peso_total', 0),
-                            metrics.get('ii_total', 0),
-                            metrics.get('ipi_total', 0),
-                            metrics.get('pis_total', 0),
-                            metrics.get('cofins_total', 0)
-                        ]
-                    }
-                    resumo_df = pd.DataFrame(resumo_data)
-                    resumo_df.to_excel(writer, sheet_name='Resumo', index=False)
-                
-                st.download_button(
-                    label="📊 Baixar Excel",
-                    data=output.getvalue(),
-                    file_name="app2_hafele_completo.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    help="Baixar todos os dados em formato Excel com múltiplas abas"
-                )
-            
-            with col3:
-                # Exportar JSON
-                json_data = json.dumps(documento, default=str, indent=2, ensure_ascii=False)
-                st.download_button(
-                    label="📋 Baixar JSON",
-                    data=json_data,
-                    file_name="app2_hafele_documento.json",
-                    mime="application/json",
-                    help="Baixar dados estruturados em formato JSON"
-                )
-            
-            # Dados brutos (opcional)
-            if show_raw_data:
-                st.markdown('<h2 class="sub-header">🔍 Dados Brutos</h2>', unsafe_allow_html=True)
-                with st.expander("Visualizar dados brutos extraídos"):
-                    st.json(documento, expanded=False)
-        
-        except Exception as e:
-            st.error(f"❌ Erro no processamento: {str(e)}")
-            logger.error(f"Erro detalhado: {str(e)}", exc_info=True)
-    
-    else:
-        st.info("📁 Aguardando upload do arquivo PDF no formato APP2...")
-        st.markdown("""
-        <div class="warning-box">
-            <strong>⚠️ Instruções:</strong>
-            <ol>
-                <li>Clique em <strong>"Browse files"</strong> no menu à esquerda</li>
-                <li>Selecione um arquivo PDF no formato <strong>APP2.pdf</strong></li>
-                <li>Aguarde o processamento automático</li>
-                <li>Explore os dados nas diferentes abas</li>
-            </ol>
-        </div>
-        """, unsafe_allow_html=True)
+    st.markdown('<div class="main-header">Sistema Unificado: DUIMP + Häfele (Ultimate Pro)</div>', unsafe_allow_html=True)
 
+    if "parsed_duimp" not in st.session_state: st.session_state["parsed_duimp"] = None
+    if "parsed_hafele" not in st.session_state: st.session_state["parsed_hafele"] = None
+    if "merged_df" not in st.session_state: st.session_state["merged_df"] = None
+
+    tab1, tab2, tab3 = st.tabs(["📂 Upload e Vinculação", "📋 Conferência Detalhada", "💾 Exportar XML"])
+
+    with tab1:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info("Passo 1: Carregue o Extrato DUIMP (Siscomex)")
+            file_duimp = st.file_uploader("Arquivo DUIMP (.pdf)", type="pdf", key="u1")
+        with col2:
+            st.info("Passo 2: Carregue o Relatório Häfele")
+            file_hafele = st.file_uploader("Arquivo Häfele (.pdf)", type="pdf", key="u2")
+
+        if file_duimp:
+            if st.session_state["parsed_duimp"] is None or file_duimp.name != getattr(st.session_state.get("last_duimp"), "name", ""):
+                try:
+                    p = DuimpPDFParser(file_duimp.read())
+                    p.preprocess()
+                    p.extract_header()
+                    p.extract_items()
+                    st.session_state["parsed_duimp"] = p
+                    st.session_state["last_duimp"] = file_duimp
+                    
+                    df = pd.DataFrame(p.items)
+                    cols_fiscais = ["NUMBER", "Frete (R$)", "Seguro (R$)", "II (R$)", "II Base (R$)", "II Alíq. (%)", "IPI (R$)", "IPI Base (R$)", "IPI Alíq. (%)", "PIS (R$)", "PIS Base (R$)", "PIS Alíq. (%)", "COFINS (R$)", "COFINS Base (R$)", "COFINS Alíq. (%)", "Aduaneiro (R$)"]
+                    for col in cols_fiscais: df[col] = 0.00 if col != "NUMBER" else ""
+                    st.session_state["merged_df"] = df
+                    st.success("DUIMP processada com sucesso!")
+                except Exception as e: st.error(f"Erro ao ler DUIMP: {e}")
+
+        if file_hafele and st.session_state["parsed_hafele"] is None:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                tmp.write(file_hafele.getvalue())
+                tmp_path = tmp.name
+            try:
+                parser_h = HafelePDFParser()
+                doc_h = parser_h.parse_pdf(tmp_path)
+                st.session_state["parsed_hafele"] = doc_h
+                
+                qtd_itens = len(doc_h['itens'])
+                if qtd_itens > 0:
+                    st.success(f"Häfele: {qtd_itens} itens extraídos corretamente!")
+                else:
+                    st.warning("Atenção: Nenhum item foi extraído do PDF Häfele.")
+                    
+            except Exception as e:
+                st.error(f"Erro ao ler Häfele: {e}")
+            finally:
+                if os.path.exists(tmp_path): os.unlink(tmp_path)
+
+        st.markdown("---")
+        if st.button("🔗 VINCULAR DADOS (Cruzamento Automático)", type="primary", use_container_width=True):
+            if st.session_state["merged_df"] is not None and st.session_state["parsed_hafele"] is not None:
+                try:
+                    df_dest = st.session_state["merged_df"].copy()
+                    src_map = {int(it['numero_item']): it for it in st.session_state["parsed_hafele"]['itens']}
+                    count = 0
+                    for idx, row in df_dest.iterrows():
+                        try:
+                            item_num = int(row['numeroAdicao'])
+                            if item_num in src_map:
+                                src = src_map[item_num]
+                                
+                                # CONCATENAÇÃO OBRIGATÓRIA
+                                cod_interno = src.get('codigo_interno', '')
+                                desc_comp = src.get('descricao_complementar', '')
+                                final_number = f"{cod_interno} - {desc_comp}" if desc_comp else cod_interno
+                                
+                                df_dest.at[idx, 'NUMBER'] = final_number
+                                df_dest.at[idx, 'Frete (R$)'] = src.get('frete_internacional', 0.0)
+                                df_dest.at[idx, 'Seguro (R$)'] = src.get('seguro_internacional', 0.0)
+                                df_dest.at[idx, 'Aduaneiro (R$)'] = src.get('local_aduaneiro', 0.0)
+                                
+                                df_dest.at[idx, 'II (R$)'] = src.get('ii_valor_devido', 0.0)
+                                df_dest.at[idx, 'II Base (R$)'] = src.get('ii_base_calculo', 0.0)
+                                df_dest.at[idx, 'II Alíq. (%)'] = src.get('ii_aliquota', 0.0)
+                                
+                                df_dest.at[idx, 'IPI (R$)'] = src.get('ipi_valor_devido', 0.0)
+                                df_dest.at[idx, 'IPI Base (R$)'] = src.get('ipi_base_calculo', 0.0)
+                                df_dest.at[idx, 'IPI Alíq. (%)'] = src.get('ipi_aliquota', 0.0)
+                                
+                                df_dest.at[idx, 'PIS (R$)'] = src.get('pis_valor_devido', 0.0)
+                                df_dest.at[idx, 'PIS Base (R$)'] = src.get('pis_base_calculo', 0.0)
+                                df_dest.at[idx, 'PIS Alíq. (%)'] = src.get('pis_aliquota', 0.0)
+                                
+                                df_dest.at[idx, 'COFINS (R$)'] = src.get('cofins_valor_devido', 0.0)
+                                df_dest.at[idx, 'COFINS Base (R$)'] = src.get('cofins_base_calculo', 0.0)
+                                df_dest.at[idx, 'COFINS Alíq. (%)'] = src.get('cofins_aliquota', 0.0)
+                                
+                                count += 1
+                        except: continue
+                    
+                    st.session_state["merged_df"] = df_dest
+                    st.success(f"Vinculação concluída! {count} itens foram cruzados e atualizados.")
+                except Exception as e: st.error(f"Erro na vinculação: {e}")
+            else:
+                st.warning("Por favor, carregue os dois arquivos antes de vincular.")
+
+    with tab2:
+        st.header("📋 Conferência e Edição")
+        if st.session_state["merged_df"] is not None:
+            col_config = {
+                "numeroAdicao": st.column_config.TextColumn("Item", width="small", disabled=True),
+                "NUMBER": st.column_config.TextColumn("Código Interno + Descrição", width="large"),
+                "Frete (R$)": st.column_config.NumberColumn(format="R$ %.2f"),
+                "Seguro (R$)": st.column_config.NumberColumn(format="R$ %.2f"),
+                "II (R$)": st.column_config.NumberColumn(label="II Vlr", format="R$ %.2f"),
+                "II Base (R$)": st.column_config.NumberColumn(label="II Base", format="R$ %.2f"),
+            }
+            edited_df = st.data_editor(st.session_state["merged_df"], hide_index=True, column_config=col_config, use_container_width=True, height=600)
+            st.session_state["merged_df"] = edited_df
+        else:
+            st.info("Aguardando dados...")
+
+    with tab3:
+        st.header("💾 Exportar XML")
+        if st.session_state["merged_df"] is not None:
+            if st.button("Gerar XML (Layout 8686)", type="primary"):
+                try:
+                    p = st.session_state["parsed_duimp"]
+                    records = st.session_state["merged_df"].to_dict("records")
+                    
+                    for i, item in enumerate(p.items):
+                        if i < len(records):
+                            item.update(records[i])
+                    
+                    builder = XMLBuilder(p)
+                    xml_bytes = builder.build()
+                    
+                    duimp_num = p.header.get("numeroDUIMP", "0000").replace("/", "-")
+                    file_name = f"DUIMP_{duimp_num}_INTEGRADO.xml"
+                    
+                    st.download_button(
+                        label="⬇️ Baixar XML Final",
+                        data=xml_bytes,
+                        file_name=file_name,
+                        mime="text/xml"
+                    )
+                    st.success("Arquivo gerado com sucesso! Cabeçalho validado.")
+                    
+                except Exception as e:
+                    st.error(f"Erro na geração do XML: {e}")
+        else:
+            st.warning("Realize a vinculação e conferência antes de exportar.")
 
 if __name__ == "__main__":
     main()
