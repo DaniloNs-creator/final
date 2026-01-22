@@ -30,14 +30,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==============================================================================
-# PARTE 1: PARSER DO PDF "APP 2" (HÄFELE/EXTRATO DUIMP) - VERSÃO DEFINITIVA
+# PARTE 1: PARSER "BLINDADO" PARA O PDF APP2.pdf (DUIMP)
 # ==============================================================================
 
 class HafelePDFParser:
     """
-    Parser BLINDADO para o layout Extrato DUIMP (APP2.pdf).
-    Resolve o problema de 'Não ler/achar' usando Regex flexível e
-    identifica impostos pela alíquota matemática, ignorando cabeçalhos quebrados.
+    Parser Definitivo para o layout Extrato DUIMP (APP2.pdf).
+    Correções:
+    1. Regex flexível para 'ITENS DA DUIMP'
+    2. Identificação de impostos por ALÍQUOTA (Matemática) e não por texto (que falha)
+    3. Captura robusta de Código Interno e NCM
     """
     
     def __init__(self):
@@ -49,12 +51,12 @@ class HafelePDFParser:
         
     def parse_pdf(self, pdf_path: str) -> Dict:
         try:
-            logger.info(f"Iniciando parsing do layout DUIMP/APP2: {pdf_path}")
+            logger.info(f"Iniciando parsing DEFINITIVO do layout DUIMP/APP2: {pdf_path}")
             
             with pdfplumber.open(pdf_path) as pdf:
                 full_text = ""
                 for page in pdf.pages:
-                    # layout=False captura o fluxo de texto cru (melhor para regex neste PDF)
+                    # layout=False é essencial para capturar o fluxo de dados bruto sem tabelas visuais
                     text = page.extract_text(layout=False) 
                     if text:
                         full_text += text + "\n"
@@ -68,45 +70,44 @@ class HafelePDFParser:
             return self.documento
 
     def _process_full_text(self, text: str):
-        # REGEX FLEXÍVEL: Aceita múltiplos espaços ou quebras entre as palavras
-        # Procura por "ITENS DA DUIMP - 00001" ou variações
+        # 1. DIVISOR DE ITENS (Baseado no seu arquivo APP2.pdf)
+        # Procura por "ITENS DA DUIMP-00001" permitindo variações de espaço
         chunks = re.split(r'(ITENS\s+DA\s+DUIMP\s*-\s*\d+)', text, flags=re.IGNORECASE)
         items_found = []
         
-        # Se encontrou marcadores, processa os blocos
+        # O split cria uma lista: [Texto_Intro, HEADER_ITEM_1, CONTEUDO_ITEM_1, HEADER_ITEM_2, ...]
         if len(chunks) > 1:
             for i in range(1, len(chunks), 2):
                 header = chunks[i]    # Ex: ITENS DA DUIMP-00001
-                content = chunks[i+1] # Texto do item
+                content = chunks[i+1] # Todo o texto até o próximo item
                 
-                # Extrai apenas o número do item do cabeçalho
+                # Extrai o número do item (Ex: 00001 -> 1)
                 item_num_match = re.search(r'(\d+)', header)
                 item_num = int(item_num_match.group(1)) if item_num_match else i
                 
-                # Processa o bloco individual
+                # Processa o bloco
                 item_data = self._parse_item_block(item_num, content)
                 if item_data:
                     items_found.append(item_data)
         else:
-            # Fallback de emergência (caso o regex falhe silenciosamente)
-            st.warning("Aviso: Marcadores 'ITENS DA DUIMP' não detectados padrão. Tentando método alternativo...")
+            st.warning("⚠️ Atenção: O padrão 'ITENS DA DUIMP' não foi encontrado. Verifique se o PDF está correto.")
         
         self.documento['itens'] = items_found
         self._calculate_totals()
 
     def _parse_item_block(self, item_num: int, text: str) -> Dict:
+        """Extrai dados de um bloco de texto referente a UM item"""
         try:
             item = {
                 'numero_item': item_num,
                 'ncm': '',
-                'codigo_produto': '',
                 'codigo_interno': '',
                 'nome_produto': '',
                 'quantidade': 0.0,
                 'peso_liquido': 0.0,
                 'valor_total': 0.0,
                 
-                # Campos fiscais iniciados com 0.0
+                # Campos Fiscais (Zerados inicialmente)
                 'ii_valor_devido': 0.0, 'ii_base_calculo': 0.0, 'ii_aliquota': 0.0,
                 'ipi_valor_devido': 0.0, 'ipi_base_calculo': 0.0, 'ipi_aliquota': 0.0,
                 'pis_valor_devido': 0.0, 'pis_base_calculo': 0.0, 'pis_aliquota': 0.0,
@@ -117,18 +118,18 @@ class HafelePDFParser:
                 'local_aduaneiro': 0.0
             }
 
-            # --- 1. Identificadores ---
-            # Busca "Código interno" seguido de número (ex: 342.79.301)
+            # --- IDENTIFICADORES ---
+            # Captura: "Código interno" seguido de números (com pontos)
             code_match = re.search(r'Código interno\s*([\d\.]+)', text, re.IGNORECASE)
             if code_match: 
                 item['codigo_interno'] = code_match.group(1).replace('.', '')
 
-            # Busca padrão de NCM (ex: 8302.10.00)
+            # Captura NCM: Padrão 4 dígitos . 2 dígitos . 2 dígitos
             ncm_match = re.search(r'(\d{4}\.\d{2}\.\d{2})', text)
             if ncm_match: 
                 item['ncm'] = ncm_match.group(1).replace('.', '')
 
-            # --- 2. Valores Gerais ---
+            # --- VALORES E PESOS ---
             qtd_match = re.search(r'Qtde Unid\. Comercial\s*([\d\.,]+)', text)
             if qtd_match: item['quantidade'] = self._parse_valor(qtd_match.group(1))
             
@@ -147,10 +148,9 @@ class HafelePDFParser:
             aduana_match = re.search(r'Local Aduaneiro \(R\$\)\s*([\d\.,]+)', text)
             if aduana_match: item['local_aduaneiro'] = self._parse_valor(aduana_match.group(1))
 
-            # --- 3. Extração de Impostos (SOLUÇÃO DEFINITIVA) ---
-            # O texto está quebrado. Procuramos padrões matemáticos triplos:
-            # Base ... Alíquota ... Valor
-            # Usamos re.DOTALL para atravessar linhas quebradas
+            # --- IMPOSTOS (LÓGICA MATEMÁTICA DEFINITIVA) ---
+            # Procura qualquer sequência que tenha: Base de Cálculo ... Alíquota ... Valor
+            # O re.DOTALL faz o ponto (.) pegar quebras de linha também
             
             tax_patterns = re.findall(
                 r'Base de Cálculo \(R\$\)\s*([\d\.,]+).*?% Alíquota\s*([\d\.,]+).*?Valor (?:Devido|A Recolher|Calculado) \(R\$\)\s*([\d\.,]+)', 
@@ -163,39 +163,36 @@ class HafelePDFParser:
                 aliq = self._parse_valor(aliq_str)
                 val = self._parse_valor(val_str)
 
-                # HEURÍSTICA FISCAL (Identifica pelo valor da alíquota)
+                # HEURÍSTICA: Descobre qual é o imposto pelo valor da %
                 
-                # PIS: Geralmente entre 1.65% e 3.0% (Ex: 2.10%)
+                # PIS: Geralmente entre 1.65% e 3.0% (No seu PDF aparece 2,10%)
                 if 1.60 <= aliq <= 3.00:
                     item['pis_aliquota'] = aliq
                     item['pis_base_calculo'] = base
                     item['pis_valor_devido'] = val
                 
-                # COFINS: Geralmente entre 7.0% e 12.0% (Ex: 9.65%)
+                # COFINS: Geralmente entre 7.0% e 12.0% (No seu PDF aparece 9,65%)
                 elif 7.00 <= aliq <= 12.00:
                     item['cofins_aliquota'] = aliq
                     item['cofins_base_calculo'] = base
                     item['cofins_valor_devido'] = val
                 
-                # II (Importação): Geralmente maior que 12% (Ex: 16%, 18%)
+                # II (Importação): Geralmente maior que 12% (No seu PDF aparece 16,00%)
                 elif aliq > 12.00:
                     item['ii_aliquota'] = aliq
                     item['ii_base_calculo'] = base
                     item['ii_valor_devido'] = val
                     
-                # IPI: Se não caiu nos outros e tem valor, assumimos IPI (Ex: 5%, 10% ou 0%)
+                # IPI: Se tiver valor e não se encaixar nos outros (ex: 0%, 5%, 6.5%, 10%)
+                # Prioridade baixa, pega o que sobra.
                 elif aliq >= 0:
-                    # Só preenche se o IPI ainda estiver zerado para evitar sobrescrever
-                    # com zeros de outros impostos isentos
-                    if item['ipi_aliquota'] == 0 and val > 0: 
+                    # Só grava se o IPI ainda estiver zerado para não sobrescrever isenções
+                    if item['ipi_aliquota'] == 0: 
                         item['ipi_aliquota'] = aliq
                         item['ipi_base_calculo'] = base
                         item['ipi_valor_devido'] = val
-                    elif item['ipi_aliquota'] == 0 and aliq > 0:
-                         # Caso tenha alíquota mas valor 0 (suspenso), guarda alíquota
-                         item['ipi_aliquota'] = aliq
 
-            # Totais do Item
+            # Recálculo dos totais para validação
             item['total_impostos'] = (item['ii_valor_devido'] + item['ipi_valor_devido'] + 
                                     item['pis_valor_devido'] + item['cofins_valor_devido'])
             item['valor_total_com_impostos'] = item['valor_total'] + item['total_impostos']
@@ -203,11 +200,11 @@ class HafelePDFParser:
             return item
             
         except Exception as e:
-            logger.error(f"Erro item {item_num}: {e}")
+            logger.error(f"Erro ao processar item {item_num}: {e}")
             return None
 
     def _parse_valor(self, valor_str: str) -> float:
-        """Converte string '1.234,56' para float 1234.56 de forma robusta"""
+        """Converte string '1.234,56' para float 1234.56"""
         try:
             if not valor_str: return 0.0
             # Remove ponto de milhar e troca vírgula por ponto
@@ -216,14 +213,15 @@ class HafelePDFParser:
         except: return 0.0
 
     def _calculate_totals(self):
-        totais = {
-            'valor_total_mercadoria': sum(i['valor_total'] for i in self.documento['itens']),
-            'total_impostos': sum(i['total_impostos'] for i in self.documento['itens'])
-        }
-        self.documento['totais'] = totais
+        # Apenas soma os itens encontrados para exibir no log/tela
+        if self.documento['itens']:
+            self.documento['totais'] = {
+                'valor_total_mercadoria': sum(i['valor_total'] for i in self.documento['itens']),
+                'total_impostos': sum(i['total_impostos'] for i in self.documento['itens'])
+            }
 
 # ==============================================================================
-# PARTE 2: PARSER APP 1, XML BUILDER E CONSTANTES (MANTIDOS ORIGINAIS)
+# PARTE 2: PARSER DO APP 1 (DUIMP/XML) E DEMAIS CLASSES (MANTIDO)
 # ==============================================================================
 
 ADICAO_FIELDS_ORDER = [
