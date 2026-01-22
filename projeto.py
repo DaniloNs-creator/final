@@ -30,13 +30,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==============================================================================
-# PARTE 1: PARSER APP 2 (HÄFELE/EXTRATO DUIMP) - CORRIGIDO
+# PARTE 1: PARSER APP 2 (HÄFELE/EXTRATO DUIMP) - VERSÃO BLINDADA
 # ==============================================================================
 
 class HafelePDFParser:
     """
     Parser BLINDADO para o layout Extrato DUIMP (APP2.pdf).
-    Melhoria: Regex de impostos mais permissivo para capturar II corretamente.
     """
     
     def __init__(self):
@@ -92,35 +91,25 @@ class HafelePDFParser:
                 'codigo_interno': '',
                 'nome_produto': '',
                 'quantidade': 0.0,
-                'quantidade_comercial': 0.0,
                 'peso_liquido': 0.0,
                 'valor_total': 0.0,
-                
                 'ii_valor_devido': 0.0, 'ii_base_calculo': 0.0, 'ii_aliquota': 0.0,
                 'ipi_valor_devido': 0.0, 'ipi_base_calculo': 0.0, 'ipi_aliquota': 0.0,
                 'pis_valor_devido': 0.0, 'pis_base_calculo': 0.0, 'pis_aliquota': 0.0,
                 'cofins_valor_devido': 0.0, 'cofins_base_calculo': 0.0, 'cofins_aliquota': 0.0,
-                
                 'frete_internacional': 0.0,
                 'seguro_internacional': 0.0,
                 'local_aduaneiro': 0.0
             }
 
-            # Identificadores
             code_match = re.search(r'Código interno\s*([\d\.]+)', text, re.IGNORECASE)
             if code_match: item['codigo_interno'] = code_match.group(1).replace('.', '')
 
             ncm_match = re.search(r'(\d{4}\.\d{2}\.\d{2})', text)
             if ncm_match: item['ncm'] = ncm_match.group(1).replace('.', '')
 
-            # Valores
-            qtd_com_match = re.search(r'Qtde Unid\. Comercial\s*([\d\.,]+)', text)
-            if qtd_com_match: item['quantidade_comercial'] = self._parse_valor(qtd_com_match.group(1))
+            # Note: Removida a leitura de quantidade do APP2 pois agora vem do APP1
             
-            qtd_est_match = re.search(r'Qtde Unid\. Estatística\s*([\d\.,]+)', text)
-            if qtd_est_match: item['quantidade'] = self._parse_valor(qtd_est_match.group(1))
-            else: item['quantidade'] = item['quantidade_comercial']
-
             val_match = re.search(r'Valor Tot\. Cond Venda\s*([\d\.,]+)', text)
             if val_match: item['valor_total'] = self._parse_valor(val_match.group(1))
 
@@ -136,12 +125,10 @@ class HafelePDFParser:
             aduana_match = re.search(r'Local Aduaneiro \(R\$\)\s*([\d\.,]+)', text)
             if aduana_match: item['local_aduaneiro'] = self._parse_valor(aduana_match.group(1))
 
-            # --- IMPOSTOS (REGEX MELHORADO) ---
-            # O ".*?" entre as palavras permite que haja sujeira ou quebras de linha entre os campos
+            # IMPOSTOS
             tax_patterns = re.findall(
-                r'Base de Cálculo.*?\(R\$\)\s*([\d\.,]+).*?% Alíquota\s*([\d\.,]+).*?Valor.*?(?:Devido|A Recolher|Calculado).*?\(R\$\)\s*([\d\.,]+)', 
-                text, 
-                re.DOTALL | re.IGNORECASE
+                r'Base de Cálculo \(R\$\)\s*([\d\.,]+).*?% Alíquota\s*([\d\.,]+).*?Valor (?:Devido|A Recolher|Calculado) \(R\$\)\s*([\d\.,]+)', 
+                text, re.DOTALL | re.IGNORECASE
             )
 
             for base_str, aliq_str, val_str in tax_patterns:
@@ -157,7 +144,7 @@ class HafelePDFParser:
                     item['cofins_aliquota'] = aliq
                     item['cofins_base_calculo'] = base
                     item['cofins_valor_devido'] = val
-                elif aliq > 12.00: # II (Ex: 16%)
+                elif aliq > 12.00:
                     item['ii_aliquota'] = aliq
                     item['ii_base_calculo'] = base
                     item['ii_valor_devido'] = val
@@ -192,11 +179,11 @@ class HafelePDFParser:
             }
 
 # ==============================================================================
-# PARTE 2: PARSER APP 1 (DUIMP) - MANTIDO
+# PARTE 2: PARSER APP 1 (DUIMP) - CORRIGIDO (Lê Qtd Comercial)
 # ==============================================================================
 
 class DuimpPDFParser:
-    """Parser do App 1 (Mantido original)"""
+    """Parser do App 1 (Mantido original + Leitura de Qtd Comercial)"""
     def __init__(self, file_stream):
         self.doc = fitz.open(stream=file_stream, filetype="pdf")
         self.full_text = ""
@@ -236,8 +223,11 @@ class DuimpPDFParser:
                 
                 item["ncm"] = self._regex(r"NCM:\s*([\d\.]+)", content)
                 item["paisOrigem"] = self._regex(r"País de origem:\s*\n?(.+)", content)
+                
+                # --- LÊ AS DUAS QUANTIDADES (ESTATÍSTICA E COMERCIAL) ---
                 item["quantidade"] = self._regex(r"Quantidade na unidade estatística:\s*([\d\.,]+)", content)
                 item["quantidade_comercial"] = self._regex(r"Quantidade na unidade comercializada:\s*([\d\.,]+)", content)
+                
                 item["unidade"] = self._regex(r"Unidade estatística:\s*(.+)", content)
                 item["pesoLiq"] = self._regex(r"Peso líquido \(kg\):\s*([\d\.,]+)", content)
                 item["valorUnit"] = self._regex(r"Valor unitário na condição de venda:\s*([\d\.,]+)", content)
@@ -491,171 +481,6 @@ FOOTER_TAGS = {
     "viaTransportePaisTransportadorNome": "CINGAPURA"
 }
 
-class DataFormatter:
-    @staticmethod
-    def clean_text(text):
-        if not text: return ""
-        text = text.replace('\n', ' ').replace('\r', '')
-        return re.sub(r'\s+', ' ', text).strip()
-
-    @staticmethod
-    def format_number(value, length=15):
-        if not value: return "0" * length
-        clean = re.sub(r'\D', '', str(value))
-        if not clean: return "0" * length
-        return clean.zfill(length)
-    
-    @staticmethod
-    def format_ncm(value):
-        if not value: return "00000000"
-        return re.sub(r'\D', '', value)[:8]
-
-    @staticmethod
-    def format_input_fiscal(value, length=15, is_percent=False):
-        try:
-            if isinstance(value, str):
-                value = value.replace('.', '')
-                value = value.replace(',', '.')
-            
-            val_float = float(value)
-            val_int = int(round(val_float * 100))
-            return str(val_int).zfill(length)
-        except:
-            return "0" * length
-
-    @staticmethod
-    def format_high_precision(value, length=15):
-        try:
-            if isinstance(value, str):
-                value = value.replace('.', '')
-                value = value.replace(',', '.')
-            
-            val_float = float(value)
-            val_int = int(round(val_float * 10000000))
-            return str(val_int).zfill(length)
-        except:
-            return "0" * length
-
-    @staticmethod
-    def format_quantity(value, length=14):
-        try:
-            if isinstance(value, str):
-                value = value.replace('.', '')
-                value = value.replace(',', '.')
-            
-            val_float = float(value)
-            val_int = int(round(val_float * 100000))
-            return str(val_int).zfill(length)
-        except:
-            return "0" * length
-
-    @staticmethod
-    def calculate_cbs_ibs(base_xml_string):
-        try:
-            base_int = int(base_xml_string)
-            base_float = base_int / 100.0
-            
-            cbs_val = base_float * 0.009
-            cbs_str = str(int(round(cbs_val * 100))).zfill(14)
-            
-            ibs_val = base_float * 0.001
-            ibs_str = str(int(round(ibs_val * 100))).zfill(14)
-            
-            return cbs_str, ibs_str
-        except:
-            return "0".zfill(14), "0".zfill(14)
-
-    @staticmethod
-    def parse_supplier_info(raw_name, raw_addr):
-        data = {"fornecedorNome": "", "fornecedorLogradouro": "", "fornecedorNumero": "S/N", "fornecedorCidade": ""}
-        if raw_name:
-            parts = raw_name.split('-', 1)
-            data["fornecedorNome"] = parts[-1].strip() if len(parts) > 1 else raw_name.strip()
-        if raw_addr:
-            clean_addr = DataFormatter.clean_text(raw_addr)
-            parts_dash = clean_addr.rsplit('-', 1)
-            if len(parts_dash) > 1:
-                data["fornecedorCidade"] = parts_dash[1].strip()
-                street_part = parts_dash[0].strip()
-            else:
-                data["fornecedorCidade"] = "EXTERIOR"
-                street_part = clean_addr
-            comma_split = street_part.rsplit(',', 1)
-            if len(comma_split) > 1:
-                data["fornecedorLogradouro"] = comma_split[0].strip()
-                num_match = re.search(r'\d+', comma_split[1])
-                if num_match: data["fornecedorNumero"] = num_match.group(0)
-            else:
-                data["fornecedorLogradouro"] = street_part
-        return data
-
-class DuimpPDFParser:
-    """Parser do App 1 (Mantido original + Correção Leitura Qtd Comercial)"""
-    def __init__(self, file_stream):
-        self.doc = fitz.open(stream=file_stream, filetype="pdf")
-        self.full_text = ""
-        self.header = {}
-        self.items = []
-
-    def preprocess(self):
-        clean_lines = []
-        for page in self.doc:
-            text = page.get_text("text")
-            lines = text.split('\n')
-            for line in lines:
-                l_strip = line.strip()
-                if "Extrato da DUIMP" in l_strip: continue
-                if "Data, hora e responsável" in l_strip: continue
-                if re.match(r'^\d+\s*/\s*\d+$', l_strip): continue
-                clean_lines.append(line)
-        self.full_text = "\n".join(clean_lines)
-
-    def extract_header(self):
-        txt = self.full_text
-        self.header["numeroDUIMP"] = self._regex(r"Extrato da Duimp\s+([\w\-\/]+)", txt)
-        self.header["cnpj"] = self._regex(r"CNPJ do importador:\s*([\d\.\/\-]+)", txt)
-        self.header["nomeImportador"] = self._regex(r"Nome do importador:\s*\n?(.+)", txt)
-        self.header["pesoBruto"] = self._regex(r"Peso Bruto \(kg\):\s*([\d\.,]+)", txt)
-        self.header["pesoLiquido"] = self._regex(r"Peso Liquido \(kg\):\s*([\d\.,]+)", txt)
-        self.header["urf"] = self._regex(r"Unidade de despacho:\s*([\d]+)", txt)
-        self.header["paisProcedencia"] = self._regex(r"País de Procedência:\s*\n?(.+)", txt)
-
-    def extract_items(self):
-        chunks = re.split(r"Item\s+(\d+)", self.full_text)
-        if len(chunks) > 1:
-            for i in range(1, len(chunks), 2):
-                num = chunks[i]
-                content = chunks[i+1]
-                item = {"numeroAdicao": num}
-                
-                item["ncm"] = self._regex(r"NCM:\s*([\d\.]+)", content)
-                item["paisOrigem"] = self._regex(r"País de origem:\s*\n?(.+)", content)
-                
-                # --- LÊ AS DUAS QUANTIDADES DO APP 1 ---
-                item["quantidade"] = self._regex(r"Quantidade na unidade estatística:\s*([\d\.,]+)", content)
-                item["quantidade_comercial"] = self._regex(r"Quantidade na unidade comercializada:\s*([\d\.,]+)", content)
-                
-                item["unidade"] = self._regex(r"Unidade estatística:\s*(.+)", content)
-                item["pesoLiq"] = self._regex(r"Peso líquido \(kg\):\s*([\d\.,]+)", content)
-                item["valorUnit"] = self._regex(r"Valor unitário na condição de venda:\s*([\d\.,]+)", content)
-                item["valorTotal"] = self._regex(r"Valor total na condição de venda:\s*([\d\.,]+)", content)
-                item["moeda"] = self._regex(r"Moeda negociada:\s*(.+)", content)
-                
-                exp_match = re.search(r"Código do Exportador Estrangeiro:\s*(.+?)(?=\n\s*(?:Endereço|Dados))", content, re.DOTALL)
-                item["fornecedor_raw"] = exp_match.group(1).strip() if exp_match else ""
-                
-                addr_match = re.search(r"Endereço:\s*(.+?)(?=\n\s*(?:Dados da Mercadoria|Aplicação))", content, re.DOTALL)
-                item["endereco_raw"] = addr_match.group(1).strip() if addr_match else ""
-
-                desc_match = re.search(r"Detalhamento do Produto:\s*(.+?)(?=\n\s*(?:Número de Identificação|Versão|Código de Class|Descrição complementar))", content, re.DOTALL)
-                item["descricao"] = desc_match.group(1).strip() if desc_match else ""
-                
-                self.items.append(item)
-
-    def _regex(self, pattern, text):
-        match = re.search(pattern, text)
-        return match.group(1).strip() if match else ""
-
 class XMLBuilder:
     def __init__(self, parser, edited_items=None):
         self.p = parser
@@ -753,11 +578,11 @@ class XMLBuilder:
                 "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
                 "freteValorReais": frete_fmt,
                 "seguroValorReais": seguro_fmt,
+                
+                # --- CORREÇÃO SOLICITADA PARA O IMPOSTO DE IMPORTAÇÃO (II) ---
                 "iiBaseCalculo": ii_base_fmt,
                 "iiAliquotaAdValorem": ii_aliq_fmt,
-                
-                # --- CORREÇÃO: MAPEAR OS VALORES DE II PARA AS TAGS CORRETAS ---
-                "iiAliquotaValorCalculado": ii_val_fmt, # Mapeado!
+                "iiAliquotaValorCalculado": ii_val_fmt, # Mapeamento Explícito
                 "iiAliquotaValorDevido": ii_val_fmt,
                 "iiAliquotaValorRecolher": ii_val_fmt,
                 
@@ -940,7 +765,6 @@ def main():
                     src_map = {}
                     for item in st.session_state["parsed_hafele"]['itens']:
                         try:
-                            # Garante que seja inteiro
                             idx = int(item['numero_item'])
                             src_map[idx] = item
                         except: pass
@@ -980,7 +804,6 @@ def main():
                                 
                                 count += 1
                         except Exception as e:
-                            # Continua para o próximo item se houver erro pontual
                             continue
                     
                     st.session_state["merged_df"] = df_dest
