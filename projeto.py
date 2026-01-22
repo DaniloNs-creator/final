@@ -2,227 +2,188 @@ import streamlit as st
 import pdfplumber
 import pandas as pd
 import re
-import plotly.express as px
-
-# --- VERIFICAÇÃO DE DEPENDÊNCIAS OPCIONAIS ---
-try:
-    import matplotlib
-    HAS_MATPLOTLIB = True
-except ImportError:
-    HAS_MATPLOTLIB = False
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="DUIMP Auditor Pro", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="Leitor DUIMP - IPI Fix", page_icon="🎯", layout="wide")
 
-# --- UTILITÁRIOS ---
+# --- FUNÇÕES DE LIMPEZA ---
 def clean_currency(value_str):
+    """Converte '3.849,7200000' para float 3849.72"""
     if not value_str: return 0.0
     try:
-        # Pega o primeiro token numérico. Ex: "2.100,00" -> 2100.00
+        # Pega apenas números e vírgula/ponto iniciais
         clean = re.sub(r'[^\d,]', '', str(value_str).split()[0])
         clean = clean.replace(',', '.')
         return float(clean)
     except:
         return 0.0
 
-def clean_block_text(text):
-    """
-    Remove ruídos de quebra de página para 'costurar' o texto.
-    Remove linhas como '--- PAGE 12 ---', datas isoladas, etc.
-    """
-    # Remove linhas de paginação
-    text = re.sub(r'--- PAGE \d+ ---', '', text) 
-    text = re.sub(r'ITENS DA DUIMP\s*-\s*\d+', '', text, flags=re.IGNORECASE)
-    # Remove excesso de quebras de linha para juntar o texto
-    text = re.sub(r'\n+', '\n', text)
-    return text
+def clean_text_stream(text):
+    """Remove cabeçalhos de página e une o texto para análise contínua"""
+    # Remove marcadores de página comuns
+    text = re.sub(r'--- PAGE \d+ ---', '', text)
+    text = re.sub(r'ITENS DA DUIMP\s*-\s*\d+', ' ||ITEM_SEP|| ', text, flags=re.IGNORECASE)
+    # Normaliza quebras de linha
+    return text.replace('\n', ' ')
 
-def extract_tax_details(block, tax_name):
+def extract_tax_by_base_barrier(item_text, tax_name):
     """
-    Extrai Base, Alíquota e Valor com regex tolerante a quebras.
+    Técnica de Barreira: Busca o valor do imposto apenas dentro do escopo
+    da sua própria Base de Cálculo até a próxima Base de Cálculo.
+    Isso impede que o IPI 'roube' o valor do PIS.
     """
-    details = {"Base": 0.0, "Rate": 0.0, "Value": 0.0}
-    if not block: return details
+    # 1. Encontrar a Base de Cálculo do Imposto Específico
+    # Procura algo como "IPI ... Base de Cálculo (R$) 3.849,72"
+    # O regex procura o nome do imposto, segue texto, acha "Base", pega o número.
     
-    # Limpa o bloco para aproximar rótulos dos valores (corrige o problema da quebra de página)
-    clean_block = clean_block_text(block)
-
-    # 1. BASE DE CÁLCULO
-    # Regex busca: "Base de Cálculo" ... (ignora texto intermediário) ... (Número)
-    base_match = re.search(r"Base de Cálculo \(R\$\).*?([\d\.,]+)", clean_block, re.DOTALL | re.IGNORECASE)
-    if base_match:
-        details["Base"] = clean_currency(base_match.group(1))
-
-    # 2. ALÍQUOTA (%)
-    # Prioridade 1: "Alíquota" seguido de número (Ex: % Alíquota 9,6500)
-    # Prioridade 2: "AD VALOREM" seguido de número (comum no IPI/II)
-    rate_match = re.search(r"% Alíquota\s*([\d\.,]+)", clean_block, re.DOTALL | re.IGNORECASE)
-    if not rate_match:
-         rate_match = re.search(r"AD VALOREM.*?([\d\.,]+)", clean_block, re.DOTALL | re.IGNORECASE)
+    # Pattern: TaxName ... (text) ... Base de Cálculo (R$) (Value)
+    start_pattern = rf"{tax_name}.*?Base de Cálculo \(R\$\)\s*([\d\.,]+)"
+    base_match = re.search(start_pattern, item_text, re.IGNORECASE)
     
-    if rate_match:
-        details["Rate"] = clean_currency(rate_match.group(1))
-
-    # 3. VALOR A RECOLHER
-    # Tenta "Valor A Recolher" primeiro, depois "Valor Devido" (comum no IPI)
-    val_match = re.search(r"Valor A Recolher \(R\$\).*?([\d\.,]+)", clean_block, re.DOTALL | re.IGNORECASE)
+    if not base_match:
+        return 0.0, 0.0, 0.0 # Base, Rate, Value
+        
+    base_val_str = base_match.group(1)
+    base_val = clean_currency(base_val_str)
+    
+    # Posição onde termina a Base do IPI
+    start_search_idx = base_match.end()
+    
+    # 2. Definir a Barreira (Onde começa a próxima Base de Cálculo?)
+    # Procuramos a próxima ocorrência de "Base de Cálculo" a partir daqui
+    next_base_match = re.search(r"Base de Cálculo \(R\$\)", item_text[start_search_idx:])
+    
+    if next_base_match:
+        # O limite é onde começa a próxima base
+        end_search_idx = start_search_idx + next_base_match.start()
+        # O bloco seguro é apenas entre a Base Atual e a Próxima Base
+        safe_block = item_text[start_search_idx:end_search_idx]
+    else:
+        # Se não tiver próxima base, vai até o fim do item
+        safe_block = item_text[start_search_idx:]
+        
+    # 3. Extrair Valores Seguros dentro do Bloco
+    # Alíquota
+    rate = 0.0
+    rate_match = re.search(r"% Alíquota\s*([\d\.,]+)", safe_block)
+    if not rate_match: # Tenta padrão alternativo
+         rate_match = re.search(r"AD VALOREM.*?([\d\.,]+)", safe_block)
+    if rate_match: rate = clean_currency(rate_match.group(1))
+    
+    # Valor a Recolher
+    value = 0.0
+    val_match = re.search(r"Valor A Recolher \(R\$\)\s*([\d\.,]+)", safe_block)
     if not val_match:
-        val_match = re.search(r"Valor Devido \(R\$\).*?([\d\.,]+)", clean_block, re.DOTALL | re.IGNORECASE)
-    
+        val_match = re.search(r"Valor Devido \(R\$\)\s*([\d\.,]+)", safe_block)
+        
     if val_match:
-        details["Value"] = clean_currency(val_match.group(1))
+        value = clean_currency(val_match.group(1))
+        
+    return base_val, rate, value
 
-    return details
-
-# --- ENGINE CORE ---
-def parse_duimp_robust(pdf_file):
-    full_text = ""
+# --- ENGINE PRINCIPAL ---
+def parse_duimp_advanced(pdf_file):
+    # 1. Leitura Linear Completa (Costura as páginas)
+    full_text_pages = []
     with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
-            full_text += page.extract_text() + "\n"
-
-    # Quebra por itens (Regex robusta para cabeçalhos variados)
-    raw_items = re.split(r"ITENS DA DUIMP\s*-\s*\d+", full_text, flags=re.IGNORECASE)
+            full_text_pages.append(page.extract_text())
+    
+    full_text = "\n".join(full_text_pages)
+    
+    # Limpeza para remover cabeçalhos de página que quebram tabelas
+    clean_content = clean_text_stream(full_text)
+    
+    # 2. Separação por Itens
+    items_raw = clean_content.split('||ITEM_SEP||')
     
     data = []
     
-    if len(raw_items) > 1:
-        for i, item_text in enumerate(raw_items[1:], start=1):
+    # Pula o primeiro bloco (cabeçalho geral)
+    if len(items_raw) > 1:
+        for i, item_text in enumerate(items_raw[1:], start=1):
             try:
-                # --- Identificadores ---
-                pn = "N/A"
+                # --- Identificação ---
                 pn_match = re.search(r"Código interno\s*([\d\.]+)", item_text)
-                if pn_match: pn = pn_match.group(1)
+                pn = pn_match.group(1) if pn_match else f"Item {i}"
                 
-                # --- Slicing dos Impostos (Com Lógica de Fim de Arquivo) ---
-                text_upper = item_text.upper()
-                
-                # Encontra posições dos cabeçalhos dos impostos
-                # Adiciona variações com e sem \n para robustez
-                idx_ii = text_upper.find("\nII\n") if text_upper.find("\nII\n") != -1 else text_upper.find(" II ")
-                idx_ipi = text_upper.find("\nIPI\n") if text_upper.find("\nIPI\n") != -1 else text_upper.find(" IPI ")
-                
-                # PIS muitas vezes aparece colado ou como 'PIS-IMPORTAÇÃO'
-                idx_pis = text_upper.find("PIS-") 
-                if idx_pis == -1: idx_pis = text_upper.find("\nPIS\n")
-                if idx_pis == -1: idx_pis = text_upper.find(" PIS ")
-
-                idx_cofins = text_upper.find("\nCOFINS\n") if text_upper.find("\nCOFINS\n") != -1 else text_upper.find(" COFINS ")
-                
-                # Define limites seguros (se não achar, usa o fim do texto)
-                len_text = len(item_text)
-                
-                # Lógica de cascata para definir onde termina o bloco de cada imposto
-                limit_ii = idx_ipi if idx_ipi != -1 else (idx_pis if idx_pis != -1 else len_text)
-                limit_ipi = idx_pis if idx_pis != -1 else (idx_cofins if idx_cofins != -1 else len_text)
-                limit_pis = idx_cofins if idx_cofins != -1 else len_text
-                
-                # Extração
-                tax_info = {}
+                # --- Extração Cirúrgica por Barreiras ---
+                # A ordem de extração não importa mais, pois cada um busca sua própria Base
                 
                 # II
-                if idx_ii != -1:
-                    tax_info["II"] = extract_tax_details(item_text[idx_ii:limit_ii], "II")
-                else: tax_info["II"] = {"Base": 0.0, "Rate": 0.0, "Value": 0.0}
+                ii_base, ii_rate, ii_val = extract_tax_by_base_barrier(item_text, "II")
                 
-                # IPI (Bloco crítico devido à quebra de página)
-                if idx_ipi != -1:
-                    # Pega o bloco recortado
-                    block_ipi = item_text[idx_ipi:limit_ipi]
-                    tax_info["IPI"] = extract_tax_details(block_ipi, "IPI")
-                else: tax_info["IPI"] = {"Base": 0.0, "Rate": 0.0, "Value": 0.0}
+                # IPI (Agora protegido pela lógica de barreira)
+                # Ele vai procurar "IPI ... Base" e parar antes de "Base" do PIS
+                ipi_base, ipi_rate, ipi_val = extract_tax_by_base_barrier(item_text, "IPI")
                 
                 # PIS
-                if idx_pis != -1:
-                    tax_info["PIS"] = extract_tax_details(item_text[idx_pis:limit_pis], "PIS")
-                else: tax_info["PIS"] = {"Base": 0.0, "Rate": 0.0, "Value": 0.0}
+                pis_base, pis_rate, pis_val = extract_tax_by_base_barrier(item_text, "PIS")
                 
                 # COFINS
-                if idx_cofins != -1:
-                    tax_info["COFINS"] = extract_tax_details(item_text[idx_cofins:], "COFINS")
-                else: tax_info["COFINS"] = {"Base": 0.0, "Rate": 0.0, "Value": 0.0}
+                cofins_base, cofins_rate, cofins_val = extract_tax_by_base_barrier(item_text, "COFINS")
 
                 # --- Montagem ---
                 row = {
                     "Item": i,
                     "Part Number": pn,
                     
-                    # II
-                    "II Base": tax_info["II"]["Base"],
-                    "II Aliq": tax_info["II"]["Rate"],
-                    "II Vlr": tax_info["II"]["Value"],
+                    # IPI (O foco do problema)
+                    "IPI Base": ipi_base,
+                    "IPI Alíquota": ipi_rate,
+                    "IPI Valor": ipi_val,
                     
-                    # IPI
-                    "IPI Base": tax_info["IPI"]["Base"],
-                    "IPI Aliq": tax_info["IPI"]["Rate"],
-                    "IPI Vlr": tax_info["IPI"]["Value"],
-                    
-                    # PIS
-                    "PIS Base": tax_info["PIS"]["Base"],
-                    "PIS Aliq": tax_info["PIS"]["Rate"],
-                    "PIS Vlr": tax_info["PIS"]["Value"],
-                    
-                    # COFINS
-                    "COFINS Base": tax_info["COFINS"]["Base"],
-                    "COFINS Aliq": tax_info["COFINS"]["Rate"],
-                    "COFINS Vlr": tax_info["COFINS"]["Value"],
-                    
-                    "Total Tributos": tax_info["II"]["Value"] + tax_info["IPI"]["Value"] + tax_info["PIS"]["Value"] + tax_info["COFINS"]["Value"]
+                    # Outros
+                    "II Valor": ii_val,
+                    "PIS Valor": pis_val,
+                    "COFINS Valor": cofins_val,
+                    "Total Tributos": ii_val + ipi_val + pis_val + cofins_val
                 }
                 data.append(row)
-
+                
             except Exception as e:
-                # Log silencioso para debug se necessário
                 print(f"Erro item {i}: {e}")
-                continue
-
+                
     return pd.DataFrame(data)
 
 # --- FRONTEND ---
-st.title("🕵️ Validador DUIMP (Robust Mode)")
-
-if not HAS_MATPLOTLIB:
-    st.warning("⚠️ Biblioteca 'matplotlib' não detectada. Os gradientes de cor (formatação condicional) foram desativados, mas o app funcionará normalmente.")
+st.title("🛡️ Validador Fiscal - Solução Definitiva IPI")
+st.info("Algoritmo de 'Barreira de Base de Cálculo' aplicado. Impede que o IPI leia valores do PIS mesmo com quebras de página.")
 
 uploaded_file = st.file_uploader("Upload PDF", type="pdf")
 
 if uploaded_file:
-    with st.spinner("Processando e corrigindo quebras de página..."):
-        df = parse_duimp_robust(uploaded_file)
+    df = parse_duimp_advanced(uploaded_file)
     
     if not df.empty:
-        # Tabela Focada em IPI e Impostos
-        st.subheader("Auditoria de IPI e Tributos")
-        
-        # Formatação
-        format_dict = {col: "R$ {:,.2f}" for col in df.columns if "Base" in col or "Vlr" in col or "Total" in col}
-        format_dict.update({col: "{:.2f}%" for col in df.columns if "Aliq" in col})
-        
-        # Destaca colunas do IPI
-        cols_ipi = ["Item", "Part Number", "IPI Base", "IPI Aliq", "IPI Vlr", "Total Tributos"]
-        
-        # Lógica de Estilo Defensiva
-        styler = df[cols_ipi].style.format(format_dict)
-        
-        if HAS_MATPLOTLIB:
-            try:
-                styler = styler.background_gradient(subset=["IPI Vlr"], cmap="Reds")
-            except Exception:
-                pass # Ignora erro de estilo se ocorrer algo imprevisto
-        
-        st.dataframe(styler, use_container_width=True)
-        
-        with st.expander("Ver Tabela Completa (Todos Impostos)"):
-            st.dataframe(df.style.format(format_dict), use_container_width=True)
-            
-        # KPIs Rápidos
+        # Métricas de Validação
         c1, c2, c3 = st.columns(3)
-        c1.metric("Total IPI", f"R$ {df['IPI Vlr'].sum():,.2f}")
-        c2.metric("Total PIS/COFINS", f"R$ {(df['PIS Vlr'].sum() + df['COFINS Vlr'].sum()):,.2f}")
+        c1.metric("Total IPI (Extraído)", f"R$ {df['IPI Valor'].sum():,.2f}")
+        c2.metric("Total PIS (Extraído)", f"R$ {df['PIS Valor'].sum():,.2f}")
         c3.metric("Total Geral", f"R$ {df['Total Tributos'].sum():,.2f}")
-
+        
+        st.divider()
+        
+        st.subheader("Auditoria Item a Item")
+        # Formatação
+        fmt = "{:,.2f}"
+        st.dataframe(
+            df.style.format({
+                "IPI Base": "R$ {:,.2f}", 
+                "IPI Alíquota": "{:.2f}%", 
+                "IPI Valor": "R$ {:,.2f}",
+                "II Valor": "R$ {:,.2f}",
+                "PIS Valor": "R$ {:,.2f}",
+                "COFINS Valor": "R$ {:,.2f}",
+                "Total Tributos": "R$ {:,.2f}"
+            }), 
+            use_container_width=True,
+            height=500
+        )
+        
         # Download
         csv = df.to_csv(index=False, sep=';', decimal=',').encode('utf-8-sig')
-        st.download_button("📥 Baixar Excel Auditável", csv, "duimp_ipi_fixed.csv", "text/csv")
+        st.download_button("📥 Baixar Planilha Corrigida", csv, "duimp_final_ipi_ok.csv", "text/csv")
+        
     else:
-        st.warning("O arquivo foi lido, mas nenhum item foi identificado. Verifique se é um PDF pesquisável.")
+        st.warning("Arquivo processado mas nenhum dado foi encontrado. Verifique se o PDF contém texto.")
