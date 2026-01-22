@@ -30,13 +30,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==============================================================================
-# PARTE 1: PARSER APP 2 (HÄFELE/EXTRATO DUIMP) - CORRIGIDO
+# PARTE 1: PARSER APP 2 (HÄFELE) - MANTIDO (Versão Blindada)
 # ==============================================================================
 
 class HafelePDFParser:
     """
     Parser BLINDADO para o layout Extrato DUIMP (APP2.pdf).
-    Melhoria: Regex de impostos mais permissivo para capturar II corretamente.
     """
     
     def __init__(self):
@@ -92,35 +91,26 @@ class HafelePDFParser:
                 'codigo_interno': '',
                 'nome_produto': '',
                 'quantidade': 0.0,
-                'quantidade_comercial': 0.0,
                 'peso_liquido': 0.0,
                 'valor_total': 0.0,
-                
                 'ii_valor_devido': 0.0, 'ii_base_calculo': 0.0, 'ii_aliquota': 0.0,
                 'ipi_valor_devido': 0.0, 'ipi_base_calculo': 0.0, 'ipi_aliquota': 0.0,
                 'pis_valor_devido': 0.0, 'pis_base_calculo': 0.0, 'pis_aliquota': 0.0,
                 'cofins_valor_devido': 0.0, 'cofins_base_calculo': 0.0, 'cofins_aliquota': 0.0,
-                
                 'frete_internacional': 0.0,
                 'seguro_internacional': 0.0,
                 'local_aduaneiro': 0.0
             }
 
-            # Identificadores
             code_match = re.search(r'Código interno\s*([\d\.]+)', text, re.IGNORECASE)
             if code_match: item['codigo_interno'] = code_match.group(1).replace('.', '')
 
             ncm_match = re.search(r'(\d{4}\.\d{2}\.\d{2})', text)
             if ncm_match: item['ncm'] = ncm_match.group(1).replace('.', '')
 
-            # Valores
-            qtd_com_match = re.search(r'Qtde Unid\. Comercial\s*([\d\.,]+)', text)
-            if qtd_com_match: item['quantidade_comercial'] = self._parse_valor(qtd_com_match.group(1))
+            qtd_match = re.search(r'Qtde Unid\. Comercial\s*([\d\.,]+)', text)
+            if qtd_match: item['quantidade'] = self._parse_valor(qtd_match.group(1))
             
-            qtd_est_match = re.search(r'Qtde Unid\. Estatística\s*([\d\.,]+)', text)
-            if qtd_est_match: item['quantidade'] = self._parse_valor(qtd_est_match.group(1))
-            else: item['quantidade'] = item['quantidade_comercial']
-
             val_match = re.search(r'Valor Tot\. Cond Venda\s*([\d\.,]+)', text)
             if val_match: item['valor_total'] = self._parse_valor(val_match.group(1))
 
@@ -136,12 +126,9 @@ class HafelePDFParser:
             aduana_match = re.search(r'Local Aduaneiro \(R\$\)\s*([\d\.,]+)', text)
             if aduana_match: item['local_aduaneiro'] = self._parse_valor(aduana_match.group(1))
 
-            # --- IMPOSTOS (REGEX MELHORADO) ---
-            # O ".*?" entre as palavras permite que haja sujeira ou quebras de linha entre os campos
             tax_patterns = re.findall(
-                r'Base de Cálculo.*?\(R\$\)\s*([\d\.,]+).*?% Alíquota\s*([\d\.,]+).*?Valor.*?(?:Devido|A Recolher|Calculado).*?\(R\$\)\s*([\d\.,]+)', 
-                text, 
-                re.DOTALL | re.IGNORECASE
+                r'Base de Cálculo \(R\$\)\s*([\d\.,]+).*?% Alíquota\s*([\d\.,]+).*?Valor (?:Devido|A Recolher|Calculado) \(R\$\)\s*([\d\.,]+)', 
+                text, re.DOTALL | re.IGNORECASE
             )
 
             for base_str, aliq_str, val_str in tax_patterns:
@@ -157,7 +144,7 @@ class HafelePDFParser:
                     item['cofins_aliquota'] = aliq
                     item['cofins_base_calculo'] = base
                     item['cofins_valor_devido'] = val
-                elif aliq > 12.00: # II (Ex: 16%)
+                elif aliq > 12.00:
                     item['ii_aliquota'] = aliq
                     item['ii_base_calculo'] = base
                     item['ii_valor_devido'] = val
@@ -192,11 +179,11 @@ class HafelePDFParser:
             }
 
 # ==============================================================================
-# PARTE 2: PARSER APP 1 (DUIMP) - MANTIDO
+# PARTE 2: PARSER APP 1 - CORRIGIDO PARA LER QUANTIDADE COMERCIAL
 # ==============================================================================
 
 class DuimpPDFParser:
-    """Parser do App 1 (Mantido original)"""
+    """Parser do App 1 (Mantido original + Correção de Leitura)"""
     def __init__(self, file_stream):
         self.doc = fitz.open(stream=file_stream, filetype="pdf")
         self.full_text = ""
@@ -236,8 +223,11 @@ class DuimpPDFParser:
                 
                 item["ncm"] = self._regex(r"NCM:\s*([\d\.]+)", content)
                 item["paisOrigem"] = self._regex(r"País de origem:\s*\n?(.+)", content)
+                
+                # --- CORREÇÃO: LÊ AS DUAS QUANTIDADES ---
                 item["quantidade"] = self._regex(r"Quantidade na unidade estatística:\s*([\d\.,]+)", content)
                 item["quantidade_comercial"] = self._regex(r"Quantidade na unidade comercializada:\s*([\d\.,]+)", content)
+                
                 item["unidade"] = self._regex(r"Unidade estatística:\s*(.+)", content)
                 item["pesoLiq"] = self._regex(r"Peso líquido \(kg\):\s*([\d\.,]+)", content)
                 item["valorUnit"] = self._regex(r"Valor unitário na condição de venda:\s*([\d\.,]+)", content)
@@ -693,6 +683,8 @@ class XMLBuilder:
             val_total_venda_fmt = DataFormatter.format_high_precision(it.get("valorTotal", "0"), 11)
             val_unit_fmt = DataFormatter.format_high_precision(it.get("valorUnit", "0"), 20)
             
+            # --- CORREÇÃO: TAG <quantidade> USA A COMERCIAL DO APP 1 ---
+            # Se não achar a comercial, usa a estatística como fallback
             qtd_comercial_raw = it.get("quantidade_comercial")
             if not qtd_comercial_raw: qtd_comercial_raw = it.get("quantidade")
             
@@ -733,7 +725,7 @@ class XMLBuilder:
                 "numeroAdicao": str(it["numeroAdicao"])[-3:],
                 "numeroDUIMP": duimp_fmt,
                 "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
-                "dadosMercadoriaMedidaEstatisticaQuantidade": qtd_estatistica_fmt, 
+                "dadosMercadoriaMedidaEstatisticaQuantidade": qtd_estatistica_fmt, # MANTÉM ESTATÍSTICA
                 "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "").upper(),
                 "dadosMercadoriaPesoLiquido": peso_liq_fmt,
                 "condicaoVendaMoedaNome": it.get("moeda", "").upper(),
@@ -744,7 +736,7 @@ class XMLBuilder:
                 "paisOrigemMercadoriaNome": it.get("paisOrigem", "").upper(),
                 "paisAquisicaoMercadoriaNome": it.get("paisOrigem", "").upper(),
                 "descricaoMercadoria": final_desc,
-                "quantidade": qtd_comercial_fmt, 
+                "quantidade": qtd_comercial_fmt, # USA COMERCIAL
                 "unidadeMedida": it.get("unidade", "").upper(),
                 "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800"),
                 "fornecedorNome": supplier_data["fornecedorNome"][:60],
@@ -755,12 +747,8 @@ class XMLBuilder:
                 "seguroValorReais": seguro_fmt,
                 "iiBaseCalculo": ii_base_fmt,
                 "iiAliquotaAdValorem": ii_aliq_fmt,
-                
-                # --- CORREÇÃO: MAPEAR OS VALORES DE II PARA AS TAGS CORRETAS ---
-                "iiAliquotaValorCalculado": ii_val_fmt, # Mapeado!
                 "iiAliquotaValorDevido": ii_val_fmt,
                 "iiAliquotaValorRecolher": ii_val_fmt,
-                
                 "ipiAliquotaAdValorem": ipi_aliq_fmt,
                 "ipiAliquotaValorDevido": ipi_val_fmt,
                 "ipiAliquotaValorRecolher": ipi_val_fmt,
@@ -940,7 +928,6 @@ def main():
                     src_map = {}
                     for item in st.session_state["parsed_hafele"]['itens']:
                         try:
-                            # Garante que seja inteiro
                             idx = int(item['numero_item'])
                             src_map[idx] = item
                         except: pass
@@ -980,7 +967,6 @@ def main():
                                 
                                 count += 1
                         except Exception as e:
-                            # Continua para o próximo item se houver erro pontual
                             continue
                     
                     st.session_state["merged_df"] = df_dest
