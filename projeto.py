@@ -1,6 +1,6 @@
 import streamlit as st
-import fitz  # PyMuPDF (Para leitura do DUIMP - App 1)
-import pdfplumber # (Para leitura avançada do Häfele - App 2)
+import fitz  # PyMuPDF (App 1)
+import pdfplumber # (App 2)
 import re
 import pandas as pd
 import numpy as np
@@ -13,13 +13,13 @@ from typing import Dict, List, Optional, Any
 # ==============================================================================
 # CONFIGURAÇÃO GERAL
 # ==============================================================================
-st.set_page_config(page_title="Sistema Integrado DUIMP 2026 (Professional)", layout="wide")
+st.set_page_config(page_title="Sistema Integrado DUIMP 2026 (Final Pro)", layout="wide")
 
 st.markdown("""
 <style>
     .main-header { font-size: 2.2rem; color: #003366; font-weight: bold; margin-bottom: 1rem; border-bottom: 2px solid #003366; }
-    .stButton>button { width: 100%; border-radius: 5px; font-weight: bold; height: 3em; background-color: #003366; color: white; }
-    .success-box { background-color: #d4edda; color: #155724; padding: 10px; border-radius: 5px; border: 1px solid #c3e6cb; }
+    .stButton>button { width: 100%; border-radius: 5px; font-weight: bold; background-color: #003366; color: white; height: 3em; }
+    .success-box { background-color: #d4edda; color: #155724; padding: 15px; border-radius: 5px; margin: 10px 0; border: 1px solid #c3e6cb; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -28,13 +28,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==============================================================================
-# 1. PARSER APP 2 (HÄFELE) - ENGINE AVANÇADA COM CONTEXTO
+# 1. PARSER APP 2 (HÄFELE) - ENGINE DE VARREDURA REVERSA
 # ==============================================================================
 
 class HafelePDFParser:
     """
-    Parser avançado para PDFs da Häfele.
-    Utiliza estratégia de segmentação de texto por Item e por Tributo para garantir precisão.
+    Parser especializado para o layout Häfele onde valores antecedem os rótulos 
+    (ex: '531,00 Valor Devido') e tabelas são quebradas.
     """
     
     def __init__(self):
@@ -42,45 +42,33 @@ class HafelePDFParser:
         
     def parse_pdf(self, pdf_path: str) -> Dict:
         with pdfplumber.open(pdf_path) as pdf:
-            # Estratégia: Juntar todo o texto mantendo o layout visual
-            # Isso resolve o problema de tabelas que quebram de página
-            all_text_content = []
+            all_text = ""
             for page in pdf.pages:
-                # layout=True é CRUCIAL para tabelas complexas como a do seu PDF
+                # layout=True é essencial para manter a linha visual
                 text = page.extract_text(layout=True)
-                if text:
-                    # Remove rodapés de página para não sujar a regex
-                    text = re.sub(r'--- PAGE \d+ ---', '', text)
-                    all_text_content.append(text)
+                if text: all_text += text + "\n"
             
-            full_text = "\n".join(all_text_content)
-            self._process_full_text(full_text)
+            self._process_full_text(all_text)
             return self.documento
             
     def _process_full_text(self, text: str):
-        # O arquivo usa "ITENS DA DUIMP-XXXXX" como separador mestre dos itens
+        # Separador mestre dos itens
         chunks = re.split(r"ITENS DA DUIMP-(\d+)", text)
         
         items = []
         if len(chunks) > 1:
-            # chunks[0] = Cabeçalho geral
-            # chunks[1] = Numero Item 1, chunks[2] = Texto Item 1
-            # chunks[3] = Numero Item 2, chunks[4] = Texto Item 2...
             for i in range(1, len(chunks), 2):
                 try:
-                    item_num_str = chunks[i]
+                    item_num = int(chunks[i])
                     content = chunks[i+1]
-                    
-                    item_num = int(item_num_str)
                     item_data = self._parse_item_content(content, item_num)
                     items.append(item_data)
                 except Exception as e:
-                    logger.error(f"Erro processando bloco de item {i}: {e}")
+                    logger.error(f"Erro processando item {i}: {e}")
         
         self.documento['itens'] = items
     
     def _parse_item_content(self, text: str, item_num: int) -> Dict:
-        """Extrai dados de um único item isolado"""
         item = {
             'numero_item': item_num,
             'codigo_interno': '',
@@ -96,103 +84,118 @@ class HafelePDFParser:
         }
 
         # 1. CÓDIGO INTERNO
-        # Procura por "Código interno" seguido de qualquer caractere até achar números/pontos
+        # Procura "Código interno" seguido de quebras e o número
         code_match = re.search(r'Código interno[^\d\n]*([\d\.]+)', text, re.IGNORECASE)
         if code_match:
             item['codigo_interno'] = code_match.group(1).strip()
 
         # 2. DESCRIÇÃO COMPLEMENTAR
-        # Captura até encontrar uma palavra chave de parada (NCM, CONDIÇÃO, etc)
+        # Captura até encontrar uma palavra chave de parada
         desc_match = re.search(r'DESCRIÇÃO COMPLEMENTAR DA MERCADORIA\s*\n?(.*?)(?=\n|CONDIÇÃO|NCM)', text, re.IGNORECASE | re.DOTALL)
         if desc_match:
             raw_desc = desc_match.group(1).strip()
             item['descricao_complementar'] = re.sub(r'\s+', ' ', raw_desc)
 
         # 3. VALORES LOGÍSTICOS
-        # Regex robusta: Label + (lixo opcional) + Valor
-        item['frete_internacional'] = self._extract_value_robust(r'Frete Internac\.', text)
-        item['seguro_internacional'] = self._extract_value_robust(r'Seguro Internac\.', text)
-        item['local_aduaneiro'] = self._extract_value_robust(r'Local Aduaneiro', text)
+        # Estes geralmente seguem o padrão Label -> Valor
+        item['frete_internacional'] = self._extract_standard(r'Frete Internac\.', text)
+        item['seguro_internacional'] = self._extract_standard(r'Seguro Internac\.', text)
+        item['local_aduaneiro'] = self._extract_standard(r'Local Aduaneiro', text)
 
         # 4. IMPOSTOS (Lógica de Blocos Isolados)
-        # Recorta janelas de texto para garantir que dados não se misturem
         
-        # Encontra índices iniciais (Suporta '11' como erro de OCR para 'II')
+        # Identifica o início de cada bloco
         idx_ii = -1
-        match_ii = re.search(r'\b(II|11)\b', text) 
+        match_ii = re.search(r'\b(II|11)\b', text) # II ou 11
         if match_ii: idx_ii = match_ii.start()
         
         match_ipi = re.search(r'\bIPI\b', text)
         idx_ipi = match_ipi.start() if match_ipi else -1
         
-        # PIS pode confundir com outros textos ("PIS-IMPORTAÇÃO"), buscamos PIS isolado ou no contexto certo
         match_pis = re.search(r'\bPIS\b[\s\n-]', text)
         idx_pis = match_pis.start() if match_pis else -1
         
         match_cofins = re.search(r'\bCOFINS\b', text)
         idx_cofins = match_cofins.start() if match_cofins else -1
 
-        # Função para recortar o bloco de texto
         def get_block(start, potential_ends):
             if start == -1: return ""
             valid_ends = [x for x in potential_ends if x > start]
             end = min(valid_ends) if valid_ends else len(text)
             return text[start:end]
 
-        # Define as janelas de texto para cada imposto
+        # Recorta o texto
         block_ii = get_block(idx_ii, [idx_ipi, idx_pis, idx_cofins])
         block_ipi = get_block(idx_ipi, [idx_pis, idx_cofins])
         block_pis = get_block(idx_pis, [idx_cofins])
         block_cofins = text[idx_cofins:] if idx_cofins != -1 else ""
 
-        # Preenche os dados usando apenas o texto do bloco específico
-        self._populate_tax_from_block(item, 'ii', block_ii)
-        self._populate_tax_from_block(item, 'ipi', block_ipi)
-        self._populate_tax_from_block(item, 'pis', block_pis)
-        self._populate_tax_from_block(item, 'cofins', block_cofins)
+        # Preenche os dados usando a lógica REVERSA (Valor antes do Rótulo)
+        self._populate_tax(item, 'ii', block_ii)
+        self._populate_tax(item, 'ipi', block_ipi)
+        self._populate_tax(item, 'pis', block_pis)
+        self._populate_tax(item, 'cofins', block_cofins)
 
         return item
 
-    def _populate_tax_from_block(self, item: Dict, prefix: str, block: str):
+    def _populate_tax(self, item: Dict, prefix: str, block: str):
         if not block: return
         
-        # Busca Valor (Prioridade: Devido -> Recolher -> Calculado)
-        val = self._extract_value_robust(r'Valor Devido', block)
-        if val == 0: val = self._extract_value_robust(r'Valor A Recolher', block)
-        if val == 0: val = self._extract_value_robust(r'Valor Calculado', block)
+        # --- ESTRATÉGIA REVERSA (Valor ... Rótulo) ---
+        # Baseado no seu PDF: "3.318,7200000 Base de Cálculo..."
         
-        # Busca Base e Alíquota
-        base = self._extract_value_robust(r'Base de Cálculo', block)
-        if base == 0: base = self._extract_value_robust(r'Base de Calculo', block)
+        # Valor Devido
+        val = self._extract_reverse(r'Valor Devido', block)
+        if val == 0: val = self._extract_reverse(r'Valor A Recolher', block)
+        if val == 0: val = self._extract_reverse(r'Valor Calculado', block)
+        # Fallback para padrão normal
+        if val == 0: val = self._extract_standard(r'Valor Devido', block)
         
-        aliq = self._extract_value_robust(r'% Alíquota', block)
-        if aliq == 0: aliq = self._extract_value_robust(r'Ad Valorem', block)
+        # Base de Cálculo
+        base = self._extract_reverse(r'Base de Cálculo', block)
+        if base == 0: base = self._extract_reverse(r'Base de Calculo', block)
+        if base == 0: base = self._extract_standard(r'Base de Cálculo', block)
+        
+        # Alíquota
+        aliq = self._extract_reverse(r'% Alíquota', block)
+        if aliq == 0: aliq = self._extract_reverse(r'Ad Valorem', block)
+        if aliq == 0: aliq = self._extract_standard(r'% Alíquota', block)
 
         item[f'{prefix}_valor_devido'] = val
         item[f'{prefix}_base_calculo'] = base
         item[f'{prefix}_aliquota'] = aliq
 
-    def _extract_value_robust(self, label_pattern: str, text_block: str) -> float:
+    def _extract_reverse(self, label_pattern: str, text_block: str) -> float:
         """
-        Regex Profissional de Alta Permeabilidade:
-        Procura o Label, ignora qualquer caractere que não seja digito (quebras de linha, vírgulas soltas),
-        e captura o primeiro formato numérico válido (1.000,00 ou 1000,00).
+        Regex Invertida: Procura um número no INÍCIO da linha que contém o Rótulo.
+        Ex: "531,00 ... Valor Devido"
         """
         try:
-            # Pattern: Label ... (lixo, newlines, chars) ... (Numero)
-            # [^\d\n]*? -> Ignora caracteres não-digito de forma 'lazy'
-            # ([\d\.]*,\d+) -> Captura 1.234,56
-            regex = label_pattern + r'[^\d]*?([\d\.]*,\d+)'
-            match = re.search(regex, text_block, re.IGNORECASE | re.DOTALL)
+            # Procura: (Numero) ... (Lixo) ... (Label)
+            regex = r'([\d\.]*,\d+)[^\n]*?' + label_pattern
+            match = re.search(regex, text_block, re.IGNORECASE)
             
             if match:
-                val_str = match.group(1)
-                # Limpeza: remove pontos de milhar, troca vírgula decimal por ponto
-                clean_val = val_str.replace('.', '').replace(',', '.')
-                return float(clean_val)
+                return self._parse_valor(match.group(1))
             return 0.0
-        except:
+        except: return 0.0
+
+    def _extract_standard(self, label_pattern: str, text_block: str) -> float:
+        """Regex Padrão: Label ... (Numero)"""
+        try:
+            regex = label_pattern + r'[^\d\n]*?([\d\.]*,\d+)'
+            match = re.search(regex, text_block, re.IGNORECASE | re.DOTALL)
+            if match:
+                return self._parse_valor(match.group(1))
             return 0.0
+        except: return 0.0
+
+    def _parse_valor(self, valor_str: str) -> float:
+        if not valor_str: return 0.0
+        try:
+            clean = valor_str.replace('.', '').replace(',', '.')
+            return float(clean)
+        except: return 0.0
 
 class FinancialAnalyzer:
     def __init__(self, documento: Dict):
@@ -201,7 +204,7 @@ class FinancialAnalyzer:
         return pd.DataFrame(self.documento['itens'])
 
 # ==============================================================================
-# 2. PARSER APP 1 (DUIMP SISCOMEX) - MANTIDO INTACTO
+# 2. PARSER APP 1 (DUIMP SISCOMEX) - INTACTO
 # ==============================================================================
 
 class DuimpPDFParser:
@@ -353,7 +356,7 @@ class DataFormatter:
                 data["fornecedorLogradouro"] = street_part
         return data
 
-# LAYOUT OBRIGATÓRIO 8686 - MANTIDO
+# LAYOUT 8686 - MANTIDO
 ADICAO_FIELDS_ORDER = [
     {"tag": "acrescimo", "type": "complex", "children": [
         {"tag": "codigoAcrescimo", "default": "17"},
@@ -581,7 +584,7 @@ FOOTER_TAGS = {
 # ==============================================================================
 
 def main():
-    st.markdown('<div class="main-header">Sistema Unificado: DUIMP + Häfele (Ultimate Pro)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">Sistema Unificado 2026 (Final Pro)</div>', unsafe_allow_html=True)
 
     if "parsed_duimp" not in st.session_state: st.session_state["parsed_duimp"] = None
     if "parsed_hafele" not in st.session_state: st.session_state["parsed_hafele"] = None
@@ -648,7 +651,7 @@ def main():
                             if item_num in src_map:
                                 src = src_map[item_num]
                                 
-                                # CONCATENAÇÃO OBRIGATÓRIA
+                                # CONCATENAÇÃO
                                 cod_interno = src.get('codigo_interno', '')
                                 desc_comp = src.get('descricao_complementar', '')
                                 final_number = f"{cod_interno} - {desc_comp}" if desc_comp else cod_interno
