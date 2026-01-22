@@ -395,7 +395,7 @@ class PDFParser:
                 
                 item["ncm"] = self._regex(r"NCM:\s*([\d\.]+)", content)
                 item["paisOrigem"] = self._regex(r"País de origem:\s*\n?(.+)", content)
-                item["quantidade"] = self._regex(r"Quantidade na unidade estatística:\s*([\d\.,]+)", content)
+                item["quantidade"] = self._regex(r"Quantidade na unidade comercializada:\s*([\d\.,]+)", content)
                 item["unidade"] = self._regex(r"Unidade estatística:\s*(.+)", content)
                 item["pesoLiq"] = self._regex(r"Peso líquido \(kg\):\s*([\d\.,]+)", content)
                 item["valorUnit"] = self._regex(r"Valor unitário na condição de venda:\s*([\d\.,]+)", content)
