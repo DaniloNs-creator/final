@@ -195,8 +195,21 @@ class HafelePDFParser:
 # PARTE 2: PARSER APP 1 (DUIMP) - ALTERADO
 # ==============================================================================
 
+# --- FUNÇÃO SOLICITADA ---
+def montar_descricao_final(desc_complementar, codigo_extra, detalhamento):
+    """
+    Concatena: Descrição Complementar - Código - Detalhamento
+    Retorna string limpa, sem espaços desnecessários nas pontas.
+    """
+    parte1 = str(desc_complementar).strip()
+    parte2 = str(codigo_extra).strip()
+    parte3 = str(detalhamento).strip()
+    
+    return f"{parte1} - {parte2} - {parte3}"
+# -------------------------
+
 class DuimpPDFParser:
-    """Parser do App 1 (Mantido original + Correção Leitura Qtd Comercial + Concatenação Descrição)"""
+    """Parser do App 1 (Mantido original)"""
     def __init__(self, file_stream):
         self.doc = fitz.open(stream=file_stream, filetype="pdf")
         self.full_text = ""
@@ -226,25 +239,6 @@ class DuimpPDFParser:
         self.header["urf"] = self._regex(r"Unidade de despacho:\s*([\d]+)", txt)
         self.header["paisProcedencia"] = self._regex(r"País de Procedência:\s*\n?(.+)", txt)
 
-    def _get_concatenated_desc(self, content):
-        """
-        Função auxiliar para capturar e concatenar Detalhamento e Descrição Complementar.
-        """
-        # 1. Extrai Detalhamento do Produto
-        # O regex para no início dos próximos campos possíveis, incluindo Descrição complementar
-        det_match = re.search(r"Detalhamento do Produto:\s*(.+?)(?=\n\s*(?:Número de Identificação|Versão|Código de Class|Descrição complementar))", content, re.DOTALL)
-        desc_det = det_match.group(1).strip() if det_match else ""
-        
-        # 2. Extrai Descrição complementar
-        # O regex procura especificamente o campo e para nos próximos campos lógicos da DUIMP
-        comp_match = re.search(r"Descrição complementar:\s*(.+?)(?=\n\s*(?:Número de Identificação|Versão|Código de Class|Atributos|Dados da Mercadoria))", content, re.DOTALL)
-        desc_comp = comp_match.group(1).strip() if comp_match else ""
-        
-        # 3. Concatena os valores se existirem
-        if desc_det and desc_comp:
-            return f"{desc_det} - {desc_comp}"
-        return desc_det if desc_det else desc_comp
-
     def extract_items(self):
         chunks = re.split(r"Item\s+(\d+)", self.full_text)
         if len(chunks) > 1:
@@ -255,11 +249,8 @@ class DuimpPDFParser:
                 
                 item["ncm"] = self._regex(r"NCM:\s*([\d\.]+)", content)
                 item["paisOrigem"] = self._regex(r"País de origem:\s*\n?(.+)", content)
-                
-                # --- LÊ AS DUAS QUANTIDADES DO APP 1 ---
                 item["quantidade"] = self._regex(r"Quantidade na unidade estatística:\s*([\d\.,]+)", content)
                 item["quantidade_comercial"] = self._regex(r"Quantidade na unidade comercializada:\s*([\d\.,]+)", content)
-                
                 item["unidade"] = self._regex(r"Unidade estatística:\s*(.+)", content)
                 item["pesoLiq"] = self._regex(r"Peso líquido \(kg\):\s*([\d\.,]+)", content)
                 item["valorUnit"] = self._regex(r"Valor unitário na condição de venda:\s*([\d\.,]+)", content)
@@ -272,9 +263,14 @@ class DuimpPDFParser:
                 addr_match = re.search(r"Endereço:\s*(.+?)(?=\n\s*(?:Dados da Mercadoria|Aplicação))", content, re.DOTALL)
                 item["endereco_raw"] = addr_match.group(1).strip() if addr_match else ""
 
-                # --- ALTERAÇÃO AQUI: USO DA NOVA FUNÇÃO DE CONCATENAÇÃO ---
-                item["descricao"] = self._get_concatenated_desc(content)
+                desc_match = re.search(r"Detalhamento do Produto:\s*(.+?)(?=\n\s*(?:Número de Identificação|Versão|Código de Class|Descrição complementar))", content, re.DOTALL)
+                item["descricao"] = desc_match.group(1).strip() if desc_match else ""
                 
+                # --- ALTERAÇÃO AQUI: Captura da Descrição Complementar ---
+                compl_match = re.search(r"Descrição complementar da mercadoria:\s*(.+?)(?=\n|$)", content, re.DOTALL)
+                item["desc_complementar"] = compl_match.group(1).strip() if compl_match else ""
+                # --------------------------------------------------------
+
                 self.items.append(item)
 
     def _regex(self, pattern, text):
@@ -611,6 +607,78 @@ class DataFormatter:
                 data["fornecedorLogradouro"] = street_part
         return data
 
+class DuimpPDFParser:
+    """Parser do App 1 (Mantido original + Correção Leitura Qtd Comercial)"""
+    def __init__(self, file_stream):
+        self.doc = fitz.open(stream=file_stream, filetype="pdf")
+        self.full_text = ""
+        self.header = {}
+        self.items = []
+
+    def preprocess(self):
+        clean_lines = []
+        for page in self.doc:
+            text = page.get_text("text")
+            lines = text.split('\n')
+            for line in lines:
+                l_strip = line.strip()
+                if "Extrato da DUIMP" in l_strip: continue
+                if "Data, hora e responsável" in l_strip: continue
+                if re.match(r'^\d+\s*/\s*\d+$', l_strip): continue
+                clean_lines.append(line)
+        self.full_text = "\n".join(clean_lines)
+
+    def extract_header(self):
+        txt = self.full_text
+        self.header["numeroDUIMP"] = self._regex(r"Extrato da Duimp\s+([\w\-\/]+)", txt)
+        self.header["cnpj"] = self._regex(r"CNPJ do importador:\s*([\d\.\/\-]+)", txt)
+        self.header["nomeImportador"] = self._regex(r"Nome do importador:\s*\n?(.+)", txt)
+        self.header["pesoBruto"] = self._regex(r"Peso Bruto \(kg\):\s*([\d\.,]+)", txt)
+        self.header["pesoLiquido"] = self._regex(r"Peso Liquido \(kg\):\s*([\d\.,]+)", txt)
+        self.header["urf"] = self._regex(r"Unidade de despacho:\s*([\d]+)", txt)
+        self.header["paisProcedencia"] = self._regex(r"País de Procedência:\s*\n?(.+)", txt)
+
+    def extract_items(self):
+        chunks = re.split(r"Item\s+(\d+)", self.full_text)
+        if len(chunks) > 1:
+            for i in range(1, len(chunks), 2):
+                num = chunks[i]
+                content = chunks[i+1]
+                item = {"numeroAdicao": num}
+                
+                item["ncm"] = self._regex(r"NCM:\s*([\d\.]+)", content)
+                item["paisOrigem"] = self._regex(r"País de origem:\s*\n?(.+)", content)
+                
+                # --- LÊ AS DUAS QUANTIDADES DO APP 1 ---
+                item["quantidade"] = self._regex(r"Quantidade na unidade estatística:\s*([\d\.,]+)", content)
+                item["quantidade_comercial"] = self._regex(r"Quantidade na unidade comercializada:\s*([\d\.,]+)", content)
+                
+                item["unidade"] = self._regex(r"Unidade estatística:\s*(.+)", content)
+                item["pesoLiq"] = self._regex(r"Peso líquido \(kg\):\s*([\d\.,]+)", content)
+                item["valorUnit"] = self._regex(r"Valor unitário na condição de venda:\s*([\d\.,]+)", content)
+                item["valorTotal"] = self._regex(r"Valor total na condição de venda:\s*([\d\.,]+)", content)
+                item["moeda"] = self._regex(r"Moeda negociada:\s*(.+)", content)
+                
+                exp_match = re.search(r"Código do Exportador Estrangeiro:\s*(.+?)(?=\n\s*(?:Endereço|Dados))", content, re.DOTALL)
+                item["fornecedor_raw"] = exp_match.group(1).strip() if exp_match else ""
+                
+                addr_match = re.search(r"Endereço:\s*(.+?)(?=\n\s*(?:Dados da Mercadoria|Aplicação))", content, re.DOTALL)
+                item["endereco_raw"] = addr_match.group(1).strip() if addr_match else ""
+
+                desc_match = re.search(r"Detalhamento do Produto:\s*(.+?)(?=\n\s*(?:Número de Identificação|Versão|Código de Class|Descrição complementar))", content, re.DOTALL)
+                item["descricao"] = desc_match.group(1).strip() if desc_match else ""
+
+                # --- ALTERAÇÃO AQUI: Captura da Descrição Complementar ---
+                compl_match = re.search(r"Descrição complementar da mercadoria:\s*(.+?)(?=\n|$)", content, re.DOTALL)
+                item["desc_complementar"] = compl_match.group(1).strip() if compl_match else ""
+                # --------------------------------------------------------
+                
+                self.items.append(item)
+
+    def _regex(self, pattern, text):
+        match = re.search(pattern, text)
+        return match.group(1).strip() if match else ""
+
 class XMLBuilder:
     def __init__(self, parser, edited_items=None):
         self.p = parser
@@ -643,7 +711,11 @@ class XMLBuilder:
             
             input_number = str(it.get("NUMBER", "")).strip()
             original_desc = DataFormatter.clean_text(it.get("descricao", ""))
-            final_desc = f"{input_number} - {original_desc}" if input_number else original_desc
+            
+            # --- ALTERAÇÃO AQUI: Usando a nova função ---
+            desc_compl = DataFormatter.clean_text(it.get("desc_complementar", ""))
+            final_desc = montar_descricao_final(desc_compl, input_number, original_desc)
+            # --------------------------------------------
 
             val_total_venda_fmt = DataFormatter.format_high_precision(it.get("valorTotal", "0"), 11)
             val_unit_fmt = DataFormatter.format_high_precision(it.get("valorUnit", "0"), 20)
