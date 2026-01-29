@@ -1,4 +1,4 @@
-import streamlit as st
+Esse é o meu projeto. Em python nao quero que altere nada. Somente crie uma função no app1 que comcatena a descrição complementar com o detalhamento do produtos e entao o item ficara assim25088526 - 210 - 43323446 - COM EXTRACAO TOTAL E AMORTECEDOR E CARGA ATE 30 KG - PARA MOVEIS. Faça somente isso nao altere mais nads no meu projeto. import streamlit as st
 import fitz  # PyMuPDF
 import pdfplumber
 import re
