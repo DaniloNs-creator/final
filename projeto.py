@@ -16,9 +16,10 @@ from typing import Dict, List, Optional, Any
 st.set_page_config(page_title="Sistema Unificado 2026 (Pro)", layout="wide")
 
 # Estilos CSS
+# ALTERAÇÃO: Adicionado 'text-align: center;' em .main-header
 st.markdown("""
 <style>
-    .main-header { font-size: 2.5rem; color: #1E3A8A; font-weight: bold; margin-bottom: 1rem; }
+    .main-header { font-size: 2.5rem; color: #1E3A8A; font-weight: bold; margin-bottom: 1rem; text-align: center; }
     .sub-header { font-size: 1.5rem; color: #2563EB; margin-top: 1.5rem; border-bottom: 2px solid #E5E7EB; }
     .section-card { background: #FFFFFF; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 1rem; border: 1px solid #E5E7EB; }
     .success-box { background-color: #d1fae5; color: #065f46; padding: 10px; border-radius: 5px; margin: 10px 0; }
@@ -927,7 +928,12 @@ class XMLBuilder:
 # ==============================================================================
 
 def main():
-    st.markdown('<div class="main-header">Sistema Integrado DUIMP 2026</div>', unsafe_allow_html=True)
+    # ALTERAÇÃO: INSERÇÃO DA LOGO E CENTRALIZAÇÃO
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        st.image("https://github.com/DaniloNs-creator/final/blob/main/haefele_logo.png?raw=true", use_container_width=True)
+
+    st.markdown('<div class="main-header">Sistema Integrado DUIMP 2026 (Versão Final Restaurada)</div>', unsafe_allow_html=True)
 
     # Estado da Sessão
     if "parsed_duimp" not in st.session_state: st.session_state["parsed_duimp"] = None
