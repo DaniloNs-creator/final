@@ -137,6 +137,7 @@ class HafelePDFParser:
             if aduana_match: item['local_aduaneiro'] = self._parse_valor(aduana_match.group(1))
 
             # --- IMPOSTOS (REGEX MELHORADO) ---
+            # O ".*?" entre as palavras permite que haja sujeira ou quebras de linha entre os campos
             tax_patterns = re.findall(
                 r'Base de Cálculo.*?\(R\$\)\s*([\d\.,]+).*?% Alíquota\s*([\d\.,]+).*?Valor.*?(?:Devido|A Recolher|Calculado).*?\(R\$\)\s*([\d\.,]+)', 
                 text, 
@@ -194,13 +195,21 @@ class HafelePDFParser:
 # PARTE 2: PARSER APP 1 (DUIMP) - ALTERADO
 # ==============================================================================
 
+# --- FUNÇÃO SOLICITADA ---
 def montar_descricao_final(desc_complementar, codigo_extra, detalhamento):
+    """
+    Concatena: Descrição Complementar - Código - Detalhamento
+    Retorna string limpa, sem espaços desnecessários nas pontas.
+    """
     parte1 = str(desc_complementar).strip()
     parte2 = str(codigo_extra).strip()
     parte3 = str(detalhamento).strip()
+    
     return f"{parte1} - {parte2} - {parte3}"
+# -------------------------
 
 class DuimpPDFParser:
+    """Parser do App 1 (Mantido original)"""
     def __init__(self, file_stream):
         self.doc = fitz.open(stream=file_stream, filetype="pdf")
         self.full_text = ""
@@ -237,6 +246,7 @@ class DuimpPDFParser:
                 num = chunks[i]
                 content = chunks[i+1]
                 item = {"numeroAdicao": num}
+                
                 item["ncm"] = self._regex(r"NCM:\s*([\d\.]+)", content)
                 item["paisOrigem"] = self._regex(r"País de origem:\s*\n?(.+)", content)
                 item["quantidade"] = self._regex(r"Quantidade na unidade estatística:\s*([\d\.,]+)", content)
@@ -246,14 +256,21 @@ class DuimpPDFParser:
                 item["valorUnit"] = self._regex(r"Valor unitário na condição de venda:\s*([\d\.,]+)", content)
                 item["valorTotal"] = self._regex(r"Valor total na condição de venda:\s*([\d\.,]+)", content)
                 item["moeda"] = self._regex(r"Moeda negociada:\s*(.+)", content)
+                
                 exp_match = re.search(r"Código do Exportador Estrangeiro:\s*(.+?)(?=\n\s*(?:Endereço|Dados))", content, re.DOTALL)
                 item["fornecedor_raw"] = exp_match.group(1).strip() if exp_match else ""
+                
                 addr_match = re.search(r"Endereço:\s*(.+?)(?=\n\s*(?:Dados da Mercadoria|Aplicação))", content, re.DOTALL)
                 item["endereco_raw"] = addr_match.group(1).strip() if addr_match else ""
+
                 desc_match = re.search(r"Detalhamento do Produto:\s*(.+?)(?=\n\s*(?:Número de Identificação|Versão|Código de Class|Descrição complementar))", content, re.DOTALL)
                 item["descricao"] = desc_match.group(1).strip() if desc_match else ""
+                
+                # --- ALTERAÇÃO AQUI: Captura da Descrição Complementar ---
                 compl_match = re.search(r"Descrição complementar da mercadoria:\s*(.+?)(?=\n|$)", content, re.DOTALL)
                 item["desc_complementar"] = compl_match.group(1).strip() if compl_match else ""
+                # --------------------------------------------------------
+
                 self.items.append(item)
 
     def _regex(self, pattern, text):
@@ -408,7 +425,6 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "vinculoCompradorVendedor", "default": "Não há vinculação entre comprador e vendedor."}
 ]
 
-# FOOTER_TAGS ORIGINAL COM REFERÊNCIAS DINÂMICAS QUE VAMOS CRIAR
 FOOTER_TAGS = {
     "armazem": {"tag": "nomeArmazem", "default": "TCP"},
     "armazenamentoRecintoAduaneiroCodigo": "9801303",
@@ -516,43 +532,56 @@ class DataFormatter:
     def format_input_fiscal(value, length=15, is_percent=False):
         try:
             if isinstance(value, str):
-                value = value.replace('.', '').replace(',', '.')
+                value = value.replace('.', '')
+                value = value.replace(',', '.')
+            
             val_float = float(value)
             val_int = int(round(val_float * 100))
             return str(val_int).zfill(length)
-        except: return "0" * length
+        except:
+            return "0" * length
 
     @staticmethod
     def format_high_precision(value, length=15):
         try:
             if isinstance(value, str):
-                value = value.replace('.', '').replace(',', '.')
+                value = value.replace('.', '')
+                value = value.replace(',', '.')
+            
             val_float = float(value)
             val_int = int(round(val_float * 10000000))
             return str(val_int).zfill(length)
-        except: return "0" * length
+        except:
+            return "0" * length
 
     @staticmethod
     def format_quantity(value, length=14):
         try:
             if isinstance(value, str):
-                value = value.replace('.', '').replace(',', '.')
+                value = value.replace('.', '')
+                value = value.replace(',', '.')
+            
             val_float = float(value)
             val_int = int(round(val_float * 100000))
             return str(val_int).zfill(length)
-        except: return "0" * length
+        except:
+            return "0" * length
 
     @staticmethod
     def calculate_cbs_ibs(base_xml_string):
         try:
             base_int = int(base_xml_string)
             base_float = base_int / 100.0
+            
             cbs_val = base_float * 0.009
             cbs_str = str(int(round(cbs_val * 100))).zfill(14)
+            
             ibs_val = base_float * 0.001
             ibs_str = str(int(round(ibs_val * 100))).zfill(14)
+            
             return cbs_str, ibs_str
-        except: return "0".zfill(14), "0".zfill(14)
+        except:
+            return "0".zfill(14), "0".zfill(14)
 
     @staticmethod
     def parse_supplier_info(raw_name, raw_addr):
@@ -578,15 +607,86 @@ class DataFormatter:
                 data["fornecedorLogradouro"] = street_part
         return data
 
+class DuimpPDFParser:
+    """Parser do App 1 (Mantido original + Correção Leitura Qtd Comercial)"""
+    def __init__(self, file_stream):
+        self.doc = fitz.open(stream=file_stream, filetype="pdf")
+        self.full_text = ""
+        self.header = {}
+        self.items = []
+
+    def preprocess(self):
+        clean_lines = []
+        for page in self.doc:
+            text = page.get_text("text")
+            lines = text.split('\n')
+            for line in lines:
+                l_strip = line.strip()
+                if "Extrato da DUIMP" in l_strip: continue
+                if "Data, hora e responsável" in l_strip: continue
+                if re.match(r'^\d+\s*/\s*\d+$', l_strip): continue
+                clean_lines.append(line)
+        self.full_text = "\n".join(clean_lines)
+
+    def extract_header(self):
+        txt = self.full_text
+        self.header["numeroDUIMP"] = self._regex(r"Extrato da Duimp\s+([\w\-\/]+)", txt)
+        self.header["cnpj"] = self._regex(r"CNPJ do importador:\s*([\d\.\/\-]+)", txt)
+        self.header["nomeImportador"] = self._regex(r"Nome do importador:\s*\n?(.+)", txt)
+        self.header["pesoBruto"] = self._regex(r"Peso Bruto \(kg\):\s*([\d\.,]+)", txt)
+        self.header["pesoLiquido"] = self._regex(r"Peso Liquido \(kg\):\s*([\d\.,]+)", txt)
+        self.header["urf"] = self._regex(r"Unidade de despacho:\s*([\d]+)", txt)
+        self.header["paisProcedencia"] = self._regex(r"País de Procedência:\s*\n?(.+)", txt)
+
+    def extract_items(self):
+        chunks = re.split(r"Item\s+(\d+)", self.full_text)
+        if len(chunks) > 1:
+            for i in range(1, len(chunks), 2):
+                num = chunks[i]
+                content = chunks[i+1]
+                item = {"numeroAdicao": num}
+                
+                item["ncm"] = self._regex(r"NCM:\s*([\d\.]+)", content)
+                item["paisOrigem"] = self._regex(r"País de origem:\s*\n?(.+)", content)
+                
+                # --- LÊ AS DUAS QUANTIDADES DO APP 1 ---
+                item["quantidade"] = self._regex(r"Quantidade na unidade estatística:\s*([\d\.,]+)", content)
+                item["quantidade_comercial"] = self._regex(r"Quantidade na unidade comercializada:\s*([\d\.,]+)", content)
+                
+                item["unidade"] = self._regex(r"Unidade estatística:\s*(.+)", content)
+                item["pesoLiq"] = self._regex(r"Peso líquido \(kg\):\s*([\d\.,]+)", content)
+                item["valorUnit"] = self._regex(r"Valor unitário na condição de venda:\s*([\d\.,]+)", content)
+                item["valorTotal"] = self._regex(r"Valor total na condição de venda:\s*([\d\.,]+)", content)
+                item["moeda"] = self._regex(r"Moeda negociada:\s*(.+)", content)
+                
+                exp_match = re.search(r"Código do Exportador Estrangeiro:\s*(.+?)(?=\n\s*(?:Endereço|Dados))", content, re.DOTALL)
+                item["fornecedor_raw"] = exp_match.group(1).strip() if exp_match else ""
+                
+                addr_match = re.search(r"Endereço:\s*(.+?)(?=\n\s*(?:Dados da Mercadoria|Aplicação))", content, re.DOTALL)
+                item["endereco_raw"] = addr_match.group(1).strip() if addr_match else ""
+
+                desc_match = re.search(r"Detalhamento do Produto:\s*(.+?)(?=\n\s*(?:Número de Identificação|Versão|Código de Class|Descrição complementar))", content, re.DOTALL)
+                item["descricao"] = desc_match.group(1).strip() if desc_match else ""
+
+                # --- ALTERAÇÃO AQUI: Captura da Descrição Complementar ---
+                compl_match = re.search(r"Descrição complementar da mercadoria:\s*(.+?)(?=\n|$)", content, re.DOTALL)
+                item["desc_complementar"] = compl_match.group(1).strip() if compl_match else ""
+                # --------------------------------------------------------
+                
+                self.items.append(item)
+
+    def _regex(self, pattern, text):
+        match = re.search(pattern, text)
+        return match.group(1).strip() if match else ""
+
 class XMLBuilder:
-    def __init__(self, parser, edited_items=None, manual_data=None):
+    def __init__(self, parser, edited_items=None):
         self.p = parser
         self.items_to_use = edited_items if edited_items else self.p.items
-        self.manual_data = manual_data # RECEBENDO OS INPUTS DA TELA
         self.root = etree.Element("ListaDeclaracoes")
         self.duimp = etree.SubElement(self.root, "duimp")
 
-    def build(self):
+    def build(self, user_inputs=None):
         h = self.p.header
         duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
         
@@ -599,43 +699,114 @@ class XMLBuilder:
             except: return 0.0
 
         for it in self.items_to_use:
+            totals["frete"] += get_float(it.get("Frete (R$)", 0))
+            totals["seguro"] += get_float(it.get("Seguro (R$)", 0))
+            totals["ii"] += get_float(it.get("II (R$)", 0))
+            totals["ipi"] += get_float(it.get("IPI (R$)", 0))
+            totals["pis"] += get_float(it.get("PIS (R$)", 0))
+            totals["cofins"] += get_float(it.get("COFINS (R$)", 0))
+
+        for it in self.items_to_use:
             adicao = etree.SubElement(self.duimp, "adicao")
+            
             input_number = str(it.get("NUMBER", "")).strip()
             original_desc = DataFormatter.clean_text(it.get("descricao", ""))
+            
+            # --- ALTERAÇÃO AQUI: Usando a nova função ---
             desc_compl = DataFormatter.clean_text(it.get("desc_complementar", ""))
             final_desc = montar_descricao_final(desc_compl, input_number, original_desc)
+            # --------------------------------------------
 
             val_total_venda_fmt = DataFormatter.format_high_precision(it.get("valorTotal", "0"), 11)
             val_unit_fmt = DataFormatter.format_high_precision(it.get("valorUnit", "0"), 20)
-            qtd_comercial_fmt = DataFormatter.format_quantity(it.get("quantidade_comercial") or it.get("quantidade"), 14)
+            
+            qtd_comercial_raw = it.get("quantidade_comercial")
+            if not qtd_comercial_raw: qtd_comercial_raw = it.get("quantidade")
+            
+            qtd_comercial_fmt = DataFormatter.format_quantity(qtd_comercial_raw, 14)
             qtd_estatistica_fmt = DataFormatter.format_quantity(it.get("quantidade"), 14)
+
             peso_liq_fmt = DataFormatter.format_quantity(it.get("pesoLiq"), 15)
             base_total_reais_fmt = DataFormatter.format_input_fiscal(it.get("valorTotal", "0"), 15)
             
+            raw_frete = get_float(it.get("Frete (R$)", 0))
+            raw_seguro = get_float(it.get("Seguro (R$)", 0))
+            raw_aduaneiro = get_float(it.get("Aduaneiro (R$)", 0))
+            
+            frete_fmt = DataFormatter.format_input_fiscal(raw_frete)
+            seguro_fmt = DataFormatter.format_input_fiscal(raw_seguro)
+            aduaneiro_fmt = DataFormatter.format_input_fiscal(raw_aduaneiro)
+
+            ii_base_fmt = DataFormatter.format_input_fiscal(it.get("II Base (R$)", 0))
+            ii_aliq_fmt = DataFormatter.format_input_fiscal(it.get("II Alíq. (%)", 0), 5, True)
             ii_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("II (R$)", 0)))
+
+            ipi_aliq_fmt = DataFormatter.format_input_fiscal(it.get("IPI Alíq. (%)", 0), 5, True)
             ipi_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("IPI (R$)", 0)))
+
+            pis_base_fmt = DataFormatter.format_input_fiscal(it.get("PIS Base (R$)", 0))
+            pis_aliq_fmt = DataFormatter.format_input_fiscal(it.get("PIS Alíq. (%)", 0), 5, True)
             pis_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("PIS (R$)", 0)))
+
+            cofins_aliq_fmt = DataFormatter.format_input_fiscal(it.get("COFINS Alíq. (%)", 0), 5, True)
             cofins_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("COFINS (R$)", 0)))
 
-            icms_base_valor = DataFormatter.format_input_fiscal(it.get("II Base (R$)", 0)) if get_float(it.get("II Base (R$)", 0)) > 0 else base_total_reais_fmt
+            icms_base_valor = ii_base_fmt if int(ii_base_fmt) > 0 else base_total_reais_fmt
             cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
+            
             supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"), it.get("endereco_raw"))
 
             extracted_map = {
                 "numeroAdicao": str(it["numeroAdicao"])[-3:],
                 "numeroDUIMP": duimp_fmt,
                 "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
-                "dadosMercadoriaMedidaEstatisticaQuantidade": qtd_estatistica_fmt,
+                "dadosMercadoriaMedidaEstatisticaQuantidade": qtd_estatistica_fmt, 
+                "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "").upper(),
                 "dadosMercadoriaPesoLiquido": peso_liq_fmt,
+                "condicaoVendaMoedaNome": it.get("moeda", "").upper(),
+                "valorTotalCondicaoVenda": val_total_venda_fmt,
+                "valorUnitario": val_unit_fmt,
+                "condicaoVendaValorMoeda": base_total_reais_fmt,
+                "condicaoVendaValorReais": aduaneiro_fmt if int(aduaneiro_fmt) > 0 else base_total_reais_fmt,
+                "paisOrigemMercadoriaNome": it.get("paisOrigem", "").upper(),
+                "paisAquisicaoMercadoriaNome": it.get("paisOrigem", "").upper(),
                 "descricaoMercadoria": final_desc,
-                "quantidade": qtd_comercial_fmt,
+                "quantidade": qtd_comercial_fmt, 
+                "unidadeMedida": it.get("unidade", "").upper(),
+                "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800"),
+                "fornecedorNome": supplier_data["fornecedorNome"][:60],
+                "fornecedorLogradouro": supplier_data["fornecedorLogradouro"][:60],
+                "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
+                "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
+                "freteValorReais": frete_fmt,
+                "seguroValorReais": seguro_fmt,
+                "iiBaseCalculo": ii_base_fmt,
+                "iiAliquotaAdValorem": ii_aliq_fmt,
+                
+                # --- CORREÇÃO: MAPEAR OS VALORES DE II PARA AS TAGS CORRETAS ---
+                "iiAliquotaValorCalculado": ii_val_fmt, # Mapeado!
                 "iiAliquotaValorDevido": ii_val_fmt,
+                "iiAliquotaValorRecolher": ii_val_fmt,
+                
+                "ipiAliquotaAdValorem": ipi_aliq_fmt,
                 "ipiAliquotaValorDevido": ipi_val_fmt,
+                "ipiAliquotaValorRecolher": ipi_val_fmt,
+                "pisCofinsBaseCalculoValor": pis_base_fmt,
+                "pisPasepAliquotaAdValorem": pis_aliq_fmt,
                 "pisPasepAliquotaValorDevido": pis_val_fmt,
+                "pisPasepAliquotaValorRecolher": pis_val_fmt,
+                "cofinsAliquotaAdValorem": cofins_aliq_fmt,
                 "cofinsAliquotaValorDevido": cofins_val_fmt,
+                "cofinsAliquotaValorRecolher": cofins_val_fmt,
+                "icmsBaseCalculoValor": icms_base_valor,
+                "icmsBaseCalculoAliquota": "01800",
+                "cbsIbsClasstrib": "000001",
+                "cbsBaseCalculoValor": icms_base_valor,
+                "cbsBaseCalculoAliquota": "00090",
                 "cbsBaseCalculoValorImposto": cbs_imposto,
+                "ibsBaseCalculoValor": icms_base_valor,
+                "ibsBaseCalculoAliquota": "00010",
                 "ibsBaseCalculoValorImposto": ibs_imposto
-                # ... outros mapeamentos ...
             }
 
             for field in ADICAO_FIELDS_ORDER:
@@ -650,40 +821,90 @@ class XMLBuilder:
                     val = extracted_map.get(tag_name, field["default"])
                     etree.SubElement(adicao, tag_name).text = val
 
-        # --- AQUI ESTÁ O QUE VOCÊ PEDIU: USO DOS INPUTS MANUAIS ---
-        m = self.manual_data
-        
-        # Mapeando os campos do FOOTER com os inputs da tela
+        peso_bruto_fmt = DataFormatter.format_quantity(h.get("pesoBruto"), 15)
+        peso_liq_total_fmt = DataFormatter.format_quantity(h.get("pesoLiquido"), 15)
+
         footer_map = {
             "numeroDUIMP": duimp_fmt,
-            "cargaPesoBruto": DataFormatter.format_number(m['peso_bruto']),
-            "cargaPesoLiquido": DataFormatter.format_number(m['peso_liquido']),
-            "cargaDataChegada": m['data_chegada'].replace("-","").replace("/",""),
-            "dataDesembaraco": m['data_desemb'].replace("-","").replace("/",""),
-            "dataRegistro": m['data_reg'].replace("-","").replace("/",""),
-            "conhecimentoCargaEmbarqueData": m['data_embarque'].replace("-","").replace("/",""),
-            "localDescargaTotalDolares": DataFormatter.format_input_fiscal(m['desc_usd']),
-            "localDescargaTotalReais": DataFormatter.format_input_fiscal(m['desc_brl']),
-            "localEmbarqueTotalDolares": DataFormatter.format_input_fiscal(m['emb_usd']),
-            "localEmbarqueTotalReais": DataFormatter.format_input_fiscal(m['emb_brl']),
+            "importadorNome": h.get("nomeImportador", ""),
+            "importadorNumero": DataFormatter.format_number(h.get("cnpj"), 14),
+            "cargaPesoBruto": peso_bruto_fmt,
+            "cargaPesoLiquido": peso_liq_total_fmt,
+            "cargaPaisProcedenciaNome": h.get("paisProcedencia", "").upper(),
+            "totalAdicoes": str(len(self.items_to_use)).zfill(3),
+            "freteTotalReais": DataFormatter.format_input_fiscal(totals["frete"]),
+            "seguroTotalReais": DataFormatter.format_input_fiscal(totals["seguro"]),
         }
 
+        # --- PROCESSAMENTO DOS CAMPOS MANUAIS (SUBSTITUIÇÃO) ---
+        if user_inputs:
+            # Substitui Datas
+            footer_map["cargaDataChegada"] = user_inputs.get("cargaDataChegada", "20251120")
+            footer_map["dataDesembaraco"] = user_inputs.get("dataDesembaraco", "20251124")
+            footer_map["dataRegistro"] = user_inputs.get("dataRegistro", "20251124")
+            footer_map["conhecimentoCargaEmbarqueData"] = user_inputs.get("conhecimentoCargaEmbarqueData", "20251025")
+            
+            # Substitui Pesos
+            footer_map["cargaPesoBruto"] = user_inputs.get("cargaPesoBruto", peso_bruto_fmt)
+            footer_map["cargaPesoLiquido"] = user_inputs.get("cargaPesoLiquido", peso_liq_total_fmt)
+
+            # Substitui Locais
+            footer_map["localDescargaTotalDolares"] = user_inputs.get("localDescargaTotalDolares", "000000000000000")
+            footer_map["localDescargaTotalReais"] = user_inputs.get("localDescargaTotalReais", "000000000000000")
+            footer_map["localEmbarqueTotalDolares"] = user_inputs.get("localEmbarqueTotalDolares", "000000000000000")
+            footer_map["localEmbarqueTotalReais"] = user_inputs.get("localEmbarqueTotalReais", "000000000000000")
+
+        receita_codes = [
+            {"code": "0086", "val": totals["ii"]},
+            {"code": "1038", "val": totals["ipi"]},
+            {"code": "5602", "val": totals["pis"]},
+            {"code": "5629", "val": totals["cofins"]}
+        ]
+
+        # Adiciona 7811 se houver valor no input
+        if user_inputs and user_inputs.get("valorReceita7811", "0") != "0":
+             receita_codes.append({"code": "7811", "val": float(user_inputs.get("valorReceita7811"))})
+
         for tag, default_val in FOOTER_TAGS.items():
-            if tag == "pagamento":
-                # SISCOMEX 7811 USANDO INPUTS
-                pag = etree.SubElement(self.duimp, "pagamento")
-                etree.SubElement(pag, "agenciaPagamento").text = str(m['agencia'])
-                etree.SubElement(pag, "bancoPagamento").text = str(m['banco'])
-                etree.SubElement(pag, "codigoReceita").text = str(m['receita_cod'])
-                etree.SubElement(pag, "valorReceita").text = DataFormatter.format_input_fiscal(m['receita_val'])
+            # Override para QuantidadeVolume dentro de Embalagem
+            if tag == "embalagem" and user_inputs:
+                parent = etree.SubElement(self.duimp, tag)
+                for subfield in default_val:
+                    val_to_use = subfield["default"]
+                    if subfield["tag"] == "quantidadeVolume":
+                        val_to_use = user_inputs.get("quantidadeVolume", val_to_use)
+                    etree.SubElement(parent, subfield["tag"]).text = val_to_use
                 continue
 
-            if tag == "embalagem":
-                # QUANTIDADE VOLUME USANDO INPUT
-                parent = etree.SubElement(self.duimp, tag)
-                etree.SubElement(parent, "codigoTipoEmbalagem").text = "60"
-                etree.SubElement(parent, "nomeEmbalagem").text = "PALLETS"
-                etree.SubElement(parent, "quantidadeVolume").text = str(m['qtd_volume']).zfill(5)
+            if tag == "pagamento":
+                agencia = "3715"
+                banco = "341"
+                if user_inputs:
+                    agencia = user_inputs.get("agenciaPagamento", "3715")
+                    banco = user_inputs.get("bancoPagamento", "341")
+
+                for rec in receita_codes:
+                    if rec["val"] > 0:
+                        pag = etree.SubElement(self.duimp, "pagamento")
+                        etree.SubElement(pag, "agenciaPagamento").text = agencia
+                        etree.SubElement(pag, "bancoPagamento").text = banco
+                        etree.SubElement(pag, "codigoReceita").text = rec["code"]
+                        # Se for 7811, pega direto, senão formata do calculado
+                        if rec["code"] == "7811" and user_inputs:
+                             etree.SubElement(pag, "valorReceita").text = user_inputs.get("valorReceita7811").zfill(15)
+                        else:
+                             etree.SubElement(pag, "valorReceita").text = DataFormatter.format_input_fiscal(rec["val"])
+                continue
+
+            # Override direto para tags simples que estão no footer_map
+            if tag in footer_map:
+                val = footer_map[tag]
+                etree.SubElement(self.duimp, tag).text = val
+                continue
+
+            # Override direto se a tag estiver no user_inputs e não no footer_map (ex: dataRegistro)
+            if user_inputs and tag in user_inputs:
+                etree.SubElement(self.duimp, tag).text = user_inputs[tag]
                 continue
 
             if isinstance(default_val, list):
@@ -697,84 +918,288 @@ class XMLBuilder:
                 val = footer_map.get(tag, default_val)
                 etree.SubElement(self.duimp, tag).text = val
         
-        xml_content = etree.tostring(self.root, pretty_print=True, encoding="UTF-8")
-        return b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml_content
+        xml_content = etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=False)
+        header = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        return header + xml_content
 
 # ==============================================================================
 # MAIN APP - INTEGRAÇÃO FINAL
 # ==============================================================================
 
 def main():
-    st.markdown('<div class="main-header">Sistema Integrado DUIMP 2026</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">Sistema Integrado DUIMP 2026 (Versão Final Restaurada)</div>', unsafe_allow_html=True)
 
+    # Estado da Sessão
     if "parsed_duimp" not in st.session_state: st.session_state["parsed_duimp"] = None
+    if "parsed_hafele" not in st.session_state: st.session_state["parsed_hafele"] = None
     if "merged_df" not in st.session_state: st.session_state["merged_df"] = None
 
-    tab1, tab2, tab3 = st.tabs(["📂 Upload", "📋 Conferência", "💾 Exportar XML"])
+    # Abas
+    tab1, tab2, tab3 = st.tabs(["📂 Upload e Vinculação", "📋 Conferência Detalhada", "💾 Exportar XML"])
 
     with tab1:
-        file_duimp = st.file_uploader("Arquivo DUIMP (.pdf)", type="pdf")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown('<div class="section-card">', unsafe_allow_html=True)
+            st.info("Passo 1: Carregue o Extrato DUIMP (Siscomex)")
+            file_duimp = st.file_uploader("Arquivo DUIMP (.pdf)", type="pdf", key="u1")
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+        with col2:
+            st.markdown('<div class="section-card">', unsafe_allow_html=True)
+            st.info("Passo 2: Carregue o Relatório Häfele (ou Extrato Detalhado)")
+            file_hafele = st.file_uploader("Arquivo APP2 (.pdf)", type="pdf", key="u2")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # Processamento DUIMP (APP 1)
         if file_duimp:
-            p = DuimpPDFParser(file_duimp.read())
-            p.preprocess(); p.extract_header(); p.extract_items()
-            st.session_state["parsed_duimp"] = p
-            st.session_state["merged_df"] = pd.DataFrame(p.items)
-            st.success("DUIMP carregada.")
+            if st.session_state["parsed_duimp"] is None or file_duimp.name != getattr(st.session_state.get("last_duimp"), "name", ""):
+                try:
+                    p = DuimpPDFParser(file_duimp.read())
+                    p.preprocess()
+                    p.extract_header()
+                    p.extract_items()
+                    st.session_state["parsed_duimp"] = p
+                    st.session_state["last_duimp"] = file_duimp
+                    
+                    # DataFrame Base
+                    df = pd.DataFrame(p.items)
+                    cols_fiscais = [
+                        "NUMBER", "Frete (R$)", "Seguro (R$)", 
+                        "II (R$)", "II Base (R$)", "II Alíq. (%)",
+                        "IPI (R$)", "IPI Base (R$)", "IPI Alíq. (%)",
+                        "PIS (R$)", "PIS Base (R$)", "PIS Alíq. (%)",
+                        "COFINS (R$)", "COFINS Base (R$)", "COFINS Alíq. (%)",
+                        "Aduaneiro (R$)"
+                    ]
+                    for col in cols_fiscais:
+                        df[col] = 0.00 if col != "NUMBER" else ""
+                    
+                    st.session_state["merged_df"] = df
+                    st.markdown(f'<div class="success-box">✅ DUIMP Lida com Sucesso! {len(p.items)} adições encontradas.</div>', unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"Erro ao ler DUIMP: {e}")
+
+        # Processamento Häfele (APP 2 - NOVO PARSER BLINDADO)
+        if file_hafele and st.session_state["parsed_hafele"] is None:
+            # Salva temporariamente para o pdfplumber abrir
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                tmp.write(file_hafele.getvalue())
+                tmp_path = tmp.name
+            
+            try:
+                parser_h = HafelePDFParser()
+                doc_h = parser_h.parse_pdf(tmp_path)
+                st.session_state["parsed_hafele"] = doc_h
+                
+                qtd_itens = len(doc_h['itens'])
+                if qtd_itens > 0:
+                    st.markdown(f'<div class="success-box">✅ APP2 (Extrato) Lido com Sucesso! {qtd_itens} itens encontrados.</div>', unsafe_allow_html=True)
+                else:
+                    st.warning("O PDF foi lido, mas nenhum item 'ITENS DA DUIMP' foi identificado automaticamente. Verifique se o PDF está no layout padrão.")
+                    
+            except Exception as e:
+                st.error(f"Erro ao ler APP2: {e}")
+            finally:
+                # Remove o arquivo temporário
+                if os.path.exists(tmp_path): 
+                    try:
+                        os.unlink(tmp_path)
+                    except: pass
+
+        st.divider()
+
+        # Botão de Vinculação
+        if st.button("🔗 VINCULAR DADOS (Cruzamento Automático)", type="primary", use_container_width=True):
+            if st.session_state["merged_df"] is not None and st.session_state["parsed_hafele"] is not None:
+                try:
+                    df_dest = st.session_state["merged_df"].copy()
+                    
+                    # Mapear itens do Häfele pelo numero_item (INT)
+                    src_map = {}
+                    for item in st.session_state["parsed_hafele"]['itens']:
+                        try:
+                            # Garante que seja inteiro
+                            idx = int(item['numero_item'])
+                            src_map[idx] = item
+                        except: pass
+                    
+                    count = 0
+                    for idx, row in df_dest.iterrows():
+                        try:
+                            # Tenta converter numeroAdicao para int para garantir match
+                            raw_num = str(row['numeroAdicao']).strip()
+                            item_num = int(raw_num)
+                            
+                            if item_num in src_map:
+                                src = src_map[item_num]
+                                
+                                # Preenchimento dos campos mapeados
+                                df_dest.at[idx, 'NUMBER'] = src.get('codigo_interno', '')
+                                
+                                df_dest.at[idx, 'Frete (R$)'] = src.get('frete_internacional', 0.0)
+                                df_dest.at[idx, 'Seguro (R$)'] = src.get('seguro_internacional', 0.0)
+                                df_dest.at[idx, 'Aduaneiro (R$)'] = src.get('local_aduaneiro', 0.0)
+                                
+                                df_dest.at[idx, 'II (R$)'] = src.get('ii_valor_devido', 0.0)
+                                df_dest.at[idx, 'II Base (R$)'] = src.get('ii_base_calculo', 0.0)
+                                df_dest.at[idx, 'II Alíq. (%)'] = src.get('ii_aliquota', 0.0)
+                                
+                                df_dest.at[idx, 'IPI (R$)'] = src.get('ipi_valor_devido', 0.0)
+                                df_dest.at[idx, 'IPI Base (R$)'] = src.get('ipi_base_calculo', 0.0)
+                                df_dest.at[idx, 'IPI Alíq. (%)'] = src.get('ipi_aliquota', 0.0)
+                                
+                                df_dest.at[idx, 'PIS (R$)'] = src.get('pis_valor_devido', 0.0)
+                                df_dest.at[idx, 'PIS Base (R$)'] = src.get('pis_base_calculo', 0.0)
+                                df_dest.at[idx, 'PIS Alíq. (%)'] = src.get('pis_aliquota', 0.0)
+                                
+                                df_dest.at[idx, 'COFINS (R$)'] = src.get('cofins_valor_devido', 0.0)
+                                df_dest.at[idx, 'COFINS Base (R$)'] = src.get('cofins_base_calculo', 0.0)
+                                df_dest.at[idx, 'COFINS Alíq. (%)'] = src.get('cofins_aliquota', 0.0)
+                                
+                                count += 1
+                        except Exception as e:
+                            # Continua para o próximo item se houver erro pontual
+                            continue
+                    
+                    st.session_state["merged_df"] = df_dest
+                    st.success(f"Sucesso! {count} itens foram vinculados e preenchidos.")
+                    
+                except Exception as e:
+                    st.error(f"Erro na vinculação: {e}")
+            else:
+                st.warning("Carregue os dois arquivos antes de vincular.")
 
     with tab2:
+        st.subheader("Conferência e Edição")
         if st.session_state["merged_df"] is not None:
-            st.session_state["merged_df"] = st.data_editor(st.session_state["merged_df"], use_container_width=True)
-
-    with tab3:
-        st.subheader("🛠️ Informações Complementares do XML")
-        # --- OS CAMPOS DE INPUT QUE VOCÊ PEDIU ---
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.write("**QUANTIDADE**")
-            manual_qtd_volume = st.text_input("Quantidade Volume", "00001")
-            
-            st.write("**SISCOMEX 7811**")
-            manual_agencia = st.text_input("Agência Pagamento", "3715")
-            manual_banco = st.text_input("Banco Pagamento", "341")
-            manual_receita_cod = st.text_input("Código Receita", "7811")
-            manual_receita_val = st.text_input("Valor Receita", "0.00")
-
-        with c2:
-            st.write("**DATAS**")
-            manual_dt_chegada = st.text_input("Data Chegada", "20251120")
-            manual_dt_desemb = st.text_input("Data Desembaraço", "20251124")
-            manual_dt_reg = st.text_input("Data Registro", "20251124")
-            manual_dt_embarque = st.text_input("Data Embarque Carga", "20251025")
-
-        with c3:
-            st.write("**PESO**")
-            manual_peso_bruto = st.text_input("Carga Peso Bruto", "000002114187000")
-            manual_peso_liq = st.text_input("Carga Peso Líquido", "000002114187000")
-            
-            st.write("**VALORES TOTAIS**")
-            manual_desc_usd = st.text_input("Local Descarga Dólares", "0.00")
-            manual_desc_brl = st.text_input("Local Descarga Reais", "0.00")
-            manual_emb_usd = st.text_input("Local Embarque Dólares", "0.00")
-            manual_emb_brl = st.text_input("Local Embarque Reais", "0.00")
-
-        if st.button("Gerar XML Final", type="primary"):
-            # Empacotando os dados manuais
-            manual_data = {
-                'qtd_volume': manual_qtd_volume, 'agencia': manual_agencia, 'banco': manual_banco,
-                'receita_cod': manual_receita_cod, 'receita_val': manual_receita_val,
-                'data_chegada': manual_dt_chegada, 'data_desemb': manual_dt_desemb,
-                'data_reg': manual_dt_reg, 'data_embarque': manual_dt_embarque,
-                'peso_bruto': manual_peso_bruto, 'peso_liquido': manual_peso_liq,
-                'desc_usd': manual_desc_usd, 'desc_brl': manual_desc_brl,
-                'emb_usd': manual_emb_usd, 'emb_brl': manual_emb_brl
+            col_config = {
+                "numeroAdicao": st.column_config.TextColumn("Item", width="small", disabled=True),
+                "NUMBER": st.column_config.TextColumn("Código Interno", width="medium"),
+                "Frete (R$)": st.column_config.NumberColumn(format="R$ %.2f"),
+                "Seguro (R$)": st.column_config.NumberColumn(format="R$ %.2f"),
+                "II (R$)": st.column_config.NumberColumn(label="II Vlr", format="R$ %.2f"),
             }
             
-            builder = XMLBuilder(st.session_state["parsed_duimp"], 
-                                edited_items=st.session_state["merged_df"].to_dict('records'),
-                                manual_data=manual_data)
+            # 1. Edição pelo Usuário
+            edited_df = st.data_editor(
+                st.session_state["merged_df"],
+                hide_index=True,
+                column_config=col_config,
+                use_container_width=True,
+                height=600
+            )
+
+            # 2. Recálculo Automático (Aplica Fórmula: Vlr = Base * Alíquota)
+            # Isso garante que se o usuário mudar a alíquota, o valor fiscal será atualizado
+            taxes = ['II', 'IPI', 'PIS', 'COFINS']
+            for tax in taxes:
+                base_col = f"{tax} Base (R$)"
+                aliq_col = f"{tax} Alíq. (%)"
+                val_col = f"{tax} (R$)"
+                
+                # Se as colunas existirem, aplica o cálculo vetorizado
+                if base_col in edited_df.columns and aliq_col in edited_df.columns:
+                    # Converte para numérico para garantir
+                    edited_df[base_col] = pd.to_numeric(edited_df[base_col], errors='coerce').fillna(0.0)
+                    edited_df[aliq_col] = pd.to_numeric(edited_df[aliq_col], errors='coerce').fillna(0.0)
+                    
+                    # Cálculo: Base * (Alíquota / 100)
+                    edited_df[val_col] = edited_df[base_col] * (edited_df[aliq_col] / 100.0)
+
+            # 3. Salva no Estado (Para persistir o recálculo)
+            st.session_state["merged_df"] = edited_df
+
+        else:
+            st.info("Nenhum dado para exibir.")
+
+    with tab3:
+        st.subheader("Gerar XML Final (Configurações Manuais)")
+        
+        # --- INPUTS ADICIONADOS CONFORME SOLICITADO ---
+        st.markdown("### Preenchimento Obrigatório das Tags")
+        
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("**QUANTIDADE**")
+            inp_qtd_volume = st.text_input("Quantidade Volume", value="00001", help="Preenche <quantidadeVolume>")
             
-            xml_bytes = builder.build()
-            st.download_button("Baixar XML", data=xml_bytes, file_name="DUIMP_GERADA.xml", mime="text/xml")
+            st.markdown("**DATAS**")
+            inp_dt_chegada = st.text_input("Data Chegada", value="20251120", help="Preenche <cargaDataChegada>")
+            inp_dt_desemb = st.text_input("Data Desembaraço", value="20251124", help="Preenche <dataDesembaraco>")
+            inp_dt_reg = st.text_input("Data Registro", value="20251124", help="Preenche <dataRegistro>")
+            inp_dt_emb = st.text_input("Data Embarque", value="20251025", help="Preenche <conhecimentoCargaEmbarqueData>")
+
+        with c2:
+            st.markdown("**PESO (KG)**")
+            inp_peso_bruto = st.text_input("Peso Bruto", value="000002114187000", help="Preenche <cargaPesoBruto>")
+            inp_peso_liq = st.text_input("Peso Líquido", value="000002114187000", help="Preenche <cargaPesoLiquido>")
+
+            st.markdown("**LOCAIS (Reais/Dólares)**")
+            inp_loc_desc_dol = st.text_input("Local Descarga Total Dólares", value="000000000000000")
+            inp_loc_desc_rea = st.text_input("Local Descarga Total Reais", value="000000000000000")
+            inp_loc_emb_dol = st.text_input("Local Embarque Total Dólares", value="000000000000000")
+            inp_loc_emb_rea = st.text_input("Local Embarque Total Reais", value="000000000000000")
+
+        with c3:
+            st.markdown("**SISCOMEX**")
+            inp_agencia = st.text_input("Agência Pagamento", value="3715", help="Preenche <agenciaPagamento>")
+            inp_banco = st.text_input("Banco Pagamento", value="341", help="Preenche <bancoPagamento>")
+            st.markdown("---")
+            st.markdown("**SISCOMEX 7811**")
+            st.text("Preenche <codigoReceita>7811</codigoReceita>")
+            inp_valor_7811 = st.text_input("Valor Receita 7811", value="000000000000000", help="Preenche <valorReceita> para o código 7811")
+
+        # Dicionário de Configuração para o XML Builder
+        user_xml_config = {
+            "quantidadeVolume": inp_qtd_volume,
+            "cargaDataChegada": inp_dt_chegada,
+            "dataDesembaraco": inp_dt_desemb,
+            "dataRegistro": inp_dt_reg,
+            "conhecimentoCargaEmbarqueData": inp_dt_emb,
+            "cargaPesoBruto": inp_peso_bruto,
+            "cargaPesoLiquido": inp_peso_liq,
+            "agenciaPagamento": inp_agencia,
+            "bancoPagamento": inp_banco,
+            "valorReceita7811": inp_valor_7811,
+            "localDescargaTotalDolares": inp_loc_desc_dol,
+            "localDescargaTotalReais": inp_loc_desc_rea,
+            "localEmbarqueTotalDolares": inp_loc_emb_dol,
+            "localEmbarqueTotalReais": inp_loc_emb_rea
+        }
+        # ---------------------------------------------
+
+        if st.session_state["merged_df"] is not None:
+            if st.button("Gerar XML (Layout 8686)", type="primary"):
+                try:
+                    p = st.session_state["parsed_duimp"]
+                    records = st.session_state["merged_df"].to_dict("records")
+                    
+                    # Atualiza os itens originais do parser com os novos dados editados/calculados
+                    for i, item in enumerate(p.items):
+                        if i < len(records):
+                            item.update(records[i])
+                    
+                    # Passa as configs manuais para o build
+                    builder = XMLBuilder(p)
+                    xml_bytes = builder.build(user_inputs=user_xml_config)
+                    
+                    duimp_num = p.header.get("numeroDUIMP", "0000").replace("/", "-")
+                    file_name = f"DUIMP_{duimp_num}_INTEGRADO.xml"
+                    
+                    st.download_button(
+                        label="⬇️ Baixar XML",
+                        data=xml_bytes,
+                        file_name=file_name,
+                        mime="text/xml"
+                    )
+                    st.success("XML Gerado com sucesso!")
+                    
+                except Exception as e:
+                    st.error(f"Erro na geração do XML: {e}")
+        else:
+            st.warning("Realize a vinculação primeiro.")
 
 if __name__ == "__main__":
     main()
