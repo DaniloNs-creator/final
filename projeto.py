@@ -425,6 +425,7 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "vinculoCompradorVendedor", "default": "Não há vinculação entre comprador e vendedor."}
 ]
 
+# --- ALTERAÇÃO SOLICITADA: VALORES FIXOS E NOVOS CAMPOS ---
 FOOTER_TAGS = {
     "armazem": {"tag": "nomeArmazem", "default": "TCP"},
     "armazenamentoRecintoAduaneiroCodigo": "9801303",
@@ -433,15 +434,15 @@ FOOTER_TAGS = {
     "canalSelecaoParametrizada": "001",
     "caracterizacaoOperacaoCodigoTipo": "1",
     "caracterizacaoOperacaoDescricaoTipo": "Importação Própria",
-    "cargaDataChegada": "20251120",
+    "cargaDataChegada": "20251120", # VALOR FIXO SOLICITADO
     "cargaNumeroAgente": "N/I",
     "cargaPaisProcedenciaCodigo": "386",
     "cargaPaisProcedenciaNome": "",
-    "cargaPesoBruto": "000000000000000",
-    "cargaPesoLiquido": "000000000000000",
+    "cargaPesoBruto": "000002114187000", # VALOR FIXO SOLICITADO
+    "cargaPesoLiquido": "000002114187000", # VALOR FIXO SOLICITADO
     "cargaUrfEntradaCodigo": "0917800",
     "cargaUrfEntradaNome": "PORTO DE PARANAGUA",
-    "conhecimentoCargaEmbarqueData": "20251025",
+    "conhecimentoCargaEmbarqueData": "20251025", # VALOR FIXO SOLICITADO
     "conhecimentoCargaEmbarqueLocal": "EXTERIOR",
     "conhecimentoCargaId": "CE123456",
     "conhecimentoCargaIdMaster": "CE123456",
@@ -449,12 +450,17 @@ FOOTER_TAGS = {
     "conhecimentoCargaTipoNome": "HBL - House Bill of Lading",
     "conhecimentoCargaUtilizacao": "1",
     "conhecimentoCargaUtilizacaoNome": "Total",
-    "dataDesembaraco": "20251124",
-    "dataRegistro": "20251124",
+    "dataDesembaraco": "20251124", # VALOR FIXO SOLICITADO
+    "dataRegistro": "20251124", # VALOR FIXO SOLICITADO
     "documentoChegadaCargaCodigoTipo": "1",
     "documentoChegadaCargaNome": "Manifesto da Carga",
     "documentoChegadaCargaNumero": "1625502058594",
-    "embalagem": [{"tag": "codigoTipoEmbalagem", "default": "60"}, {"tag": "nomeEmbalagem", "default": "PALLETS"}, {"tag": "quantidadeVolume", "default": "00001"}],
+    # --- ALTERAÇÃO AQUI: QUANTIDADE 00001 ---
+    "embalagem": [
+        {"tag": "codigoTipoEmbalagem", "default": "60"}, 
+        {"tag": "nomeEmbalagem", "default": "PALLETS"}, 
+        {"tag": "quantidadeVolume", "default": "00001"}
+    ],
     "freteCollect": "000000000000000",
     "freteEmTerritorioNacional": "000000000000000",
     "freteMoedaNegociadaCodigo": "978",
@@ -478,10 +484,10 @@ FOOTER_TAGS = {
     "importadorNumero": "",
     "importadorNumeroTelefone": "0000000000",
     "informacaoComplementar": "Informações extraídas do Extrato DUIMP.",
-    "localDescargaTotalDolares": "000000000000000",
-    "localDescargaTotalReais": "000000000000000",
-    "localEmbarqueTotalDolares": "000000000000000",
-    "localEmbarqueTotalReais": "000000000000000",
+    "localDescargaTotalDolares": "000000000000000", # ZERADO
+    "localDescargaTotalReais": "000000000000000", # ZERADO
+    "localEmbarqueTotalDolares": "000000000000000", # ZERADO
+    "localEmbarqueTotalReais": "000000000000000", # ZERADO
     "modalidadeDespachoCodigo": "1",
     "modalidadeDespachoNome": "Normal",
     "numeroDUIMP": "",
@@ -821,15 +827,15 @@ class XMLBuilder:
                     val = extracted_map.get(tag_name, field["default"])
                     etree.SubElement(adicao, tag_name).text = val
 
-        peso_bruto_fmt = DataFormatter.format_quantity(h.get("pesoBruto"), 15)
-        peso_liq_total_fmt = DataFormatter.format_quantity(h.get("pesoLiquido"), 15)
-
+        # NOTA: O peso_bruto aqui seria calculado pelo PDF, mas vamos sobrescrever com o FOOTER_TAGS
+        # conforme solicitado, garantindo que o valor fixo seja usado.
+        
         footer_map = {
             "numeroDUIMP": duimp_fmt,
             "importadorNome": h.get("nomeImportador", ""),
             "importadorNumero": DataFormatter.format_number(h.get("cnpj"), 14),
-            "cargaPesoBruto": peso_bruto_fmt,
-            "cargaPesoLiquido": peso_liq_total_fmt,
+            # OBS: Aqui estou forçando o uso do que está em FOOTER_TAGS ao invés do PDF
+            # para cargaPesoBruto e cargaPesoLiquido
             "cargaPaisProcedenciaNome": h.get("paisProcedencia", "").upper(),
             "totalAdicoes": str(len(self.items_to_use)).zfill(3),
             "freteTotalReais": DataFormatter.format_input_fiscal(totals["frete"]),
@@ -841,10 +847,12 @@ class XMLBuilder:
             {"code": "1038", "val": totals["ipi"]},
             {"code": "5602", "val": totals["pis"]},
             {"code": "5629", "val": totals["cofins"]}
+            # O código 7811 será adicionado manualmente abaixo
         ]
 
         for tag, default_val in FOOTER_TAGS.items():
             if tag == "pagamento":
+                # Adiciona pagamentos automáticos (maiores que 0)
                 for rec in receita_codes:
                     if rec["val"] > 0:
                         pag = etree.SubElement(self.duimp, "pagamento")
@@ -852,6 +860,15 @@ class XMLBuilder:
                         etree.SubElement(pag, "bancoPagamento").text = "341"
                         etree.SubElement(pag, "codigoReceita").text = rec["code"]
                         etree.SubElement(pag, "valorReceita").text = DataFormatter.format_input_fiscal(rec["val"])
+                
+                # --- ALTERAÇÃO SOLICITADA: ADICIONAR SISCOMEX 7811 ZERADO ---
+                pag_siscomex = etree.SubElement(self.duimp, "pagamento")
+                etree.SubElement(pag_siscomex, "agenciaPagamento").text = "3715"
+                etree.SubElement(pag_siscomex, "bancoPagamento").text = "341"
+                etree.SubElement(pag_siscomex, "codigoReceita").text = "7811"
+                etree.SubElement(pag_siscomex, "valorReceita").text = "000000000000000"
+                # -------------------------------------------------------------
+                
                 continue
 
             if isinstance(default_val, list):
@@ -862,7 +879,14 @@ class XMLBuilder:
                 parent = etree.SubElement(self.duimp, tag)
                 etree.SubElement(parent, default_val["tag"]).text = default_val["default"]
             else:
+                # Aqui a prioridade é o que está em FOOTER_TAGS se for um valor fixo solicitado
+                # Se não estiver no map, usa o default (que agora contém os valores fixos)
                 val = footer_map.get(tag, default_val)
+                
+                # Força o uso do default para os pesos, caso o footer_map tenha tentado sobrescrever
+                if tag in ["cargaPesoBruto", "cargaPesoLiquido"]:
+                    val = default_val
+                    
                 etree.SubElement(self.duimp, tag).text = val
         
         xml_content = etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=False)
