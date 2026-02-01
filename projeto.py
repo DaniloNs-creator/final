@@ -927,7 +927,7 @@ class XMLBuilder:
 # ==============================================================================
 
 def main():
-    st.markdown('<div class="main-header">Sistema Integrado DUIMP 2026 (Versão Final Restaurada)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">Sistema Integrado DUIMP 2026</div>', unsafe_allow_html=True)
 
     # Estado da Sessão
     if "parsed_duimp" not in st.session_state: st.session_state["parsed_duimp"] = None
