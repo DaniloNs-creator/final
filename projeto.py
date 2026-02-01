@@ -16,10 +16,9 @@ from typing import Dict, List, Optional, Any
 st.set_page_config(page_title="Sistema Unificado 2026 (Pro)", layout="wide")
 
 # Estilos CSS
-# ALTERAÇÃO: Adicionado 'text-align: center;' em .main-header
 st.markdown("""
 <style>
-    .main-header { font-size: 2.5rem; color: #1E3A8A; font-weight: bold; margin-bottom: 1rem; text-align: center; }
+    .main-header { font-size: 2.5rem; color: #1E3A8A; font-weight: bold; margin-bottom: 1rem; }
     .sub-header { font-size: 1.5rem; color: #2563EB; margin-top: 1.5rem; border-bottom: 2px solid #E5E7EB; }
     .section-card { background: #FFFFFF; border-radius: 12px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 1rem; border: 1px solid #E5E7EB; }
     .success-box { background-color: #d1fae5; color: #065f46; padding: 10px; border-radius: 5px; margin: 10px 0; }
@@ -687,7 +686,7 @@ class XMLBuilder:
         self.root = etree.Element("ListaDeclaracoes")
         self.duimp = etree.SubElement(self.root, "duimp")
 
-    def build(self, user_inputs=None):
+    def build(self):
         h = self.p.header
         duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
         
@@ -837,24 +836,6 @@ class XMLBuilder:
             "seguroTotalReais": DataFormatter.format_input_fiscal(totals["seguro"]),
         }
 
-        # --- PROCESSAMENTO DOS CAMPOS MANUAIS (SUBSTITUIÇÃO) ---
-        if user_inputs:
-            # Substitui Datas
-            footer_map["cargaDataChegada"] = user_inputs.get("cargaDataChegada", "20251120")
-            footer_map["dataDesembaraco"] = user_inputs.get("dataDesembaraco", "20251124")
-            footer_map["dataRegistro"] = user_inputs.get("dataRegistro", "20251124")
-            footer_map["conhecimentoCargaEmbarqueData"] = user_inputs.get("conhecimentoCargaEmbarqueData", "20251025")
-            
-            # Substitui Pesos
-            footer_map["cargaPesoBruto"] = user_inputs.get("cargaPesoBruto", peso_bruto_fmt)
-            footer_map["cargaPesoLiquido"] = user_inputs.get("cargaPesoLiquido", peso_liq_total_fmt)
-
-            # Substitui Locais
-            footer_map["localDescargaTotalDolares"] = user_inputs.get("localDescargaTotalDolares", "000000000000000")
-            footer_map["localDescargaTotalReais"] = user_inputs.get("localDescargaTotalReais", "000000000000000")
-            footer_map["localEmbarqueTotalDolares"] = user_inputs.get("localEmbarqueTotalDolares", "000000000000000")
-            footer_map["localEmbarqueTotalReais"] = user_inputs.get("localEmbarqueTotalReais", "000000000000000")
-
         receita_codes = [
             {"code": "0086", "val": totals["ii"]},
             {"code": "1038", "val": totals["ipi"]},
@@ -862,50 +843,15 @@ class XMLBuilder:
             {"code": "5629", "val": totals["cofins"]}
         ]
 
-        # Adiciona 7811 se houver valor no input
-        if user_inputs and user_inputs.get("valorReceita7811", "0") != "0":
-             receita_codes.append({"code": "7811", "val": float(user_inputs.get("valorReceita7811"))})
-
         for tag, default_val in FOOTER_TAGS.items():
-            # Override para QuantidadeVolume dentro de Embalagem
-            if tag == "embalagem" and user_inputs:
-                parent = etree.SubElement(self.duimp, tag)
-                for subfield in default_val:
-                    val_to_use = subfield["default"]
-                    if subfield["tag"] == "quantidadeVolume":
-                        val_to_use = user_inputs.get("quantidadeVolume", val_to_use)
-                    etree.SubElement(parent, subfield["tag"]).text = val_to_use
-                continue
-
             if tag == "pagamento":
-                agencia = "3715"
-                banco = "341"
-                if user_inputs:
-                    agencia = user_inputs.get("agenciaPagamento", "3715")
-                    banco = user_inputs.get("bancoPagamento", "341")
-
                 for rec in receita_codes:
                     if rec["val"] > 0:
                         pag = etree.SubElement(self.duimp, "pagamento")
-                        etree.SubElement(pag, "agenciaPagamento").text = agencia
-                        etree.SubElement(pag, "bancoPagamento").text = banco
+                        etree.SubElement(pag, "agenciaPagamento").text = "3715"
+                        etree.SubElement(pag, "bancoPagamento").text = "341"
                         etree.SubElement(pag, "codigoReceita").text = rec["code"]
-                        # Se for 7811, pega direto, senão formata do calculado
-                        if rec["code"] == "7811" and user_inputs:
-                             etree.SubElement(pag, "valorReceita").text = user_inputs.get("valorReceita7811").zfill(15)
-                        else:
-                             etree.SubElement(pag, "valorReceita").text = DataFormatter.format_input_fiscal(rec["val"])
-                continue
-
-            # Override direto para tags simples que estão no footer_map
-            if tag in footer_map:
-                val = footer_map[tag]
-                etree.SubElement(self.duimp, tag).text = val
-                continue
-
-            # Override direto se a tag estiver no user_inputs e não no footer_map (ex: dataRegistro)
-            if user_inputs and tag in user_inputs:
-                etree.SubElement(self.duimp, tag).text = user_inputs[tag]
+                        etree.SubElement(pag, "valorReceita").text = DataFormatter.format_input_fiscal(rec["val"])
                 continue
 
             if isinstance(default_val, list):
@@ -928,17 +874,29 @@ class XMLBuilder:
 # ==============================================================================
 
 def main():
-    # ALTERAÇÃO: INSERÇÃO DA LOGO E CENTRALIZAÇÃO
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c2:
-        st.image("https://github.com/DaniloNs-creator/final/blob/main/haefele_logo.png?raw=true", use_container_width=True)
-
     st.markdown('<div class="main-header">Sistema Integrado DUIMP 2026 (Versão Final Restaurada)</div>', unsafe_allow_html=True)
 
     # Estado da Sessão
     if "parsed_duimp" not in st.session_state: st.session_state["parsed_duimp"] = None
     if "parsed_hafele" not in st.session_state: st.session_state["parsed_hafele"] = None
     if "merged_df" not in st.session_state: st.session_state["merged_df"] = None
+    
+    # NOVO: Estado para os parâmetros adicionais
+    if "quantidade_volume" not in st.session_state: st.session_state["quantidade_volume"] = "00001"
+    if "carga_peso_bruto" not in st.session_state: st.session_state["carga_peso_bruto"] = "000000000000000"
+    if "carga_peso_liquido" not in st.session_state: st.session_state["carga_peso_liquido"] = "000000000000000"
+    if "carga_data_chegada" not in st.session_state: st.session_state["carga_data_chegada"] = "20251120"
+    if "data_desembaraco" not in st.session_state: st.session_state["data_desembaraco"] = "20251124"
+    if "data_registro" not in st.session_state: st.session_state["data_registro"] = "20251124"
+    if "conhecimento_carga_embarque_data" not in st.session_state: st.session_state["conhecimento_carga_embarque_data"] = "20251025"
+    if "agencia_pagamento" not in st.session_state: st.session_state["agencia_pagamento"] = "3715"
+    if "banco_pagamento" not in st.session_state: st.session_state["banco_pagamento"] = "341"
+    if "codigo_receita" not in st.session_state: st.session_state["codigo_receita"] = "7811"
+    if "valor_receita" not in st.session_state: st.session_state["valor_receita"] = "000000000000000"
+    if "local_descarga_total_dolares" not in st.session_state: st.session_state["local_descarga_total_dolares"] = "000000000000000"
+    if "local_descarga_total_reais" not in st.session_state: st.session_state["local_descarga_total_reais"] = "000000000000000"
+    if "local_embarque_total_dolares" not in st.session_state: st.session_state["local_embarque_total_dolares"] = "000000000000000"
+    if "local_embarque_total_reais" not in st.session_state: st.session_state["local_embarque_total_reais"] = "000000000000000"
 
     # Abas
     tab1, tab2, tab3 = st.tabs(["📂 Upload e Vinculação", "📋 Conferência Detalhada", "💾 Exportar XML"])
@@ -1121,61 +1079,145 @@ def main():
             st.info("Nenhum dado para exibir.")
 
     with tab3:
-        st.subheader("Gerar XML Final (Configurações Manuais)")
+        st.subheader("Gerar XML Final")
         
-        # --- INPUTS ADICIONADOS CONFORME SOLICITADO ---
-        st.markdown("### Preenchimento Obrigatório das Tags")
+        # NOVA SEÇÃO: PARÂMETROS ADICIONAIS
+        st.markdown("---")
+        st.subheader("📝 Parâmetros Adicionais")
         
-        c1, c2, c3 = st.columns(3)
-        with c1:
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
             st.markdown("**QUANTIDADE**")
-            inp_qtd_volume = st.text_input("Quantidade Volume", value="00001", help="Preenche <quantidadeVolume>")
+            quantidade_volume = st.text_input(
+                "Quantidade Volume",
+                value=st.session_state["quantidade_volume"],
+                help="Preenche a tag <quantidadeVolume>",
+                key="quantidade_volume_input"
+            )
+            st.session_state["quantidade_volume"] = quantidade_volume
             
+            st.markdown("**PESO**")
+            carga_peso_bruto = st.text_input(
+                "Carga Peso Bruto (kg)",
+                value=st.session_state["carga_peso_bruto"],
+                help="Preenche a tag <cargaPesoBruto> - Formato: 15 dígitos",
+                key="carga_peso_bruto_input"
+            )
+            st.session_state["carga_peso_bruto"] = carga_peso_bruto
+            
+            carga_peso_liquido = st.text_input(
+                "Carga Peso Líquido (kg)",
+                value=st.session_state["carga_peso_liquido"],
+                help="Preenche a tag <cargaPesoLiquido> - Formato: 15 dígitos",
+                key="carga_peso_liquido_input"
+            )
+            st.session_state["carga_peso_liquido"] = carga_peso_liquido
+        
+        with col2:
             st.markdown("**DATAS**")
-            inp_dt_chegada = st.text_input("Data Chegada", value="20251120", help="Preenche <cargaDataChegada>")
-            inp_dt_desemb = st.text_input("Data Desembaraço", value="20251124", help="Preenche <dataDesembaraco>")
-            inp_dt_reg = st.text_input("Data Registro", value="20251124", help="Preenche <dataRegistro>")
-            inp_dt_emb = st.text_input("Data Embarque", value="20251025", help="Preenche <conhecimentoCargaEmbarqueData>")
-
-        with c2:
-            st.markdown("**PESO (KG)**")
-            inp_peso_bruto = st.text_input("Peso Bruto", value="000002114187000", help="Preenche <cargaPesoBruto>")
-            inp_peso_liq = st.text_input("Peso Líquido", value="000002114187000", help="Preenche <cargaPesoLiquido>")
-
-            st.markdown("**LOCAIS (Reais/Dólares)**")
-            inp_loc_desc_dol = st.text_input("Local Descarga Total Dólares", value="000000000000000")
-            inp_loc_desc_rea = st.text_input("Local Descarga Total Reais", value="000000000000000")
-            inp_loc_emb_dol = st.text_input("Local Embarque Total Dólares", value="000000000000000")
-            inp_loc_emb_rea = st.text_input("Local Embarque Total Reais", value="000000000000000")
-
-        with c3:
-            st.markdown("**SISCOMEX**")
-            inp_agencia = st.text_input("Agência Pagamento", value="3715", help="Preenche <agenciaPagamento>")
-            inp_banco = st.text_input("Banco Pagamento", value="341", help="Preenche <bancoPagamento>")
-            st.markdown("---")
+            carga_data_chegada = st.text_input(
+                "Carga Data Chegada (AAAAMMDD)",
+                value=st.session_state["carga_data_chegada"],
+                help="Preenche a tag <cargaDataChegada> - Formato: AAAAMMDD",
+                key="carga_data_chegada_input"
+            )
+            st.session_state["carga_data_chegada"] = carga_data_chegada
+            
+            data_desembaraco = st.text_input(
+                "Data Desembaraço (AAAAMMDD)",
+                value=st.session_state["data_desembaraco"],
+                help="Preenche a tag <dataDesembaraco> - Formato: AAAAMMDD",
+                key="data_desembaraco_input"
+            )
+            st.session_state["data_desembaraco"] = data_desembaraco
+            
+            data_registro = st.text_input(
+                "Data Registro (AAAAMMDD)",
+                value=st.session_state["data_registro"],
+                help="Preenche a tag <dataRegistro> - Formato: AAAAMMDD",
+                key="data_registro_input"
+            )
+            st.session_state["data_registro"] = data_registro
+            
+            conhecimento_carga_embarque_data = st.text_input(
+                "Conhecimento Carga Embarque Data (AAAAMMDD)",
+                value=st.session_state["conhecimento_carga_embarque_data"],
+                help="Preenche a tag <conhecimentoCargaEmbarqueData> - Formato: AAAAMMDD",
+                key="conhecimento_carga_embarque_data_input"
+            )
+            st.session_state["conhecimento_carga_embarque_data"] = conhecimento_carga_embarque_data
+        
+        with col3:
             st.markdown("**SISCOMEX 7811**")
-            st.text("Preenche <codigoReceita>7811</codigoReceita>")
-            inp_valor_7811 = st.text_input("Valor Receita 7811", value="000000000000000", help="Preenche <valorReceita> para o código 7811")
-
-        # Dicionário de Configuração para o XML Builder
-        user_xml_config = {
-            "quantidadeVolume": inp_qtd_volume,
-            "cargaDataChegada": inp_dt_chegada,
-            "dataDesembaraco": inp_dt_desemb,
-            "dataRegistro": inp_dt_reg,
-            "conhecimentoCargaEmbarqueData": inp_dt_emb,
-            "cargaPesoBruto": inp_peso_bruto,
-            "cargaPesoLiquido": inp_peso_liq,
-            "agenciaPagamento": inp_agencia,
-            "bancoPagamento": inp_banco,
-            "valorReceita7811": inp_valor_7811,
-            "localDescargaTotalDolares": inp_loc_desc_dol,
-            "localDescargaTotalReais": inp_loc_desc_rea,
-            "localEmbarqueTotalDolares": inp_loc_emb_dol,
-            "localEmbarqueTotalReais": inp_loc_emb_rea
-        }
-        # ---------------------------------------------
-
+            agencia_pagamento = st.text_input(
+                "Agência Pagamento",
+                value=st.session_state["agencia_pagamento"],
+                help="Preenche a tag <agenciaPagamento>",
+                key="agencia_pagamento_input"
+            )
+            st.session_state["agencia_pagamento"] = agencia_pagamento
+            
+            banco_pagamento = st.text_input(
+                "Banco Pagamento",
+                value=st.session_state["banco_pagamento"],
+                help="Preenche a tag <bancoPagamento>",
+                key="banco_pagamento_input"
+            )
+            st.session_state["banco_pagamento"] = banco_pagamento
+            
+            codigo_receita = st.text_input(
+                "Código Receita",
+                value=st.session_state["codigo_receita"],
+                help="Preenche a tag <codigoReceita>",
+                key="codigo_receita_input"
+            )
+            st.session_state["codigo_receita"] = codigo_receita
+            
+            valor_receita = st.text_input(
+                "Valor Receita",
+                value=st.session_state["valor_receita"],
+                help="Preenche a tag <valorReceita> - Formato: 15 dígitos",
+                key="valor_receita_input"
+            )
+            st.session_state["valor_receita"] = valor_receita
+            
+            st.markdown("**TOTAIS**")
+            local_descarga_total_dolares = st.text_input(
+                "Local Descarga Total Dólares",
+                value=st.session_state["local_descarga_total_dolares"],
+                help="Preenche a tag <localDescargaTotalDolares> - Formato: 15 dígitos",
+                key="local_descarga_total_dolares_input"
+            )
+            st.session_state["local_descarga_total_dolares"] = local_descarga_total_dolares
+            
+            local_descarga_total_reais = st.text_input(
+                "Local Descarga Total Reais",
+                value=st.session_state["local_descarga_total_reais"],
+                help="Preenche a tag <localDescargaTotalReais> - Formato: 15 dígitos",
+                key="local_descarga_total_reais_input"
+            )
+            st.session_state["local_descarga_total_reais"] = local_descarga_total_reais
+            
+            local_embarque_total_dolares = st.text_input(
+                "Local Embarque Total Dólares",
+                value=st.session_state["local_embarque_total_dolares"],
+                help="Preenche a tag <localEmbarqueTotalDolares> - Formato: 15 dígitos",
+                key="local_embarque_total_dolares_input"
+            )
+            st.session_state["local_embarque_total_dolares"] = local_embarque_total_dolares
+            
+            local_embarque_total_reais = st.text_input(
+                "Local Embarque Total Reais",
+                value=st.session_state["local_embarque_total_reais"],
+                help="Preenche a tag <localEmbarqueTotalReais> - Formato: 15 dígitos",
+                key="local_embarque_total_reais_input"
+            )
+            st.session_state["local_embarque_total_reais"] = local_embarque_total_reais
+        
+        st.markdown("---")
+        
+        # BOTÃO PARA GERAR XML (mantido original com modificações)
         if st.session_state["merged_df"] is not None:
             if st.button("Gerar XML (Layout 8686)", type="primary"):
                 try:
@@ -1187,9 +1229,237 @@ def main():
                         if i < len(records):
                             item.update(records[i])
                     
-                    # Passa as configs manuais para o build
-                    builder = XMLBuilder(p)
-                    xml_bytes = builder.build(user_inputs=user_xml_config)
+                    # CRIAR UMA CÓPIA DAS CONSTANTES PARA MODIFICAÇÃO
+                    footer_tags_copy = FOOTER_TAGS.copy()
+                    
+                    # 1. Atualizar quantidadeVolume na embalagem
+                    if "embalagem" in footer_tags_copy and isinstance(footer_tags_copy["embalagem"], list):
+                        for embalagem in footer_tags_copy["embalagem"]:
+                            if embalagem.get("tag") == "quantidadeVolume":
+                                embalagem["default"] = st.session_state["quantidade_volume"]
+                    
+                    # 2. Atualizar datas
+                    footer_tags_copy["cargaDataChegada"] = st.session_state["carga_data_chegada"]
+                    footer_tags_copy["dataDesembaraco"] = st.session_state["data_desembaraco"]
+                    footer_tags_copy["dataRegistro"] = st.session_state["data_registro"]
+                    footer_tags_copy["conhecimentoCargaEmbarqueData"] = st.session_state["conhecimento_carga_embarque_data"]
+                    
+                    # 3. Atualizar pesos
+                    footer_tags_copy["cargaPesoBruto"] = st.session_state["carga_peso_bruto"]
+                    footer_tags_copy["cargaPesoLiquido"] = st.session_state["carga_peso_liquido"]
+                    
+                    # 4. Atualizar SISCOMEX 7811 - criar um novo pagamento
+                    pagamento_7811 = {
+                        "agenciaPagamento": st.session_state["agencia_pagamento"],
+                        "bancoPagamento": st.session_state["banco_pagamento"],
+                        "codigoReceita": st.session_state["codigo_receita"],
+                        "valorReceita": st.session_state["valor_receita"]
+                    }
+                    
+                    # Adicionar ao array de pagamentos
+                    if "pagamento" not in footer_tags_copy:
+                        footer_tags_copy["pagamento"] = []
+                    footer_tags_copy["pagamento"].append(pagamento_7811)
+                    
+                    # 5. Atualizar totais
+                    footer_tags_copy["localDescargaTotalDolares"] = st.session_state["local_descarga_total_dolares"]
+                    footer_tags_copy["localDescargaTotalReais"] = st.session_state["local_descarga_total_reais"]
+                    footer_tags_copy["localEmbarqueTotalDolares"] = st.session_state["local_embarque_total_dolares"]
+                    footer_tags_copy["localEmbarqueTotalReais"] = st.session_state["local_embarque_total_reais"]
+                    
+                    # Criar um XMLBuilder personalizado com os novos parâmetros
+                    class CustomXMLBuilder(XMLBuilder):
+                        def build(self):
+                            h = self.p.header
+                            duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
+                            
+                            totals = {"frete": 0.0, "seguro": 0.0, "ii": 0.0, "ipi": 0.0, "pis": 0.0, "cofins": 0.0}
+
+                            def get_float(val):
+                                try: 
+                                    if isinstance(val, str): val = val.replace('.', '').replace(',', '.')
+                                    return float(val)
+                                except: return 0.0
+
+                            for it in self.items_to_use:
+                                totals["frete"] += get_float(it.get("Frete (R$)", 0))
+                                totals["seguro"] += get_float(it.get("Seguro (R$)", 0))
+                                totals["ii"] += get_float(it.get("II (R$)", 0))
+                                totals["ipi"] += get_float(it.get("IPI (R$)", 0))
+                                totals["pis"] += get_float(it.get("PIS (R$)", 0))
+                                totals["cofins"] += get_float(it.get("COFINS (R$)", 0))
+
+                            for it in self.items_to_use:
+                                adicao = etree.SubElement(self.duimp, "adicao")
+                                
+                                input_number = str(it.get("NUMBER", "")).strip()
+                                original_desc = DataFormatter.clean_text(it.get("descricao", ""))
+                                
+                                # Usando a nova função
+                                desc_compl = DataFormatter.clean_text(it.get("desc_complementar", ""))
+                                final_desc = montar_descricao_final(desc_compl, input_number, original_desc)
+                                
+                                val_total_venda_fmt = DataFormatter.format_high_precision(it.get("valorTotal", "0"), 11)
+                                val_unit_fmt = DataFormatter.format_high_precision(it.get("valorUnit", "0"), 20)
+                                
+                                qtd_comercial_raw = it.get("quantidade_comercial")
+                                if not qtd_comercial_raw: qtd_comercial_raw = it.get("quantidade")
+                                
+                                qtd_comercial_fmt = DataFormatter.format_quantity(qtd_comercial_raw, 14)
+                                qtd_estatistica_fmt = DataFormatter.format_quantity(it.get("quantidade"), 14)
+
+                                peso_liq_fmt = DataFormatter.format_quantity(it.get("pesoLiq"), 15)
+                                base_total_reais_fmt = DataFormatter.format_input_fiscal(it.get("valorTotal", "0"), 15)
+                                
+                                raw_frete = get_float(it.get("Frete (R$)", 0))
+                                raw_seguro = get_float(it.get("Seguro (R$)", 0))
+                                raw_aduaneiro = get_float(it.get("Aduaneiro (R$)", 0))
+                                
+                                frete_fmt = DataFormatter.format_input_fiscal(raw_frete)
+                                seguro_fmt = DataFormatter.format_input_fiscal(raw_seguro)
+                                aduaneiro_fmt = DataFormatter.format_input_fiscal(raw_aduaneiro)
+
+                                ii_base_fmt = DataFormatter.format_input_fiscal(it.get("II Base (R$)", 0))
+                                ii_aliq_fmt = DataFormatter.format_input_fiscal(it.get("II Alíq. (%)", 0), 5, True)
+                                ii_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("II (R$)", 0)))
+
+                                ipi_aliq_fmt = DataFormatter.format_input_fiscal(it.get("IPI Alíq. (%)", 0), 5, True)
+                                ipi_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("IPI (R$)", 0)))
+
+                                pis_base_fmt = DataFormatter.format_input_fiscal(it.get("PIS Base (R$)", 0))
+                                pis_aliq_fmt = DataFormatter.format_input_fiscal(it.get("PIS Alíq. (%)", 0), 5, True)
+                                pis_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("PIS (R$)", 0)))
+
+                                cofins_aliq_fmt = DataFormatter.format_input_fiscal(it.get("COFINS Alíq. (%)", 0), 5, True)
+                                cofins_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("COFINS (R$)", 0)))
+
+                                icms_base_valor = ii_base_fmt if int(ii_base_fmt) > 0 else base_total_reais_fmt
+                                cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
+                                
+                                supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"), it.get("endereco_raw"))
+
+                                extracted_map = {
+                                    "numeroAdicao": str(it["numeroAdicao"])[-3:],
+                                    "numeroDUIMP": duimp_fmt,
+                                    "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
+                                    "dadosMercadoriaMedidaEstatisticaQuantidade": qtd_estatistica_fmt, 
+                                    "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "").upper(),
+                                    "dadosMercadoriaPesoLiquido": peso_liq_fmt,
+                                    "condicaoVendaMoedaNome": it.get("moeda", "").upper(),
+                                    "valorTotalCondicaoVenda": val_total_venda_fmt,
+                                    "valorUnitario": val_unit_fmt,
+                                    "condicaoVendaValorMoeda": base_total_reais_fmt,
+                                    "condicaoVendaValorReais": aduaneiro_fmt if int(aduaneiro_fmt) > 0 else base_total_reais_fmt,
+                                    "paisOrigemMercadoriaNome": it.get("paisOrigem", "").upper(),
+                                    "paisAquisicaoMercadoriaNome": it.get("paisOrigem", "").upper(),
+                                    "descricaoMercadoria": final_desc,
+                                    "quantidade": qtd_comercial_fmt, 
+                                    "unidadeMedida": it.get("unidade", "").upper(),
+                                    "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800"),
+                                    "fornecedorNome": supplier_data["fornecedorNome"][:60],
+                                    "fornecedorLogradouro": supplier_data["fornecedorLogradouro"][:60],
+                                    "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
+                                    "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
+                                    "freteValorReais": frete_fmt,
+                                    "seguroValorReais": seguro_fmt,
+                                    "iiBaseCalculo": ii_base_fmt,
+                                    "iiAliquotaAdValorem": ii_aliq_fmt,
+                                    
+                                    "iiAliquotaValorCalculado": ii_val_fmt,
+                                    "iiAliquotaValorDevido": ii_val_fmt,
+                                    "iiAliquotaValorRecolher": ii_val_fmt,
+                                    
+                                    "ipiAliquotaAdValorem": ipi_aliq_fmt,
+                                    "ipiAliquotaValorDevido": ipi_val_fmt,
+                                    "ipiAliquotaValorRecolher": ipi_val_fmt,
+                                    "pisCofinsBaseCalculoValor": pis_base_fmt,
+                                    "pisPasepAliquotaAdValorem": pis_aliq_fmt,
+                                    "pisPasepAliquotaValorDevido": pis_val_fmt,
+                                    "pisPasepAliquotaValorRecolher": pis_val_fmt,
+                                    "cofinsAliquotaAdValorem": cofins_aliq_fmt,
+                                    "cofinsAliquotaValorDevido": cofins_val_fmt,
+                                    "cofinsAliquotaValorRecolher": cofins_val_fmt,
+                                    "icmsBaseCalculoValor": icms_base_valor,
+                                    "icmsBaseCalculoAliquota": "01800",
+                                    "cbsIbsClasstrib": "000001",
+                                    "cbsBaseCalculoValor": icms_base_valor,
+                                    "cbsBaseCalculoAliquota": "00090",
+                                    "cbsBaseCalculoValorImposto": cbs_imposto,
+                                    "ibsBaseCalculoValor": icms_base_valor,
+                                    "ibsBaseCalculoAliquota": "00010",
+                                    "ibsBaseCalculoValorImposto": ibs_imposto
+                                }
+
+                                for field in ADICAO_FIELDS_ORDER:
+                                    tag_name = field["tag"]
+                                    if field.get("type") == "complex":
+                                        parent = etree.SubElement(adicao, tag_name)
+                                        for child in field["children"]:
+                                            c_tag = child["tag"]
+                                            val = extracted_map.get(c_tag, child["default"])
+                                            etree.SubElement(parent, c_tag).text = val
+                                    else:
+                                        val = extracted_map.get(tag_name, field["default"])
+                                        etree.SubElement(adicao, tag_name).text = val
+
+                            peso_bruto_fmt = DataFormatter.format_quantity(h.get("pesoBruto"), 15)
+                            peso_liq_total_fmt = DataFormatter.format_quantity(h.get("pesoLiquido"), 15)
+
+                            footer_map = {
+                                "numeroDUIMP": duimp_fmt,
+                                "importadorNome": h.get("nomeImportador", ""),
+                                "importadorNumero": DataFormatter.format_number(h.get("cnpj"), 14),
+                                "cargaPesoBruto": peso_bruto_fmt,
+                                "cargaPesoLiquido": peso_liq_total_fmt,
+                                "cargaPaisProcedenciaNome": h.get("paisProcedencia", "").upper(),
+                                "totalAdicoes": str(len(self.items_to_use)).zfill(3),
+                                "freteTotalReais": DataFormatter.format_input_fiscal(totals["frete"]),
+                                "seguroTotalReais": DataFormatter.format_input_fiscal(totals["seguro"]),
+                            }
+
+                            receita_codes = [
+                                {"code": "0086", "val": totals["ii"]},
+                                {"code": "1038", "val": totals["ipi"]},
+                                {"code": "5602", "val": totals["pis"]},
+                                {"code": "5629", "val": totals["cofins"]}
+                            ]
+
+                            for tag, default_val in footer_tags_copy.items():
+                                if tag == "pagamento":
+                                    # Primeiro adiciona os pagamentos padrão
+                                    for rec in receita_codes:
+                                        if rec["val"] > 0:
+                                            pag = etree.SubElement(self.duimp, "pagamento")
+                                            etree.SubElement(pag, "agenciaPagamento").text = "3715"
+                                            etree.SubElement(pag, "bancoPagamento").text = "341"
+                                            etree.SubElement(pag, "codigoReceita").text = rec["code"]
+                                            etree.SubElement(pag, "valorReceita").text = DataFormatter.format_input_fiscal(rec["val"])
+                                    # Depois adiciona o pagamento 7811 personalizado
+                                    for pagamento in default_val:
+                                        if isinstance(pagamento, dict):
+                                            pag = etree.SubElement(self.duimp, "pagamento")
+                                            for key, value in pagamento.items():
+                                                etree.SubElement(pag, key).text = str(value)
+                                    continue
+
+                                if isinstance(default_val, list):
+                                    parent = etree.SubElement(self.duimp, tag)
+                                    for subfield in default_val:
+                                        etree.SubElement(parent, subfield["tag"]).text = subfield["default"]
+                                elif isinstance(default_val, dict):
+                                    parent = etree.SubElement(self.duimp, tag)
+                                    etree.SubElement(parent, default_val["tag"]).text = default_val["default"]
+                                else:
+                                    val = footer_map.get(tag, default_val)
+                                    etree.SubElement(self.duimp, tag).text = val
+                            
+                            xml_content = etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=False)
+                            header = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+                            return header + xml_content
+                    
+                    # Usar o CustomXMLBuilder
+                    builder = CustomXMLBuilder(p)
+                    xml_bytes = builder.build()
                     
                     duimp_num = p.header.get("numeroDUIMP", "0000").replace("/", "-")
                     file_name = f"DUIMP_{duimp_num}_INTEGRADO.xml"
@@ -1200,7 +1470,7 @@ def main():
                         file_name=file_name,
                         mime="text/xml"
                     )
-                    st.success("XML Gerado com sucesso!")
+                    st.success("XML Gerado com sucesso! Parâmetros adicionais incluídos.")
                     
                 except Exception as e:
                     st.error(f"Erro na geração do XML: {e}")
