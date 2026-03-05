@@ -264,8 +264,7 @@ def processador_txt():
                     
                     linhas_processadas = len(resultado.splitlines())
                     st.success(f"""
-                    **Processamento concluído!**  
-                    ✔️ Linhas originais: {total_linhas}  
+                    **Processamento concluído!** ✔️ Linhas originais: {total_linhas}  
                     ✔️ Linhas processadas: {linhas_processadas}  
                     ✔️ Linhas removidas: {total_linhas - linhas_processadas}
                     """)
@@ -617,8 +616,7 @@ def processador_cte():
                 show_success_animation("Processamento em lote concluído!")
                 
                 st.success(f"""
-                **Processamento concluído!**  
-                ✅ Sucessos: {results['success']}  
+                **Processamento concluído!** ✅ Sucessos: {results['success']}  
                 ❌ Erros: {results['errors']}
                 """)
                 
@@ -834,12 +832,27 @@ class HafelePDFParser:
         try:
             logger.info(f"Iniciando parsing do layout DUIMP/APP2: {pdf_path}")
             
-            with pdfplumber.open(pdf_path) as pdf:
-                full_text = ""
-                for page in pdf.pages:
-                    text = page.extract_text(layout=False) 
-                    if text:
-                        full_text += text + "\n"
+            # Usando PyMuPDF (fitz) para alta performance em PDFs gigantes
+            doc = fitz.open(pdf_path)
+            text_chunks = []
+            total_pages = len(doc)
+            
+            # Barra de progresso para a UI não congelar
+            progress_bar = st.progress(0, text=f"Lendo PDF Häfele: 0/{total_pages} páginas...")
+            
+            for i, page in enumerate(doc):
+                text = page.get_text("text")
+                if text:
+                    text_chunks.append(text)
+                
+                # Atualiza a barra a cada 20 páginas para manter performance
+                if i % 20 == 0 or i == total_pages - 1:
+                    progress_bar.progress((i + 1) / total_pages, text=f"Lendo PDF Häfele: {i+1}/{total_pages} páginas...")
+            
+            # Junta tudo de uma vez
+            full_text = "\n".join(text_chunks)
+            doc.close()
+            progress_bar.empty()
             
             self._process_full_text(full_text)
             return self.documento
@@ -1001,7 +1014,11 @@ class DuimpPDFParser:
 
     def preprocess(self):
         clean_lines = []
-        for page in self.doc:
+        total_pages = len(self.doc)
+        
+        progress_bar = st.progress(0, text=f"Processando Extrato DUIMP: 0/{total_pages} páginas...")
+        
+        for i, page in enumerate(self.doc):
             text = page.get_text("text")
             lines = text.split('\n')
             for line in lines:
@@ -1010,7 +1027,12 @@ class DuimpPDFParser:
                 if "Data, hora e responsável" in l_strip: continue
                 if re.match(r'^\d+\s*/\s*\d+$', l_strip): continue
                 clean_lines.append(line)
+                
+            if i % 20 == 0 or i == total_pages - 1:
+                progress_bar.progress((i + 1) / total_pages, text=f"Processando Extrato DUIMP: {i+1}/{total_pages} páginas...")
+
         self.full_text = "\n".join(clean_lines)
+        progress_bar.empty()
 
     def extract_header(self):
         txt = self.full_text
@@ -1103,7 +1125,7 @@ ADICAO_FIELDS_ORDER = [
     {"tag": "dadosCambiaisMotivoSemCoberturaNome", "default": "N/I"},
     {"tag": "dadosCambiaisValorRealCambio", "default": "000000000000000"},
     {"tag": "dadosCargaPaisProcedenciaCodigo", "default": "000"},
-    {"tag": "dadosCargaUrfEntradaCodigo", "default": "0000000"},
+    {"tag": "dadosCargaUrfEntradaCodigo", "default": "00000000"},
     {"tag": "dadosCargaViaTransporteCodigo", "default": "01"},
     {"tag": "dadosCargaViaTransporteNome", "default": "MARÍTIMA"},
     {"tag": "dadosMercadoriaAplicacao", "default": "REVENDA"},
@@ -1691,7 +1713,7 @@ def sistema_integrado_duimp():
 
         # Processamento Häfele (APP 2 - NOVO PARSER BLINDADO)
         if file_hafele and st.session_state["parsed_hafele"] is None:
-            # Salva temporariamente para o pdfplumber abrir
+            # Salva temporariamente para o pdfplumber/fitz abrir
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
                 tmp.write(file_hafele.getvalue())
                 tmp_path = tmp.name
