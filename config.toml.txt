@@ -1,0 +1,20 @@
+[server]
+# Aumenta o limite de upload para 200MB (útil para PDFs grandes de DUIMP)
+maxUploadSize = 200
+
+[client]
+# Remove o menu flutuante e o rodapé padrão para um visual mais profissional
+toolbarMode = "minimal"
+showErrorDetails = false
+
+[theme]
+# Configuração baseada no esquema de cores do seu CSS (Azul Haefele/Corporativo)
+primaryColor = "#2563EB"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F4F6"
+textColor = "#1F2937"
+font = "sans serif"
+
+[browser]
+# Tenta reunir as atualizações de tela para melhorar a performance da UI
+gatherUsageStats = false
