@@ -25,7 +25,28 @@ import re
 from lxml import etree
 import tempfile
 import logging
-import gc  # ADICIONADO: Biblioteca nativa do Python para forçar limpeza de memória
+import gc  # ADICIONADO: Biblioteca nativa para limpeza de memória
+
+# ==============================================================================
+# CONFIGURAÇÃO AUTOMÁTICA DO SERVIDOR STREAMLIT (Para PDFs gigantes)
+# ==============================================================================
+def setup_streamlit_config():
+    """Cria o config.toml automaticamente para liberar uploads pesados."""
+    try:
+        os.makedirs(".streamlit", exist_ok=True)
+        config_path = os.path.join(".streamlit", "config.toml")
+        
+        # Só cria se não existir, para não sobrescrever
+        if not os.path.exists(config_path):
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write("[server]\n")
+                f.write("maxUploadSize = 1000\n")
+                f.write("maxMessageSize = 1000\n")
+    except Exception as e:
+        pass
+
+# Executa a configuração antes de iniciar a página
+setup_streamlit_config()
 
 # ==============================================================================
 # CONFIGURAÇÃO INICIAL
@@ -814,13 +835,12 @@ def processador_cte():
             st.warning("Nenhum dado disponível para exportação.")
 
 # ==============================================================================
-# PARTE 3: PARSER APP 2 (HÄFELE/EXTRATO DUIMP) - CORRIGIDO PARA ALTO DESEMPENHO
+# PARTE 3: PARSER APP 2 (HÄFELE/EXTRATO DUIMP) - CORRIGIDO (COM BARRA DE PROGRESSO)
 # ==============================================================================
 class HafelePDFParser:
     """
     Parser BLINDADO para o layout Extrato DUIMP (APP2.pdf).
-    Melhoria: Regex de impostos mais permissivo para capturar II corretamente.
-    Modificado para evitar memory leaks em PDFs de muitas páginas.
+    Otimizado para não travar a memória em PDFs com milhares de páginas e mostrar o progresso.
     """
     
     def __init__(self):
@@ -834,17 +854,33 @@ class HafelePDFParser:
         try:
             logger.info(f"Iniciando parsing do layout DUIMP/APP2: {pdf_path}")
             
-            text_chunks = []  # Usando lista para juntar textos, previne MemoryLeak
+            text_chunks = []
+            
+            # Elementos visuais para a barra de progresso no Streamlit
+            progress_text = st.empty()
+            progress_bar = st.progress(0)
+            
             with pdfplumber.open(pdf_path) as pdf:
-                for page in pdf.pages:
+                total_pages = len(pdf.pages)
+                for i, page in enumerate(pdf.pages):
+                    
+                    # Atualiza o texto e a barra de progresso
+                    progress_text.text(f"Lendo página {i+1} de {total_pages} do Extrato Detalhado...")
+                    progress_bar.progress((i + 1) / total_pages)
+                    
                     text = page.extract_text(layout=False) 
                     if text:
                         text_chunks.append(text)
             
+            # Limpa a barra de progresso da tela após concluir a extração
+            progress_text.empty()
+            progress_bar.empty()
+            
+            # Junta tudo de forma rápida e eficiente
             full_text = "\n".join(text_chunks)
             self._process_full_text(full_text)
             
-            # Força a limpeza das variáveis pesadas da memória
+            # Força a liberação da memória
             del text_chunks
             del full_text
             gc.collect()
@@ -928,7 +964,6 @@ class HafelePDFParser:
             if aduana_match: item['local_aduaneiro'] = self._parse_valor(aduana_match.group(1))
 
             # --- IMPOSTOS (REGEX MELHORADO) ---
-            # O ".*?" entre as palavras permite que haja sujeira ou quebras de linha entre os campos
             tax_patterns = re.findall(
                 r'Base de Cálculo.*?\(R\$\)\s*([\d\.,]+).*?% Alíquota\s*([\d\.,]+).*?Valor.*?(?:Devido|A Recolher|Calculado).*?\(R\$\)\s*([\d\.,]+)', 
                 text, 
@@ -999,7 +1034,7 @@ def montar_descricao_final(desc_complementar, codigo_extra, detalhamento):
     return f"{parte1} - {parte2} - {parte3}"
 
 class DuimpPDFParser:
-    """Parser do App 1 (Mantido original + Correção Leitura Qtd Comercial)"""
+    """Parser do App 1 (Mantido original + Correção Leitura Qtd Comercial e Memória)"""
     def __init__(self, file_stream):
         self.doc = fitz.open(stream=file_stream, filetype="pdf")
         self.full_text = ""
@@ -1019,7 +1054,7 @@ class DuimpPDFParser:
                 clean_lines.append(line)
         self.full_text = "\n".join(clean_lines)
         
-        # Limpeza de memória forçada para liberar a RAM do Streamlit
+        # OTIMIZAÇÃO: Fechamento do documento e liberação de memória
         self.doc.close()
         gc.collect()
 
@@ -1424,12 +1459,12 @@ class XMLBuilder:
             except: return 0.0
 
         for it in self.items_to_use:
-            totals["frete"] += get_float(it.get("Frete (R$)", 0))
-            totals["seguro"] += get_float(it.get("Seguro (R$)", 0))
-            totals["ii"] += get_float(it.get("II (R$)", 0))
-            totals["ipi"] += get_float(it.get("IPI (R$)", 0))
-            totals["pis"] += get_float(it.get("PIS (R$)", 0))
-            totals["cofins"] += get_float(it.get("COFINS (R$)", 0))
+            totals["frete"] += get_float(it.get("Frete (R$)"))
+            totals["seguro"] += get_float(it.get("Seguro (R$)"))
+            totals["ii"] += get_float(it.get("II (R$)"))
+            totals["ipi"] += get_float(it.get("IPI (R$)"))
+            totals["pis"] += get_float(it.get("PIS (R$)"))
+            totals["cofins"] += get_float(it.get("COFINS (R$)"))
 
         for it in self.items_to_use:
             adicao = etree.SubElement(self.duimp, "adicao")
@@ -1437,10 +1472,8 @@ class XMLBuilder:
             input_number = str(it.get("NUMBER", "")).strip()
             original_desc = DataFormatter.clean_text(it.get("descricao", ""))
             
-            # --- ALTERAÇÃO AQUI: Usando a nova função ---
             desc_compl = DataFormatter.clean_text(it.get("desc_complementar", ""))
             final_desc = montar_descricao_final(desc_compl, input_number, original_desc)
-            # --------------------------------------------
 
             val_total_venda_fmt = DataFormatter.format_high_precision(it.get("valorTotal", "0"), 11)
             val_unit_fmt = DataFormatter.format_high_precision(it.get("valorUnit", "0"), 20)
@@ -1507,12 +1540,9 @@ class XMLBuilder:
                 "seguroValorReais": seguro_fmt,
                 "iiBaseCalculo": ii_base_fmt,
                 "iiAliquotaAdValorem": ii_aliq_fmt,
-                
-                # --- CORREÇÃO: MAPEAR OS VALORES DE II PARA AS TAGS CORRETAS ---
-                "iiAliquotaValorCalculado": ii_val_fmt, # Mapeado!
+                "iiAliquotaValorCalculado": ii_val_fmt,
                 "iiAliquotaValorDevido": ii_val_fmt,
                 "iiAliquotaValorRecolher": ii_val_fmt,
-                
                 "ipiAliquotaAdValorem": ipi_aliq_fmt,
                 "ipiAliquotaValorDevido": ipi_val_fmt,
                 "ipiAliquotaValorRecolher": ipi_val_fmt,
@@ -1561,19 +1591,13 @@ class XMLBuilder:
             "seguroTotalReais": DataFormatter.format_input_fiscal(totals["seguro"]),
         }
 
-        # --- PROCESSAMENTO DOS CAMPOS MANUAIS (SUBSTITUIÇÃO) ---
         if user_inputs:
-            # Substitui Datas
             footer_map["cargaDataChegada"] = user_inputs.get("cargaDataChegada", "20251120")
             footer_map["dataDesembaraco"] = user_inputs.get("dataDesembaraco", "20251124")
             footer_map["dataRegistro"] = user_inputs.get("dataRegistro", "20251124")
             footer_map["conhecimentoCargaEmbarqueData"] = user_inputs.get("conhecimentoCargaEmbarqueData", "20251025")
-            
-            # Substitui Pesos
             footer_map["cargaPesoBruto"] = user_inputs.get("cargaPesoBruto", peso_bruto_fmt)
             footer_map["cargaPesoLiquido"] = user_inputs.get("cargaPesoLiquido", peso_liq_total_fmt)
-
-            # Substitui Locais
             footer_map["localDescargaTotalDolares"] = user_inputs.get("localDescargaTotalDolares", "000000000000000")
             footer_map["localDescargaTotalReais"] = user_inputs.get("localDescargaTotalReais", "000000000000000")
             footer_map["localEmbarqueTotalDolares"] = user_inputs.get("localEmbarqueTotalDolares", "000000000000000")
@@ -1586,12 +1610,10 @@ class XMLBuilder:
             {"code": "5629", "val": totals["cofins"]}
         ]
 
-        # Adiciona 7811 se houver valor no input
         if user_inputs and user_inputs.get("valorReceita7811", "0") != "0":
              receita_codes.append({"code": "7811", "val": float(user_inputs.get("valorReceita7811"))})
 
         for tag, default_val in FOOTER_TAGS.items():
-            # Override para QuantidadeVolume dentro de Embalagem
             if tag == "embalagem" and user_inputs:
                 parent = etree.SubElement(self.duimp, tag)
                 for subfield in default_val:
@@ -1614,20 +1636,17 @@ class XMLBuilder:
                         etree.SubElement(pag, "agenciaPagamento").text = agencia
                         etree.SubElement(pag, "bancoPagamento").text = banco
                         etree.SubElement(pag, "codigoReceita").text = rec["code"]
-                        # Se for 7811, pega direto, senão formata do calculado
                         if rec["code"] == "7811" and user_inputs:
                              etree.SubElement(pag, "valorReceita").text = user_inputs.get("valorReceita7811").zfill(15)
                         else:
                              etree.SubElement(pag, "valorReceita").text = DataFormatter.format_input_fiscal(rec["val"])
                 continue
 
-            # Override direto para tags simples que estão no footer_map
             if tag in footer_map:
                 val = footer_map[tag]
                 etree.SubElement(self.duimp, tag).text = val
                 continue
 
-            # Override direto se a tag estiver no user_inputs e não no footer_map (ex: dataRegistro)
             if user_inputs and tag in user_inputs:
                 etree.SubElement(self.duimp, tag).text = user_inputs[tag]
                 continue
@@ -1653,7 +1672,6 @@ class XMLBuilder:
 def sistema_integrado_duimp():
     st.markdown('<div class="main-header">Sistema Integrado DUIMP 2026 (Versão Final Restaurada)</div>', unsafe_allow_html=True)
 
-    # Abas para o sistema DUIMP
     tab1, tab2, tab3 = st.tabs(["📂 Upload e Vinculação", "📋 Conferência Detalhada", "💾 Exportar XML"])
 
     with tab1:
@@ -1682,7 +1700,6 @@ def sistema_integrado_duimp():
                     st.session_state["parsed_duimp"] = p
                     st.session_state["last_duimp"] = file_duimp
                     
-                    # DataFrame Base
                     df = pd.DataFrame(p.items)
                     cols_fiscais = [
                         "NUMBER", "Frete (R$)", "Seguro (R$)", 
@@ -1700,9 +1717,8 @@ def sistema_integrado_duimp():
                 except Exception as e:
                     st.error(f"Erro ao ler DUIMP: {e}")
 
-        # Processamento Häfele (APP 2 - NOVO PARSER BLINDADO)
+        # Processamento Häfele (APP 2)
         if file_hafele and st.session_state["parsed_hafele"] is None:
-            # Salva temporariamente para o pdfplumber abrir
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
                 tmp.write(file_hafele.getvalue())
                 tmp_path = tmp.name
@@ -1721,7 +1737,6 @@ def sistema_integrado_duimp():
             except Exception as e:
                 st.error(f"Erro ao ler APP2: {e}")
             finally:
-                # Remove o arquivo temporário
                 if os.path.exists(tmp_path): 
                     try:
                         os.unlink(tmp_path)
@@ -1729,17 +1744,14 @@ def sistema_integrado_duimp():
 
         st.divider()
 
-        # Botão de Vinculação
         if st.button("🔗 VINCULAR DADOS (Cruzamento Automático)", type="primary", use_container_width=True):
             if st.session_state["merged_df"] is not None and st.session_state["parsed_hafele"] is not None:
                 try:
                     df_dest = st.session_state["merged_df"].copy()
                     
-                    # Mapear itens do Häfele pelo numero_item (INT)
                     src_map = {}
                     for item in st.session_state["parsed_hafele"]['itens']:
                         try:
-                            # Garante que seja inteiro
                             idx = int(item['numero_item'])
                             src_map[idx] = item
                         except: pass
@@ -1747,16 +1759,13 @@ def sistema_integrado_duimp():
                     count = 0
                     for idx, row in df_dest.iterrows():
                         try:
-                            # Tenta converter numeroAdicao para int para garantir match
                             raw_num = str(row['numeroAdicao']).strip()
                             item_num = int(raw_num)
                             
                             if item_num in src_map:
                                 src = src_map[item_num]
                                 
-                                # Preenchimento dos campos mapeados
                                 df_dest.at[idx, 'NUMBER'] = src.get('codigo_interno', '')
-                                
                                 df_dest.at[idx, 'Frete (R$)'] = src.get('frete_internacional', 0.0)
                                 df_dest.at[idx, 'Seguro (R$)'] = src.get('seguro_internacional', 0.0)
                                 df_dest.at[idx, 'Aduaneiro (R$)'] = src.get('local_aduaneiro', 0.0)
@@ -1779,7 +1788,6 @@ def sistema_integrado_duimp():
                                 
                                 count += 1
                         except Exception as e:
-                            # Continua para o próximo item se houver erro pontual
                             continue
                     
                     st.session_state["merged_df"] = df_dest
@@ -1801,7 +1809,6 @@ def sistema_integrado_duimp():
                 "II (R$)": st.column_config.NumberColumn(label="II Vlr", format="R$ %.2f"),
             }
             
-            # 1. Edição pelo Usuário
             edited_df = st.data_editor(
                 st.session_state["merged_df"],
                 hide_index=True,
@@ -1810,24 +1817,17 @@ def sistema_integrado_duimp():
                 height=600
             )
 
-            # 2. Recálculo Automático (Aplica Fórmula: Vlr = Base * Alíquota)
-            # Isso garante que se o usuário mudar a alíquota, o valor fiscal será atualizado
             taxes = ['II', 'IPI', 'PIS', 'COFINS']
             for tax in taxes:
                 base_col = f"{tax} Base (R$)"
                 aliq_col = f"{tax} Alíq. (%)"
                 val_col = f"{tax} (R$)"
                 
-                # Se as colunas existirem, aplica o cálculo vetorizado
                 if base_col in edited_df.columns and aliq_col in edited_df.columns:
-                    # Converte para numérico para garantir
                     edited_df[base_col] = pd.to_numeric(edited_df[base_col], errors='coerce').fillna(0.0)
                     edited_df[aliq_col] = pd.to_numeric(edited_df[aliq_col], errors='coerce').fillna(0.0)
-                    
-                    # Cálculo: Base * (Alíquota / 100)
                     edited_df[val_col] = edited_df[base_col] * (edited_df[aliq_col] / 100.0)
 
-            # 3. Salva no Estado (Para persistir o recálculo)
             st.session_state["merged_df"] = edited_df
 
         else:
@@ -1835,8 +1835,6 @@ def sistema_integrado_duimp():
 
     with tab3:
         st.subheader("Gerar XML Final (Configurações Manuais)")
-        
-        # --- INPUTS ADICIONADOS CONFORME SOLICITADO ---
         st.markdown("### Preenchimento Obrigatório das Tags")
         
         c1, c2, c3 = st.columns(3)
@@ -1870,7 +1868,6 @@ def sistema_integrado_duimp():
             st.text("Preenche <codigoReceita>7811</codigoReceita>")
             inp_valor_7811 = st.text_input("Valor Receita 7811", value="000000000000000", help="Preenche <valorReceita> para o código 7811")
 
-        # Dicionário de Configuração para o XML Builder
         user_xml_config = {
             "quantidadeVolume": inp_qtd_volume,
             "cargaDataChegada": inp_dt_chegada,
@@ -1887,7 +1884,6 @@ def sistema_integrado_duimp():
             "localEmbarqueTotalDolares": inp_loc_emb_dol,
             "localEmbarqueTotalReais": inp_loc_emb_rea
         }
-        # ---------------------------------------------
 
         if st.session_state["merged_df"] is not None:
             if st.button("Gerar XML (Layout 8686)", type="primary"):
@@ -1895,12 +1891,10 @@ def sistema_integrado_duimp():
                     p = st.session_state["parsed_duimp"]
                     records = st.session_state["merged_df"].to_dict("records")
                     
-                    # Atualiza os itens originais do parser com os novos dados editados/calculados
                     for i, item in enumerate(p.items):
                         if i < len(records):
                             item.update(records[i])
                     
-                    # Passa as configs manuais para o build
                     builder = XMLBuilder(p)
                     xml_bytes = builder.build(user_inputs=user_xml_config)
                     
@@ -1924,7 +1918,6 @@ def sistema_integrado_duimp():
 # APLICAÇÃO PRINCIPAL
 # ==============================================================================
 def main():
-    """Função principal que gerencia o fluxo da aplicação."""
     load_css()
     
     st.markdown("""
@@ -1935,17 +1928,11 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
-    # Tabs principais
     tab1, tab2, tab3 = st.tabs(["📄 Processador TXT", "🚚 Processador CT-e", "📊 Sistema Integrado DUIMP"])
     
-    with tab1:
-        processador_txt()
-    
-    with tab2:
-        processador_cte()
-    
-    with tab3:
-        sistema_integrado_duimp()
+    with tab1: processador_txt()
+    with tab2: processador_cte()
+    with tab3: sistema_integrado_duimp()
 
 if __name__ == "__main__":
     try:
