@@ -25,6 +25,7 @@ import re
 from lxml import etree
 import tempfile
 import logging
+import gc  # ADICIONADO: Biblioteca nativa do Python para forçar limpeza de memória
 
 # ==============================================================================
 # CONFIGURAÇÃO INICIAL
@@ -264,8 +265,7 @@ def processador_txt():
                     
                     linhas_processadas = len(resultado.splitlines())
                     st.success(f"""
-                    **Processamento concluído!**  
-                    ✔️ Linhas originais: {total_linhas}  
+                    **Processamento concluído!** ✔️ Linhas originais: {total_linhas}  
                     ✔️ Linhas processadas: {linhas_processadas}  
                     ✔️ Linhas removidas: {total_linhas - linhas_processadas}
                     """)
@@ -617,8 +617,7 @@ def processador_cte():
                 show_success_animation("Processamento em lote concluído!")
                 
                 st.success(f"""
-                **Processamento concluído!**  
-                ✅ Sucessos: {results['success']}  
+                **Processamento concluído!** ✅ Sucessos: {results['success']}  
                 ❌ Erros: {results['errors']}
                 """)
                 
@@ -815,12 +814,13 @@ def processador_cte():
             st.warning("Nenhum dado disponível para exportação.")
 
 # ==============================================================================
-# PARTE 3: PARSER APP 2 (HÄFELE/EXTRATO DUIMP) - CORRIGIDO
+# PARTE 3: PARSER APP 2 (HÄFELE/EXTRATO DUIMP) - CORRIGIDO PARA ALTO DESEMPENHO
 # ==============================================================================
 class HafelePDFParser:
     """
     Parser BLINDADO para o layout Extrato DUIMP (APP2.pdf).
     Melhoria: Regex de impostos mais permissivo para capturar II corretamente.
+    Modificado para evitar memory leaks em PDFs de muitas páginas.
     """
     
     def __init__(self):
@@ -834,14 +834,21 @@ class HafelePDFParser:
         try:
             logger.info(f"Iniciando parsing do layout DUIMP/APP2: {pdf_path}")
             
+            text_chunks = []  # Usando lista para juntar textos, previne MemoryLeak
             with pdfplumber.open(pdf_path) as pdf:
-                full_text = ""
                 for page in pdf.pages:
                     text = page.extract_text(layout=False) 
                     if text:
-                        full_text += text + "\n"
+                        text_chunks.append(text)
             
+            full_text = "\n".join(text_chunks)
             self._process_full_text(full_text)
+            
+            # Força a limpeza das variáveis pesadas da memória
+            del text_chunks
+            del full_text
+            gc.collect()
+            
             return self.documento
             
         except Exception as e:
@@ -1011,6 +1018,10 @@ class DuimpPDFParser:
                 if re.match(r'^\d+\s*/\s*\d+$', l_strip): continue
                 clean_lines.append(line)
         self.full_text = "\n".join(clean_lines)
+        
+        # Limpeza de memória forçada para liberar a RAM do Streamlit
+        self.doc.close()
+        gc.collect()
 
     def extract_header(self):
         txt = self.full_text
