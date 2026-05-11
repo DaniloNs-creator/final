@@ -1,121 +1,92 @@
 import streamlit as st
 import os
-import shutil
+import sys
 import zipfile
-import time
-import threading
 import tempfile
+import shutil
+import threading
+import time
+from pathlib import Path
 import xml.etree.ElementTree as ET
 import pandas as pd
 from io import BytesIO
-from pathlib import Path
-from datetime import datetime
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
+from selenium.webdriver.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from datetime import datetime
 
 # ==============================================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ==============================================================================
-st.set_page_config(
-    page_title="MasterSAF — CT-e para Excel",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title="MasterSAF", page_icon="⚡", layout="wide")
 
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;500;700&display=swap');
-#MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}
-html, body, [data-testid="stAppViewContainer"] { background: #0a0c10 !important; color: #d4dbe8 !important; font-family: 'DM Sans', sans-serif !important; }
-[data-testid="stSidebar"] { background: #0e1117 !important; border-right: 1px solid #1e2535 !important; }
-[data-testid="stSidebar"] * { color: #c4ccd8 !important; }
-.hero { padding: 2.5rem 0 1.5rem; border-bottom: 1px solid #1e2535; margin-bottom: 2rem; }
-.hero-tag { font-family: 'Space Mono', monospace; font-size: 0.7rem; letter-spacing: 0.2em; color: #00e5a0; text-transform: uppercase; margin-bottom: 0.5rem; }
-.hero-title { font-family: 'Space Mono', monospace; font-size: 2.1rem; font-weight: 700; color: #eef2ff; line-height: 1.15; margin: 0; }
-.hero-title span { color: #00e5a0; }
-.hero-subtitle { font-size: 0.95rem; color: #6b7a99; margin-top: 0.5rem; font-weight: 300; }
-.pipeline { display: flex; align-items: center; gap: 0; margin: 1.5rem 0 2rem; flex-wrap: wrap; }
-.step { display: flex; align-items: center; gap: 0.6rem; background: #0e1117; border: 1px solid #1e2535; border-radius: 8px; padding: 0.7rem 1.1rem; font-family: 'Space Mono', monospace; font-size: 0.72rem; color: #4a5568; }
-.step.active { border-color: #00e5a0; color: #00e5a0; box-shadow: 0 0 12px rgba(0,229,160,0.15); }
-.step.done { border-color: #0070f3; color: #0070f3; }
-.step-arrow { color: #1e2535; font-size: 1.1rem; padding: 0 0.3rem; }
-[data-testid="stProgress"] > div > div { background: linear-gradient(90deg, #00e5a0, #0070f3) !important; border-radius: 4px !important; }
-[data-testid="stProgress"] > div { background: #1e2535 !important; border-radius: 4px !important; height: 6px !important; }
-[data-testid="stTextInput"] input, [data-testid="stNumberInput"] input { background: #070910 !important; border: 1px solid #1e2535 !important; border-radius: 6px !important; color: #d4dbe8 !important; font-family: 'Space Mono', monospace !important; font-size: 0.82rem !important; }
-[data-testid="stSidebar"] label { font-family: 'Space Mono', monospace !important; font-size: 0.72rem !important; letter-spacing: 0.1em !important; text-transform: uppercase !important; color: #4a5568 !important; }
-[data-testid="stSidebar"] .stButton button { background: linear-gradient(135deg, #00e5a0, #0070f3) !important; color: #020408 !important; font-family: 'Space Mono', monospace !important; font-weight: 700 !important; border: none !important; border-radius: 6px !important; padding: 0.75rem 1.5rem !important; width: 100% !important; }
-.stDownloadButton button { background: linear-gradient(135deg, #00e5a0, #0070f3) !important; color: #020408 !important; font-family: 'Space Mono', monospace !important; font-weight: 700 !important; font-size: 1rem !important; border-radius: 8px !important; padding: 0.9rem 2rem !important; width: 100% !important; border: none !important; }
-[data-testid="stAlert"] { background: #0e1117 !important; border-radius: 8px !important; border-left: 3px solid !important; font-family: 'Space Mono', monospace !important; font-size: 0.8rem !important; }
-.section-label { font-family: 'Space Mono', monospace; font-size: 0.65rem; letter-spacing: 0.2em; color: #4a5568; text-transform: uppercase; margin-bottom: 0.8rem; margin-top: 1.8rem; border-bottom: 1px solid #1e2535; padding-bottom: 0.4rem; }
-.sidebar-logo { font-family: 'Space Mono', monospace; font-size: 0.95rem; font-weight: 700; color: #eef2ff; padding: 1.2rem 0 1.5rem; border-bottom: 1px solid #1e2535; margin-bottom: 1.2rem; }
-.sidebar-logo span { color: #00e5a0; }
-.stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; margin: 1.2rem 0; }
-.stat-card { background: #0e1117; border: 1px solid #1e2535; border-radius: 8px; padding: 1rem 1.2rem; position: relative; overflow: hidden; }
-.stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, #00e5a0, #0070f3); }
-.stat-label { font-family: 'Space Mono', monospace; font-size: 0.6rem; letter-spacing: 0.15em; color: #4a5568; text-transform: uppercase; margin-bottom: 0.3rem; }
-.stat-value { font-family: 'Space Mono', monospace; font-size: 1.6rem; font-weight: 700; color: #eef2ff; }
-.stat-value.green { color: #00e5a0; } .stat-value.blue { color: #0070f3; }
-.log-terminal { background: #070910; border: 1px solid #1e2535; border-radius: 8px; padding: 1rem 1.2rem; font-family: 'Space Mono', monospace; font-size: 0.72rem; color: #00e5a0; max-height: 320px; overflow-y: auto; line-height: 1.8; white-space: pre-wrap; word-break: break-all; }
+#MainMenu {visibility:hidden;} footer {visibility:hidden;} header {visibility:hidden;}
+html,body,[data-testid="stAppViewContainer"]{background:#0a0c10!important;color:#d4dbe8!important;font-family:'DM Sans',sans-serif!important;}
+[data-testid="stSidebar"]{background:#0e1117!important;border-right:1px solid #1e2535!important;}
+[data-testid="stSidebar"] *{color:#c4ccd8!important;}
+[data-testid="stTextInput"] input,[data-testid="stNumberInput"] input{background:#070910!important;border:1px solid #1e2535!important;border-radius:6px!important;color:#d4dbe8!important;font-family:'Space Mono',monospace!important;font-size:0.82rem!important;}
+[data-testid="stSidebar"] label{font-family:'Space Mono',monospace!important;font-size:0.72rem!important;letter-spacing:0.1em!important;text-transform:uppercase!important;color:#4a5568!important;}
+[data-testid="stSidebar"] .stButton button{background:linear-gradient(135deg,#00e5a0,#0070f3)!important;color:#020408!important;font-family:'Space Mono',monospace!important;font-weight:700!important;border:none!important;border-radius:6px!important;padding:0.75rem 1.5rem!important;width:100%!important;}
+.stDownloadButton button{background:linear-gradient(135deg,#00e5a0,#0070f3)!important;color:#020408!important;font-family:'Space Mono',monospace!important;font-weight:700!important;font-size:1rem!important;border-radius:8px!important;padding:0.9rem 2rem!important;width:100%!important;border:none!important;}
+[data-testid="stAlert"]{background:#0e1117!important;border-radius:8px!important;border-left:3px solid!important;font-family:'Space Mono',monospace!important;font-size:0.8rem!important;}
+[data-testid="stProgress"] > div > div{background:linear-gradient(90deg,#00e5a0,#0070f3)!important;border-radius:4px!important;}
+[data-testid="stProgress"] > div{background:#1e2535!important;border-radius:4px!important;height:6px!important;}
+.hero{padding:2rem 0 1.5rem;border-bottom:1px solid #1e2535;margin-bottom:1.5rem;}
+.hero-tag{font-family:'Space Mono',monospace;font-size:0.7rem;letter-spacing:0.2em;color:#00e5a0;text-transform:uppercase;margin-bottom:0.4rem;}
+.hero-title{font-family:'Space Mono',monospace;font-size:2rem;font-weight:700;color:#eef2ff;margin:0;}
+.hero-title span{color:#00e5a0;}
+.hero-sub{font-size:0.9rem;color:#6b7a99;margin-top:0.4rem;}
+.sidebar-logo{font-family:'Space Mono',monospace;font-size:0.95rem;font-weight:700;color:#eef2ff;padding:1rem 0 1.4rem;border-bottom:1px solid #1e2535;margin-bottom:1rem;}
+.sidebar-logo span{color:#00e5a0;}
+.slabel{font-family:'Space Mono',monospace;font-size:0.62rem;letter-spacing:0.2em;color:#4a5568;text-transform:uppercase;margin-bottom:0.6rem;margin-top:1.4rem;border-bottom:1px solid #1e2535;padding-bottom:0.3rem;}
+.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:0.8rem;margin:1rem 0;}
+.stat-card{background:#0e1117;border:1px solid #1e2535;border-radius:8px;padding:1rem 1.2rem;position:relative;overflow:hidden;}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,#00e5a0,#0070f3);}
+.stat-label{font-family:'Space Mono',monospace;font-size:0.6rem;letter-spacing:0.15em;color:#4a5568;text-transform:uppercase;margin-bottom:0.3rem;}
+.stat-value{font-family:'Space Mono',monospace;font-size:1.5rem;font-weight:700;color:#eef2ff;}
+.green{color:#00e5a0!important;} .blue{color:#0070f3!important;}
+.log-box{background:#070910;border:1px solid #1e2535;border-radius:8px;padding:1rem;font-family:'Space Mono',monospace;font-size:0.7rem;color:#00e5a0;max-height:300px;overflow-y:auto;line-height:1.8;white-space:pre-wrap;word-break:break-all;}
 </style>
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# ESTADO DA SESSÃO
+# ESTADO
 # ==============================================================================
-defaults = {
-    "running": False, "done": False, "error_msg": "",
-    "page_atual": 0, "page_total": 0, "status_msg": "",
-    "stage": "idle", "xml_count": 0, "excel_bytes": None, "logs": [],
-}
-for k, v in defaults.items():
+for k,v in {"running":False,"done":False,"error_msg":"","page_atual":0,
+             "page_total":0,"status_msg":"","stage":"idle",
+             "xml_count":0,"excel_bytes":None,"logs":[]}.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
 # ==============================================================================
-# HERO + PIPELINE
+# HERO
 # ==============================================================================
 st.markdown("""
 <div class="hero">
-    <div class="hero-tag">⚡ Automação Fiscal Completa</div>
-    <h1 class="hero-title">Master<span>SAF</span> → Excel</h1>
-    <p class="hero-subtitle">Baixa CT-es do portal, extrai os XMLs e entrega uma planilha Excel — tudo automaticamente</p>
+  <div class="hero-tag">⚡ Automação Fiscal</div>
+  <h1 class="hero-title">Master<span>SAF</span> → Excel</h1>
+  <p class="hero-sub">Baixa CT-es, extrai XMLs dos ZIPs e gera planilha Excel — automaticamente</p>
 </div>
 """, unsafe_allow_html=True)
-
-def render_pipeline():
-    stage = st.session_state.stage
-    steps = [("download","01 Download"),("extract","02 Extrair ZIPs"),("excel","03 Gerar Excel"),("done","04 Pronto")]
-    order = [s[0] for s in steps]
-    cur_idx = order.index(stage) if stage in order else -1
-    html = '<div class="pipeline">'
-    for i,(key,label) in enumerate(steps):
-        idx = order.index(key)
-        css  = "done" if idx < cur_idx else ("active" if idx == cur_idx else "")
-        icon = "✓"   if idx < cur_idx else ("●"      if idx == cur_idx else str(i+1).zfill(2))
-        html += f'<div class="step {css}"><span>{icon}</span><span>{label}</span></div>'
-        if i < len(steps)-1: html += '<span class="step-arrow">→</span>'
-    html += '</div>'
-    st.markdown(html, unsafe_allow_html=True)
-
-render_pipeline()
 
 # ==============================================================================
 # SIDEBAR
 # ==============================================================================
 with st.sidebar:
     st.markdown('<div class="sidebar-logo">MASTER<span>SAF</span> //</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-label">Credenciais</div>', unsafe_allow_html=True)
+    st.markdown('<div class="slabel">Credenciais</div>', unsafe_allow_html=True)
     usuario   = st.text_input("Usuário", placeholder="login@empresa.com.br", disabled=st.session_state.running)
     senha     = st.text_input("Senha", type="password", placeholder="••••••••", disabled=st.session_state.running)
-    st.markdown('<div class="section-label">Período</div>', unsafe_allow_html=True)
+    st.markdown('<div class="slabel">Período</div>', unsafe_allow_html=True)
     data_ini  = st.text_input("Data Inicial", value="08/05/2026", disabled=st.session_state.running)
     data_fin  = st.text_input("Data Final",   value="08/05/2026", disabled=st.session_state.running)
-    st.markdown('<div class="section-label">Parâmetros</div>', unsafe_allow_html=True)
-    qtd_loops = st.number_input("Qtd. Páginas (Loops)", min_value=1, max_value=1000, value=5, disabled=st.session_state.running)
+    st.markdown('<div class="slabel">Parâmetros</div>', unsafe_allow_html=True)
+    qtd_loops = st.number_input("Qtd. Páginas", min_value=1, max_value=1000, value=5, disabled=st.session_state.running)
     st.markdown("<br>", unsafe_allow_html=True)
     if not st.session_state.running:
         iniciar = st.button("⚡ Iniciar Automação")
@@ -124,7 +95,8 @@ with st.sidebar:
         iniciar = False
 
 # ==============================================================================
-# CLASSE CTeProcessor — CÓPIA EXATA DO TKINTER
+# CTeProcessor — RÉPLICA EXATA DO TKINTER
+# Única diferença: export_to_excel salva em BytesIO em vez de arquivo
 # ==============================================================================
 CTE_NAMESPACES = {'cte': 'http://www.portalfiscal.inf.br/cte'}
 
@@ -144,19 +116,21 @@ class CTeProcessor:
         try:
             tipos_peso = ['PESO BRUTO', 'PESO BASE DE CALCULO', 'PESO BASE CÁLCULO', 'PESO']
             for prefix, uri in CTE_NAMESPACES.items():
-                for infQ in root.findall(f'.//{{{uri}}}infQ'):
+                infQ_elements = root.findall(f'.//{{{uri}}}infQ')
+                for infQ in infQ_elements:
                     tpMed  = infQ.find(f'{{{uri}}}tpMed')
                     qCarga = infQ.find(f'{{{uri}}}qCarga')
                     if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
-                        for tp in tipos_peso:
-                            if tp in tpMed.text.upper():
+                        for tipo_peso in tipos_peso:
+                            if tipo_peso in tpMed.text.upper():
                                 return float(qCarga.text)
-            for infQ in root.findall('.//infQ'):
+            infQ_elements = root.findall('.//infQ')
+            for infQ in infQ_elements:
                 tpMed  = infQ.find('tpMed')
                 qCarga = infQ.find('qCarga')
                 if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
-                    for tp in tipos_peso:
-                        if tp in tpMed.text.upper():
+                    for tipo_peso in tipos_peso:
+                        if tipo_peso in tpMed.text.upper():
                             return float(qCarga.text)
             return 0.0
         except Exception:
@@ -169,7 +143,8 @@ class CTeProcessor:
             def find_text(element, xpath):
                 try:
                     for prefix, uri in CTE_NAMESPACES.items():
-                        found = element.find(xpath.replace('cte:', f'{{{uri}}}'))
+                        full_xpath = xpath.replace('cte:', f'{{{uri}}}')
+                        found = element.find(full_xpath)
                         if found is not None and found.text:
                             return found.text
                     found = element.find(xpath.replace('cte:', ''))
@@ -199,16 +174,18 @@ class CTeProcessor:
             dest_CEP     = find_text(root, './/cte:dest/cte:enderDest/cte:CEP')
             infNFe_chave = find_text(root, './/cte:infNFe/cte:chave')
 
-            doc_dest = dest_CNPJ or dest_CPF or 'N/A'
-            end_dest = ""
+            documento_destinatario = dest_CNPJ or dest_CPF or 'N/A'
+
+            endereco_destinatario = ""
             if dest_xLgr:
-                end_dest += dest_xLgr
-                if dest_nro:     end_dest += f", {dest_nro}"
-                if dest_xBairro: end_dest += f" - {dest_xBairro}"
-                if dest_xMun:    end_dest += f", {dest_xMun}"
-                if dest_UF:      end_dest += f"/{dest_UF}"
-                if dest_CEP:     end_dest += f" - CEP: {dest_CEP}"
-            if not end_dest: end_dest = "N/A"
+                endereco_destinatario += f"{dest_xLgr}"
+                if dest_nro:     endereco_destinatario += f", {dest_nro}"
+                if dest_xBairro: endereco_destinatario += f" - {dest_xBairro}"
+                if dest_xMun:    endereco_destinatario += f", {dest_xMun}"
+                if dest_UF:      endereco_destinatario += f"/{dest_UF}"
+                if dest_CEP:     endereco_destinatario += f" - CEP: {dest_CEP}"
+            if not endereco_destinatario:
+                endereco_destinatario = "N/A"
 
             numero_nfe = self.extract_nfe_number_from_key(infNFe_chave) if infNFe_chave else None
             peso_bruto = self.extract_peso_bruto(root)
@@ -216,10 +193,12 @@ class CTeProcessor:
             data_formatada = None
             if dhEmi:
                 try:
-                    data_formatada = datetime.strptime(dhEmi[:10], '%Y-%m-%d').strftime('%d/%m/%y')
+                    data_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
+                    data_formatada = data_obj.strftime('%d/%m/%y')
                 except:
                     try:
-                        data_formatada = datetime.strptime(dhEmi[:10], '%d/%m/%Y').strftime('%d/%m/%y')
+                        data_obj = datetime.strptime(dhEmi[:10], '%d/%m/%Y')
+                        data_formatada = data_obj.strftime('%d/%m/%y')
                     except:
                         data_formatada = dhEmi[:10]
 
@@ -229,7 +208,8 @@ class CTeProcessor:
                 vTPrest = 0.0
 
             return {
-                'Arquivo': filename, 'nCT': nCT or 'N/A',
+                'Arquivo': filename,
+                'nCT': nCT or 'N/A',
                 'Data Emissão': data_formatada or dhEmi or 'N/A',
                 'Código Município Início': cMunIni or 'N/A',
                 'UF Início': UFIni or 'N/A',
@@ -240,30 +220,25 @@ class CTeProcessor:
                 'Peso Bruto (kg)': peso_bruto,
                 'Remetente': rem_xNome or 'N/A',
                 'Destinatário': dest_xNome or 'N/A',
-                'Documento Destinatário': doc_dest,
-                'Endereço Destinatário': end_dest,
+                'Documento Destinatário': documento_destinatario,
+                'Endereço Destinatário': endereco_destinatario,
                 'Município Destino': dest_xMun or 'N/A',
                 'UF Destino': dest_UF or 'N/A',
                 'Chave NFe': infNFe_chave or 'N/A',
                 'Número NFe': numero_nfe or 'N/A',
-                'Data Processamento': datetime.now().strftime('%d/%m/%Y %H:%M:%S'),
+                'Data Processamento': datetime.now().strftime('%d/%m/%Y %H:%M:%S')
             }
-        except Exception:
+        except Exception as e:
             return None
 
-    # IGUAL ao tkinter: glob('*.xml') não-recursivo por pasta
-    def process_xml_files_from_directory(self, directory_path, log_fn):
+    # IGUAL AO TKINTER — glob não-recursivo, encoding utf-8
+    def process_xml_files_from_directory(self, directory_path, log_callback):
         xml_files = list(Path(directory_path).glob('*.xml'))
-        log_fn(f"   {len(xml_files)} XMLs em: {os.path.basename(directory_path)}")
+        log_callback(f"   📄 {len(xml_files)} XMLs encontrados")
         for xml_file in xml_files:
             try:
-                # tenta utf-8 primeiro, depois latin-1 (igual ao tkinter)
-                try:
-                    with open(xml_file, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                except UnicodeDecodeError:
-                    with open(xml_file, 'r', encoding='latin-1') as f:
-                        content = f.read()
+                with open(xml_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
                 if 'CTe' in content or 'conhecimento' in content.lower():
                     data = self.extract_cte_data(content, xml_file.name)
                     if data:
@@ -271,100 +246,56 @@ class CTeProcessor:
             except Exception:
                 pass
 
-    def export_to_excel_bytes(self):
-        if not self.processed_data:
-            return None, 0
-        df = pd.DataFrame(self.processed_data)
-        buf = BytesIO()
-        with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name='Dados_CTe')
-            wb = writer.book
-            ws = writer.sheets['Dados_CTe']
-            hfmt = wb.add_format({'bold': True, 'bg_color': '#0e1117', 'font_color': '#00e5a0',
-                                   'border': 1, 'border_color': '#1e2535', 'align': 'center', 'valign': 'vcenter'})
-            mfmt = wb.add_format({'num_format': 'R$ #,##0.00'})
-            wfmt = wb.add_format({'num_format': '#,##0.000'})
-            pfmt = wb.add_format({'valign': 'vcenter'})
-            for col_num, col_name in enumerate(df.columns):
-                ws.write(0, col_num, col_name, hfmt)
-                if col_name == 'Valor Prestação':
-                    ws.set_column(col_num, col_num, 20, mfmt)
-                elif 'Peso' in col_name:
-                    ws.set_column(col_num, col_num, 18, wfmt)
-                else:
-                    ws.set_column(col_num, col_num, max(len(col_name)+2, 16), pfmt)
-            ws.freeze_panes(1, 0)
-            ws.autofilter(0, 0, len(df), len(df.columns)-1)
-        return buf.getvalue(), len(df)
+    # IGUAL AO TKINTER — mas retorna bytes em vez de salvar em disco
+    def export_to_excel(self):
+        if self.processed_data:
+            df = pd.DataFrame(self.processed_data)
+            buf = BytesIO()
+            df.to_excel(buf, index=False, sheet_name='Dados_CTe')
+            buf.seek(0)
+            return buf.getvalue(), len(df)
+        return None, 0
 
     def clear_data(self):
         self.processed_data = []
 
 
 # ==============================================================================
-# DRIVER
-# ==============================================================================
-def get_driver(download_path):
-    opts = Options()
-    opts.add_argument("--headless=new")
-    opts.add_argument("--no-sandbox")
-    opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--window-size=1920,1080")
-    opts.add_argument("--disable-notifications")
-    opts.add_argument("--disable-popup-blocking")
-    prefs = {
-        "download.default_directory": download_path,
-        "download.prompt_for_download": False,
-        "download.directory_upgrade": True,
-        "safebrowsing.enabled": True,
-        "profile.default_content_setting_values.automatic_downloads": 1,
-    }
-    opts.add_experimental_option("prefs", prefs)
-    opts.add_experimental_option("excludeSwitches", ["enable-logging"])
-    opts.binary_location = "/usr/bin/chromium"
-    return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=opts)
-
-
-# ==============================================================================
-# esperar_downloads — IGUAL ao tkinter
+# esperar_downloads — IGUAL AO TKINTER
 # ==============================================================================
 def esperar_downloads(directory, timeout=120):
-    start = time.time()
-    while time.time() - start < timeout:
-        if not list(Path(directory).glob('*.crdownload')):
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        crdownload_files = list(Path(directory).glob('*.crdownload'))
+        if not crdownload_files:
             return True
         time.sleep(1)
     return False
 
 
 # ==============================================================================
-# processar_arquivos_baixados — IGUAL ao tkinter, traduzido para Python puro
+# processar_arquivos_baixados — IGUAL AO TKINTER (método para função)
 # ==============================================================================
-def processar_arquivos_baixados(base_dir, state, log_fn):
-    """
-    Cópia exata do método processar_arquivos_baixados() do tkinter.
-    Extrai ZIPs, processa XMLs por pasta, gera Excel em memória.
-    """
-    log_fn("=" * 45)
-    log_fn("INICIANDO PROCESSAMENTO DOS ARQUIVOS")
-    log_fn("=" * 45)
+def processar_arquivos_baixados(base_dir, log_callback, state):
+    log_callback("=" * 50)
+    log_callback("📦 INICIANDO PROCESSAMENTO DOS ARQUIVOS")
+    log_callback("=" * 50)
 
     state["stage"] = "extract"
+
     zip_files = list(Path(base_dir).glob('*.zip'))
-    log_fn(f"{len(zip_files)} arquivos ZIP encontrados")
+    log_callback(f"🔍 {len(zip_files)} arquivos ZIP encontrados")
 
     if not zip_files:
-        log_fn("⚠ Nenhum arquivo ZIP para processar!")
-        state["error_msg"] = "Nenhum ZIP foi baixado. Verifique login e datas."
+        log_callback("⚠ Nenhum arquivo ZIP para processar!")
+        state["error_msg"] = "Nenhum ZIP baixado. Verifique login e datas."
         return
 
-    # Pasta de extração separada — IGUAL ao tkinter (tempfile.mkdtemp)
+    # IGUAL AO TKINTER
     extract_dir = tempfile.mkdtemp(prefix="mastersaf_extracted_")
     all_xml_dirs = []
 
-    log_fn("Extraindo arquivos ZIP...")
-    for zip_file in zip_files:
+    for idx, zip_file in enumerate(zip_files):
         try:
             zip_name     = zip_file.stem
             extract_path = os.path.join(extract_dir, zip_name)
@@ -372,189 +303,208 @@ def processar_arquivos_baixados(base_dir, state, log_fn):
             with zipfile.ZipFile(zip_file, 'r') as zip_ref:
                 zip_ref.extractall(extract_path)
             all_xml_dirs.append(extract_path)
-            log_fn(f"   ✔ {zip_file.name}")
+            log_callback(f"   ✔ {zip_file.name}")
         except Exception as e:
-            log_fn(f"   ❌ Erro ao extrair {zip_file.name}: {e}")
+            log_callback(f"   ❌ Erro: {zip_file.name}")
 
-    # Processa XMLs — IGUAL ao tkinter: chama por pasta, não rglob
+    # IGUAL AO TKINTER
     state["stage"] = "excel"
-    log_fn("Processando arquivos XML de CT-e...")
+    log_callback("📄 Processando XMLs de CT-e...")
+
     processor = CTeProcessor()
 
     for xml_dir in all_xml_dirs:
-        processor.process_xml_files_from_directory(xml_dir, log_fn)
+        processor.process_xml_files_from_directory(xml_dir, log_callback)
 
-    total = len(processor.processed_data)
-    log_fn(f"Total de CT-es identificados: {total}")
-    state["xml_count"] = total
+    total_processados = len(processor.processed_data)
+    log_callback(f"📊 Total de CT-es identificados: {total_processados}")
+    state["xml_count"] = total_processados
 
-    if total > 0:
-        log_fn("Gerando Excel consolidado...")
+    if total_processados > 0:
+        log_callback("📊 Gerando Excel consolidado...")
 
-        # Resumo igual ao tkinter
-        df_res      = pd.DataFrame(processor.processed_data)
-        peso_total  = df_res['Peso Bruto (kg)'].sum()
-        valor_total = df_res['Valor Prestação'].sum()
+        # Calcula resumo ANTES de exportar (igual ao tkinter)
+        df_tmp      = pd.DataFrame(processor.processed_data)
+        peso_total  = df_tmp['Peso Bruto (kg)'].sum()
+        valor_total = df_tmp['Valor Prestação'].sum()
+        num_registros = len(df_tmp)
 
-        excel_bytes, n = processor.export_to_excel_bytes()
+        excel_bytes, _ = processor.export_to_excel()
         processor.clear_data()
 
         state["excel_bytes"] = excel_bytes
-        state["xml_count"]   = n
+        state["xml_count"]   = num_registros
         state["stage"]       = "done"
 
-        log_fn(f"✅ Excel gerado! {n} registros")
-        log_fn(f"   • Peso Bruto Total: {peso_total:,.2f} kg")
-        log_fn(f"   • Valor Total: R$ {valor_total:,.2f}")
+        log_callback(f"✅ Excel gerado com sucesso!")
+        log_callback(f"📈 Resumo:")
+        log_callback(f"   • Registros: {num_registros}")
+        log_callback(f"   • Peso Bruto: {peso_total:,.2f} kg")
+        log_callback(f"   • Valor Total: R$ {valor_total:,.2f}")
     else:
         processor.clear_data()
-        log_fn("⚠ Nenhum CT-e válido encontrado nos XMLs")
-        state["error_msg"] = "XMLs extraídos mas nenhum CT-e válido identificado."
+        log_callback("⚠ Nenhum CT-e processado")
+        state["error_msg"] = "Nenhum CT-e válido encontrado nos XMLs."
         state["stage"]     = "done"
 
     # Limpa pasta de extração
-    try:
-        shutil.rmtree(extract_dir, ignore_errors=True)
-    except Exception:
-        pass
+    shutil.rmtree(extract_dir, ignore_errors=True)
+    log_callback("=" * 50)
 
 
 # ==============================================================================
-# WORKER — thread isolada
+# rodar_automacao — IGUAL AO TKINTER (método para função de thread)
 # ==============================================================================
-def automation_worker(usuario, senha, data_ini, data_fin, qtd_loops, temp_dir, state):
-    driver = None
+def rodar_automacao(usuario, senha, dt_ini, dt_fin, loops, state):
+    temp_dir = tempfile.mkdtemp(prefix="mastersaf_downloads_")
 
     def log(msg):
         ts = datetime.now().strftime("%H:%M:%S")
         state["logs"].append(f"[{ts}] {msg}")
         state["status_msg"] = msg
 
-    try:
-        # ── Download ──────────────────────────────────────────────────────────
-        state["stage"] = "download"
-        log("Iniciando navegador...")
-        driver = get_driver(temp_dir)
+    log(f"📁 Pasta temporária: {os.path.basename(temp_dir)}")
+    driver = None
 
-        log("Acessando MasterSAF...")
+    try:
+        # Configura Chrome — IGUAL AO TKINTER
+        chrome_options = Options()
+        chrome_options.add_argument("--headless=new")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--window-size=1920,1080")
+        chrome_options.add_argument("--disable-notifications")
+        chrome_options.add_argument("--disable-popup-blocking")
+
+        prefs = {
+            "download.default_directory": temp_dir,
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True,
+            "profile.default_content_setting_values.automatic_downloads": 1
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
+        chrome_options.binary_location = "/usr/bin/chromium"
+
+        log("🌐 Iniciando navegador em segundo plano...")
+        driver = webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=chrome_options)
+
+        log("🔗 Acessando MasterSAF...")
         driver.get("https://p.dfe.mastersaf.com.br/mvc/login")
         time.sleep(3)
 
-        log("Realizando login...")
+        log("🔑 Realizando login...")
         driver.find_element(By.XPATH, '//*[@id="nomeusuario"]').send_keys(usuario)
         driver.find_element(By.XPATH, '//*[@id="senha"]').send_keys(senha)
         driver.find_element(By.XPATH, '//*[@id="enter"]').click()
         time.sleep(5)
 
-        log("Acessando Listagem Receptor CTEs...")
+        log("📋 Acessando Listagem Receptor CTEs...")
         driver.find_element(By.XPATH, '//*[@id="linkListagemReceptorCTEs"]/a').click()
         time.sleep(5)
 
-        log(f"Configurando período: {data_ini} a {data_fin}")
-        campo_ini = driver.find_element(By.XPATH, '//*[@id="consultaDataInicial"]')
-        campo_ini.click()
-        campo_ini.send_keys(Keys.CONTROL, 'a')
-        campo_ini.send_keys(data_ini)
+        log(f"📅 Configurando período: {dt_ini} a {dt_fin}")
+        campo_dt_inicial = driver.find_element(By.XPATH, '//*[@id="consultaDataInicial"]')
+        campo_dt_inicial.click()
+        campo_dt_inicial.send_keys(Keys.CONTROL, 'a')
+        campo_dt_inicial.send_keys(dt_ini)
 
-        campo_fin = driver.find_element(By.XPATH, '//*[@id="consultaDataFinal"]')
-        campo_fin.click()
-        campo_fin.send_keys(Keys.CONTROL, 'a')
-        campo_fin.send_keys(data_fin)
+        campo_dt_final = driver.find_element(By.XPATH, '//*[@id="consultaDataFinal"]')
+        campo_dt_final.click()
+        campo_dt_final.send_keys(Keys.CONTROL, 'a')
+        campo_dt_final.send_keys(dt_fin)
         time.sleep(2)
 
-        log("Atualizando listagem...")
+        log("🔄 Atualizando listagem...")
         driver.find_element(By.XPATH, '//*[@id="listagem_atualiza"]').click()
         time.sleep(5)
 
-        log("Configurando exibição (200 itens por página)...")
-        sel = driver.find_element(By.XPATH, '//*[@id="plistagem_center"]/table/tbody/tr/td[8]/select')
-        sel.click()
+        log("⚙️ Configurando exibição (200 itens por página)...")
+        select_element = driver.find_element(By.XPATH, '//*[@id="plistagem_center"]/table/tbody/tr/td[8]/select')
+        select_element.click()
         time.sleep(1)
-        sel.find_element(By.XPATH, './/option[@value="200"]').click()
+        select_element.find_element(By.XPATH, './/option[@value="200"]').click()
         time.sleep(3)
 
-        log(f"Iniciando downloads ({qtd_loops} páginas)...")
+        log(f"📥 Iniciando downloads ({loops} páginas)...")
 
-        for i in range(int(qtd_loops)):
-            log(f"Página {i+1}/{qtd_loops}")
+        for i in range(loops):
+            state["stage"] = "download"
+            log(f"📄 Página {i + 1}/{loops}")
 
+            # Seleciona todos os checkboxes — IGUAL AO TKINTER
             try:
-                cb = driver.find_element(By.XPATH, '//*[@id="jqgh_listagem_checkBox"]/div/input')
-                if not cb.is_selected():
-                    cb.click()
+                checkbox = driver.find_element(By.XPATH, '//*[@id="jqgh_listagem_checkBox"]/div/input')
+                if not checkbox.is_selected():
+                    checkbox.click()
                 time.sleep(3)
-            except Exception:
+            except:
                 pass
 
+            # Clica no botão de download múltiplo — IGUAL AO TKINTER
             try:
                 driver.find_element(By.XPATH, '//*[@id="xml_multiplos"]/h3').click()
                 time.sleep(3)
                 driver.find_element(By.XPATH, '//*[@id="downloadEmMassaXml"]').click()
                 time.sleep(3)
-            except Exception:
+            except:
                 log("   ⚠ Erro no botão de download")
 
-            # Aguarda .crdownload sumir — IGUAL ao tkinter
+            # Aguarda downloads terminarem — IGUAL AO TKINTER
             esperar_downloads(temp_dir)
 
-            # Log dos arquivos baixados até agora
-            zips_ate_agora = list(Path(temp_dir).glob('*.zip'))
-            log(f"   ✔ {len(zips_ate_agora)} ZIP(s) na pasta")
-
+            # Desmarca checkbox — IGUAL AO TKINTER
             try:
-                cb = driver.find_element(By.XPATH, '//*[@id="jqgh_listagem_checkBox"]/div/input')
-                if cb.is_selected():
-                    cb.click()
+                checkbox = driver.find_element(By.XPATH, '//*[@id="jqgh_listagem_checkBox"]/div/input')
+                if checkbox.is_selected():
+                    checkbox.click()
                 time.sleep(1)
-            except Exception:
+            except:
                 pass
 
-            if i < int(qtd_loops) - 1:
+            # Avança para próxima página — IGUAL AO TKINTER
+            if i < loops - 1:
                 try:
                     driver.find_element(By.XPATH, '//*[@id="next_plistagem"]/span').click()
                     time.sleep(5)
-                except Exception:
+                except:
                     log("   ⚠ Fim das páginas disponíveis")
                     break
 
             state["page_atual"] = i + 1
 
-        log("Downloads concluídos!")
-        driver.quit()
-        driver = None
+        log("✅ Downloads concluídos!")
 
-        # ── Processa ZIPs → XMLs → Excel (IGUAL ao tkinter) ──────────────────
-        processar_arquivos_baixados(temp_dir, state, log)
+        # Processamento pós-download — IGUAL AO TKINTER
+        processar_arquivos_baixados(temp_dir, log, state)
 
     except Exception as e:
         import traceback
-        log(f"ERRO CRITICO: {str(e)}")
+        log(f"❌ ERRO: {str(e)}")
         log(traceback.format_exc())
         state["error_msg"] = str(e)
         state["stage"]     = "done"
     finally:
-        state["running"] = False
-        state["done"]    = True
+        log("🔒 Fechando navegador...")
         if driver:
             try: driver.quit()
-            except Exception: pass
-        # Limpa pasta de downloads
-        try:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        except Exception:
-            pass
+            except: pass
+        state["running"] = False
+        state["done"]    = True
+        # Limpa downloads
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        log("=" * 50)
 
 
 # ==============================================================================
-# DISPARO
+# DISPARO DA THREAD
 # ==============================================================================
 if iniciar:
     if not usuario or not senha:
         st.error("⚠️ Preencha o usuário e a senha para continuar.")
     else:
-        # IGUAL ao tkinter: tempfile.mkdtemp com prefixo
-        temp_dir = tempfile.mkdtemp(prefix="mastersaf_downloads_")
-
         st.session_state.running     = True
         st.session_state.done        = False
         st.session_state.error_msg   = ""
@@ -567,8 +517,8 @@ if iniciar:
         st.session_state.logs        = []
 
         t = threading.Thread(
-            target=automation_worker,
-            args=(usuario, senha, data_ini, data_fin, qtd_loops, temp_dir, st.session_state),
+            target=rodar_automacao,
+            args=(usuario, senha, data_ini, data_fin, int(qtd_loops), st.session_state),
             daemon=True,
         )
         t.start()
@@ -578,18 +528,12 @@ if iniciar:
 # PAINEL DE PROGRESSO
 # ==============================================================================
 if st.session_state.running or st.session_state.done:
-    st.markdown('<div class="section-label">Execução</div>', unsafe_allow_html=True)
-
     total = st.session_state.page_total or 1
     atual = st.session_state.page_atual
     stage = st.session_state.stage
 
-    pct = {
-        "download": (atual / total) * 0.65,
-        "extract":  0.75,
-        "excel":    0.90,
-        "done":     1.0,
-    }.get(stage, 0.0)
+    pct = {"download": (atual/total)*0.65, "extract": 0.78,
+           "excel": 0.92, "done": 1.0}.get(stage, 0.0)
 
     if st.session_state.error_msg:
         st.error(f"❌ {st.session_state.error_msg}")
@@ -604,22 +548,21 @@ if st.session_state.running or st.session_state.done:
 
     st.markdown(f"""
     <div class="stat-row">
-        <div class="stat-card"><div class="stat-label">Páginas Baixadas</div><div class="stat-value green">{atual}</div></div>
-        <div class="stat-card"><div class="stat-label">Total Programado</div><div class="stat-value">{total}</div></div>
-        <div class="stat-card"><div class="stat-label">CT-es no Excel</div><div class="stat-value blue">{st.session_state.xml_count}</div></div>
-        <div class="stat-card"><div class="stat-label">Etapa</div><div class="stat-value" style="font-size:1rem;padding-top:0.3rem">{stage.upper()}</div></div>
+      <div class="stat-card"><div class="stat-label">Páginas Baixadas</div><div class="stat-value green">{atual}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Programado</div><div class="stat-value">{total}</div></div>
+      <div class="stat-card"><div class="stat-label">CT-es Extraídos</div><div class="stat-value blue">{st.session_state.xml_count}</div></div>
+      <div class="stat-card"><div class="stat-label">Etapa</div><div class="stat-value" style="font-size:0.9rem;padding-top:0.4rem">{stage.upper()}</div></div>
     </div>
     """, unsafe_allow_html=True)
 
-    # Terminal de log — mostra tudo para debug
-    st.markdown('<div class="section-label">Log de Atividades</div>', unsafe_allow_html=True)
-    log_html = "\n".join(st.session_state.logs[-100:])
-    st.markdown(f'<div class="log-terminal">{log_html if log_html else "// aguardando eventos..."}</div>', unsafe_allow_html=True)
+    # Log terminal
+    log_html = "\n".join(st.session_state.logs[-120:]) or "// aguardando..."
+    st.markdown(f'<div class="log-box">{log_html}</div>', unsafe_allow_html=True)
 
-    # Download
+    # Download Excel
     if stage == "done" and st.session_state.excel_bytes:
-        st.markdown('<div class="section-label">Download</div>', unsafe_allow_html=True)
-        periodo = f"{data_ini.replace('/','- ')}_a_{data_fin.replace('/','- ')}"
+        st.markdown("---")
+        periodo = f"{data_ini.replace('/','_')}_a_{data_fin.replace('/','_')}"
         st.download_button(
             label=f"📥  BAIXAR EXCEL — {st.session_state.xml_count} CT-e(s)",
             data=st.session_state.excel_bytes,
