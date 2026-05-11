@@ -1,145 +1,335 @@
 import streamlit as st
-import os
-import sys
-import zipfile
-import tempfile
-import shutil
-import threading
-import time
-from pathlib import Path
-import xml.etree.ElementTree as ET
+import sqlite3
+from datetime import datetime, timedelta, date
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import random
+from typing import List, Tuple, Optional, Dict, Any  # ADICIONADO Dict e Any
+import io
+import contextlib
+import chardet
 from io import BytesIO
-from selenium import webdriver
-from selenium.webdriver.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from datetime import datetime
+import base64
+import time
+import xml.etree.ElementTree as ET
+import os
+import hashlib
+import xml.dom.minidom
+import traceback
+from pathlib import Path
+import numpy as np
+import fitz  # PyMuPDF
+import pdfplumber
+import re
+from lxml import etree
+import tempfile
+import logging
+import gc  # ADICIONADO: Biblioteca nativa para limpeza de memória
 
 # ==============================================================================
-# CONFIGURAÇÃO DA PÁGINA
+# CONFIGURAÇÃO AUTOMÁTICA DO SERVIDOR STREAMLIT (Para PDFs gigantes)
 # ==============================================================================
-st.set_page_config(page_title="MasterSAF", page_icon="⚡", layout="wide")
+def setup_streamlit_config():
+    """Cria o config.toml automaticamente para liberar uploads pesados."""
+    try:
+        os.makedirs(".streamlit", exist_ok=True)
+        config_path = os.path.join(".streamlit", "config.toml")
+        
+        # Só cria se não existir, para não sobrescrever
+        if not os.path.exists(config_path):
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write("[server]\n")
+                f.write("maxUploadSize = 1000\n")
+                f.write("maxMessageSize = 1000\n")
+    except Exception as e:
+        pass
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;500;700&display=swap');
-#MainMenu {visibility:hidden;} footer {visibility:hidden;} header {visibility:hidden;}
-html,body,[data-testid="stAppViewContainer"]{background:#0a0c10!important;color:#d4dbe8!important;font-family:'DM Sans',sans-serif!important;}
-[data-testid="stSidebar"]{background:#0e1117!important;border-right:1px solid #1e2535!important;}
-[data-testid="stSidebar"] *{color:#c4ccd8!important;}
-[data-testid="stTextInput"] input,[data-testid="stNumberInput"] input{background:#070910!important;border:1px solid #1e2535!important;border-radius:6px!important;color:#d4dbe8!important;font-family:'Space Mono',monospace!important;font-size:0.82rem!important;}
-[data-testid="stSidebar"] label{font-family:'Space Mono',monospace!important;font-size:0.72rem!important;letter-spacing:0.1em!important;text-transform:uppercase!important;color:#4a5568!important;}
-[data-testid="stSidebar"] .stButton button{background:linear-gradient(135deg,#00e5a0,#0070f3)!important;color:#020408!important;font-family:'Space Mono',monospace!important;font-weight:700!important;border:none!important;border-radius:6px!important;padding:0.75rem 1.5rem!important;width:100%!important;}
-.stDownloadButton button{background:linear-gradient(135deg,#00e5a0,#0070f3)!important;color:#020408!important;font-family:'Space Mono',monospace!important;font-weight:700!important;font-size:1rem!important;border-radius:8px!important;padding:0.9rem 2rem!important;width:100%!important;border:none!important;}
-[data-testid="stAlert"]{background:#0e1117!important;border-radius:8px!important;border-left:3px solid!important;font-family:'Space Mono',monospace!important;font-size:0.8rem!important;}
-[data-testid="stProgress"] > div > div{background:linear-gradient(90deg,#00e5a0,#0070f3)!important;border-radius:4px!important;}
-[data-testid="stProgress"] > div{background:#1e2535!important;border-radius:4px!important;height:6px!important;}
-.hero{padding:2rem 0 1.5rem;border-bottom:1px solid #1e2535;margin-bottom:1.5rem;}
-.hero-tag{font-family:'Space Mono',monospace;font-size:0.7rem;letter-spacing:0.2em;color:#00e5a0;text-transform:uppercase;margin-bottom:0.4rem;}
-.hero-title{font-family:'Space Mono',monospace;font-size:2rem;font-weight:700;color:#eef2ff;margin:0;}
-.hero-title span{color:#00e5a0;}
-.hero-sub{font-size:0.9rem;color:#6b7a99;margin-top:0.4rem;}
-.sidebar-logo{font-family:'Space Mono',monospace;font-size:0.95rem;font-weight:700;color:#eef2ff;padding:1rem 0 1.4rem;border-bottom:1px solid #1e2535;margin-bottom:1rem;}
-.sidebar-logo span{color:#00e5a0;}
-.slabel{font-family:'Space Mono',monospace;font-size:0.62rem;letter-spacing:0.2em;color:#4a5568;text-transform:uppercase;margin-bottom:0.6rem;margin-top:1.4rem;border-bottom:1px solid #1e2535;padding-bottom:0.3rem;}
-.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:0.8rem;margin:1rem 0;}
-.stat-card{background:#0e1117;border:1px solid #1e2535;border-radius:8px;padding:1rem 1.2rem;position:relative;overflow:hidden;}
-.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,#00e5a0,#0070f3);}
-.stat-label{font-family:'Space Mono',monospace;font-size:0.6rem;letter-spacing:0.15em;color:#4a5568;text-transform:uppercase;margin-bottom:0.3rem;}
-.stat-value{font-family:'Space Mono',monospace;font-size:1.5rem;font-weight:700;color:#eef2ff;}
-.green{color:#00e5a0!important;} .blue{color:#0070f3!important;}
-.log-box{background:#070910;border:1px solid #1e2535;border-radius:8px;padding:1rem;font-family:'Space Mono',monospace;font-size:0.7rem;color:#00e5a0;max-height:300px;overflow-y:auto;line-height:1.8;white-space:pre-wrap;word-break:break-all;}
-</style>
-""", unsafe_allow_html=True)
+# Executa a configuração antes de iniciar a página
+setup_streamlit_config()
 
 # ==============================================================================
-# ESTADO
+# CONFIGURAÇÃO INICIAL
 # ==============================================================================
-for k,v in {"running":False,"done":False,"error_msg":"","page_atual":0,
-             "page_total":0,"status_msg":"","stage":"idle",
-             "xml_count":0,"excel_bytes":None,"logs":[]}.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
+st.set_page_config(
+    page_title="Sistema de Processamento Unificado 2026",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Namespaces para CT-e
+CTE_NAMESPACES = {
+    'cte': 'http://www.portalfiscal.inf.br/cte'
+}
+
+# Inicialização do estado da sessão
+if 'selected_xml' not in st.session_state:
+    st.session_state.selected_xml = None
+if 'cte_data' not in st.session_state:
+    st.session_state.cte_data = None
+if "parsed_duimp" not in st.session_state:
+    st.session_state["parsed_duimp"] = None
+if "parsed_hafele" not in st.session_state:
+    st.session_state["parsed_hafele"] = None
+if "merged_df" not in st.session_state:
+    st.session_state["merged_df"] = None
+
+# Configuração de logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # ==============================================================================
-# HERO
+# ANIMAÇÕES DE CARREGAMENTO
 # ==============================================================================
-st.markdown("""
-<div class="hero">
-  <div class="hero-tag">⚡ Automação Fiscal</div>
-  <h1 class="hero-title">Master<span>SAF</span> → Excel</h1>
-  <p class="hero-sub">Baixa CT-es, extrai XMLs dos ZIPs e gera planilha Excel — automaticamente</p>
-</div>
-""", unsafe_allow_html=True)
+def show_loading_animation(message="Processando..."):
+    """Exibe uma animação de carregamento"""
+    with st.spinner(message):
+        progress_bar = st.progress(0)
+        for i in range(100):
+            time.sleep(0.01)
+            progress_bar.progress(i + 1)
+        progress_bar.empty()
+
+def show_processing_animation(message="Analisando dados..."):
+    """Exibe animação de processamento"""
+    placeholder = st.empty()
+    with placeholder.container():
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.info(f"⏳ {message}")
+            spinner_placeholder = st.empty()
+            spinner_chars = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]
+            for i in range(20):
+                spinner_placeholder.markdown(f"<div style='text-align: center; font-size: 24px;'>{spinner_chars[i % 8]}</div>", unsafe_allow_html=True)
+                time.sleep(0.1)
+    placeholder.empty()
+
+def show_success_animation(message="Concluído!"):
+    """Exibe animação de sucesso"""
+    success_placeholder = st.empty()
+    with success_placeholder.container():
+        st.success(f"✅ {message}")
+        time.sleep(1.5)
+    success_placeholder.empty()
 
 # ==============================================================================
-# SIDEBAR
+# CSS E CONFIGURAÇÃO DE ESTILO
 # ==============================================================================
-with st.sidebar:
-    st.markdown('<div class="sidebar-logo">MASTER<span>SAF</span> //</div>', unsafe_allow_html=True)
-    st.markdown('<div class="slabel">Credenciais</div>', unsafe_allow_html=True)
-    usuario   = st.text_input("Usuário", placeholder="login@empresa.com.br", disabled=st.session_state.running)
-    senha     = st.text_input("Senha", type="password", placeholder="••••••••", disabled=st.session_state.running)
-    st.markdown('<div class="slabel">Período</div>', unsafe_allow_html=True)
-    data_ini  = st.text_input("Data Inicial", value="08/05/2026", disabled=st.session_state.running)
-    data_fin  = st.text_input("Data Final",   value="08/05/2026", disabled=st.session_state.running)
-    st.markdown('<div class="slabel">Parâmetros</div>', unsafe_allow_html=True)
-    qtd_loops = st.number_input("Qtd. Páginas", min_value=1, max_value=1000, value=5, disabled=st.session_state.running)
-    st.markdown("<br>", unsafe_allow_html=True)
-    if not st.session_state.running:
-        iniciar = st.button("⚡ Iniciar Automação")
-    else:
-        st.button("⏳ Processando...", disabled=True)
-        iniciar = False
+def load_css():
+    st.markdown("""
+    <style>
+        .cover-container {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ed 100%);
+            padding: 3rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+        .cover-logo {
+            max-width: 300px;
+            margin-bottom: 1.5rem;
+        }
+        .cover-title {
+            font-size: 2.8rem;
+            font-weight: 800;
+            margin-bottom: 1rem;
+            background: linear-gradient(90deg, #2c3e50, #3498db);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .cover-subtitle {
+            font-size: 1.2rem;
+            color: #7f8c8d;
+            margin-bottom: 0;
+        }
+        .header {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin: 1.5rem 0 1rem 0;
+            padding-left: 10px;
+            border-left: 5px solid #2c3e50;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+            padding: 1.8rem;
+            margin-bottom: 1.8rem;
+        }
+        .stButton>button {
+            width: 100%;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .spinner {
+            animation: spin 2s linear infinite;
+            display: inline-block;
+            font-size: 24px;
+        }
+        .main-header { 
+            font-size: 2.5rem; 
+            color: #1E3A8A; 
+            font-weight: bold; 
+            margin-bottom: 1rem; 
+        }
+        .sub-header { 
+            font-size: 1.5rem; 
+            color: #2563EB; 
+            margin-top: 1.5rem; 
+            border-bottom: 2px solid #E5E7EB; 
+        }
+        .section-card { 
+            background: #FFFFFF; 
+            border-radius: 12px; 
+            padding: 1.5rem; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+            margin-bottom: 1rem; 
+            border: 1px solid #E5E7EB; 
+        }
+        .success-box { 
+            background-color: #d1fae5; 
+            color: #065f46; 
+            padding: 10px; 
+            border-radius: 5px; 
+            margin: 10px 0; 
+        }
+        .stButton>button { 
+            width: 100%; 
+            border-radius: 5px; 
+            font-weight: bold; 
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
 # ==============================================================================
-# CTeProcessor — RÉPLICA EXATA DO TKINTER
-# Única diferença: export_to_excel salva em BytesIO em vez de arquivo
+# PARTE 1: PROCESSADOR DE ARQUIVOS TXT
 # ==============================================================================
-CTE_NAMESPACES = {'cte': 'http://www.portalfiscal.inf.br/cte'}
+def processador_txt():
+    st.title("📄 Processador de Arquivos TXT")
+    st.markdown("""
+    <div class="card">
+        Remova linhas indesejadas de arquivos TXT. Carregue seu arquivo e defina os padrões a serem removidos.
+    </div>
+    """, unsafe_allow_html=True)
 
-class CTeProcessor:
+    def detectar_encoding(conteudo):
+        """Detecta o encoding do conteúdo do arquivo"""
+        resultado = chardet.detect(conteudo)
+        return resultado['encoding']
+
+    def processar_arquivo(conteudo, padroes):
+        """
+        Processa o conteúdo do arquivo removendo linhas indesejadas e realizando substituições
+        """
+        try:
+            substituicoes = {
+                "IMPOSTO IMPORTACAO": "IMP IMPORT",
+                "TAXA SICOMEX": "TX SISCOMEX",
+                "FRETE INTERNACIONAL": "FRET INTER",
+                "SEGURO INTERNACIONAL": "SEG INTERN"
+            }
+            
+            encoding = detectar_encoding(conteudo)
+            
+            try:
+                texto = conteudo.decode(encoding)
+            except UnicodeDecodeError:
+                texto = conteudo.decode('latin-1')
+            
+            linhas = texto.splitlines()
+            linhas_processadas = []
+            
+            for linha in linhas:
+                linha = linha.strip()
+                if not any(padrao in linha for padrao in padroes):
+                    for original, substituto in substituicoes.items():
+                        linha = linha.replace(original, substituto)
+                    linhas_processadas.append(linha)
+            
+            return "\n".join(linhas_processadas), len(linhas)
+        
+        except Exception as e:
+            st.error(f"Erro ao processar o arquivo: {str(e)}")
+            return None, 0
+
+    # Padrões padrão para remoção
+    padroes_default = ["-------", "SPED EFD-ICMS/IPI"]
+    
+    # Upload do arquivo
+    arquivo = st.file_uploader("Selecione o arquivo TXT", type=['txt'])
+    
+    # Opções avançadas
+    with st.expander("⚙️ Configurações avançadas", expanded=False):
+        padroes_adicionais = st.text_input(
+            "Padrões adicionais para remoção (separados por vírgula)",
+            help="Exemplo: padrão1, padrão2, padrão3"
+        )
+        
+        padroes = padroes_default + [
+            p.strip() for p in padroes_adicionais.split(",") 
+            if p.strip()
+        ] if padroes_adicionais else padroes_default
+
+    if arquivo is not None:
+        if st.button("🔄 Processar Arquivo TXT"):
+            try:
+                show_loading_animation("Analisando arquivo TXT...")
+                conteudo = arquivo.read()
+                show_processing_animation("Processando linhas...")
+                resultado, total_linhas = processar_arquivo(conteudo, padroes)
+                
+                if resultado is not None:
+                    show_success_animation("Arquivo processado com sucesso!")
+                    
+                    linhas_processadas = len(resultado.splitlines())
+                    st.success(f"""
+                    **Processamento concluído!** ✔️ Linhas originais: {total_linhas}  
+                    ✔️ Linhas processadas: {linhas_processadas}  
+                    ✔️ Linhas removidas: {total_linhas - linhas_processadas}
+                    """)
+
+                    st.subheader("Prévia do resultado")
+                    st.text_area("Conteúdo processado", resultado, height=300)
+
+                    buffer = BytesIO()
+                    buffer.write(resultado.encode('utf-8'))
+                    buffer.seek(0)
+                    
+                    st.download_button(
+                        label="⬇️ Baixar arquivo processado",
+                        data=buffer,
+                        file_name=f"processado_{arquivo.name}",
+                        mime="text/plain"
+                    )
+            
+            except Exception as e:
+                st.error(f"Erro inesperado: {str(e)}")
+                st.info("Tente novamente ou verifique o arquivo.")
+
+# ==============================================================================
+# PARTE 2: PROCESSADOR CT-E COM EXTRAÇÃO DO PESO BRUTO E PESO BASE DE CÁLCULO
+# ==============================================================================
+class CTeProcessorDirect:
     def __init__(self):
         self.processed_data = []
-
+    
     def extract_nfe_number_from_key(self, chave_acesso):
+        """Extrai o número da NF-e da chave de acesso"""
         if not chave_acesso or len(chave_acesso) != 44:
             return None
+        
         try:
-            return chave_acesso[25:34]
+            numero_nfe = chave_acesso[25:34]
+            return numero_nfe
         except Exception:
             return None
-
+    
     def extract_peso_bruto(self, root):
+        """Extrai o peso bruto do CT-e - BUSCA EM PESO BRUTO E PESO BASE DE CÁLCULO"""
         try:
-            tipos_peso = ['PESO BRUTO', 'PESO BASE DE CALCULO', 'PESO BASE CÁLCULO', 'PESO']
-            for prefix, uri in CTE_NAMESPACES.items():
-                infQ_elements = root.findall(f'.//{{{uri}}}infQ')
-                for infQ in infQ_elements:
-                    tpMed  = infQ.find(f'{{{uri}}}tpMed')
-                    qCarga = infQ.find(f'{{{uri}}}qCarga')
-                    if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
-                        for tipo_peso in tipos_peso:
-                            if tipo_peso in tpMed.text.upper():
-                                return float(qCarga.text)
-            infQ_elements = root.findall('.//infQ')
-            for infQ in infQ_elements:
-                tpMed  = infQ.find('tpMed')
-                qCarga = infQ.find('qCarga')
-                if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
-                    for tipo_peso in tipos_peso:
-                        if tipo_peso in tpMed.text.upper():
-                            return float(qCarga.text)
-            return 0.0
-        except Exception:
-            return 0.0
-
-    def extract_cte_data(self, xml_content, filename):
-        try:
-            root = ET.fromstring(xml_content)
-
             def find_text(element, xpath):
                 try:
                     for prefix, uri in CTE_NAMESPACES.items():
@@ -147,66 +337,144 @@ class CTeProcessor:
                         found = element.find(full_xpath)
                         if found is not None and found.text:
                             return found.text
+                    
                     found = element.find(xpath.replace('cte:', ''))
                     if found is not None and found.text:
                         return found.text
                     return None
                 except Exception:
                     return None
-
-            nCT          = find_text(root, './/cte:nCT')
-            dhEmi        = find_text(root, './/cte:dhEmi')
-            cMunIni      = find_text(root, './/cte:cMunIni')
-            UFIni        = find_text(root, './/cte:UFIni')
-            cMunFim      = find_text(root, './/cte:cMunFim')
-            UFFim        = find_text(root, './/cte:UFFim')
-            emit_xNome   = find_text(root, './/cte:emit/cte:xNome')
-            vTPrest      = find_text(root, './/cte:vTPrest')
-            rem_xNome    = find_text(root, './/cte:rem/cte:xNome')
-            dest_xNome   = find_text(root, './/cte:dest/cte:xNome')
-            dest_CNPJ    = find_text(root, './/cte:dest/cte:CNPJ')
-            dest_CPF     = find_text(root, './/cte:dest/cte:CPF')
-            dest_xLgr    = find_text(root, './/cte:dest/cte:enderDest/cte:xLgr')
-            dest_nro     = find_text(root, './/cte:dest/cte:enderDest/cte:nro')
-            dest_xBairro = find_text(root, './/cte:dest/cte:enderDest/cte:xBairro')
-            dest_xMun    = find_text(root, './/cte:dest/cte:enderDest/cte:xMun')
-            dest_UF      = find_text(root, './/cte:dest/cte:enderDest/cte:UF')
-            dest_CEP     = find_text(root, './/cte:dest/cte:enderDest/cte:CEP')
-            infNFe_chave = find_text(root, './/cte:infNFe/cte:chave')
-
+            
+            # Lista de tipos de peso a serem procurados (em ordem de prioridade)
+            tipos_peso = ['PESO BRUTO', 'PESO BASE DE CALCULO', 'PESO BASE CÁLCULO', 'PESO']
+            
+            # Busca por todas as tags infQ com namespaces
+            for prefix, uri in CTE_NAMESPACES.items():
+                infQ_elements = root.findall(f'.//{{{uri}}}infQ')
+                for infQ in infQ_elements:
+                    tpMed = infQ.find(f'{{{uri}}}tpMed')
+                    qCarga = infQ.find(f'{{{uri}}}qCarga')
+                    
+                    if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
+                        # Verifica cada tipo de peso na ordem de prioridade
+                        for tipo_peso in tipos_peso:
+                            if tipo_peso in tpMed.text.upper():
+                                peso = float(qCarga.text)
+                                return peso, tipo_peso  # Retorna o peso e o tipo encontrado
+            
+            # Tentativa alternativa sem namespace
+            infQ_elements = root.findall('.//infQ')
+            for infQ in infQ_elements:
+                tpMed = infQ.find('tpMed')
+                qCarga = infQ.find('qCarga')
+                
+                if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
+                    for tipo_peso in tipos_peso:
+                        if tipo_peso in tpMed.text.upper():
+                            peso = float(qCarga.text)
+                            return peso, tipo_peso
+            
+            return 0.0, "Não encontrado"
+            
+        except Exception as e:
+            st.warning(f"Não foi possível extrair o peso: {str(e)}")
+            return 0.0, "Erro na extração"
+    
+    def extract_cte_data(self, xml_content, filename):
+        """Extrai dados específicos do CT-e incluindo peso bruto"""
+        try:
+            root = ET.fromstring(xml_content)
+            
+            for prefix, uri in CTE_NAMESPACES.items():
+                ET.register_namespace(prefix, uri)
+            
+            def find_text(element, xpath):
+                try:
+                    for prefix, uri in CTE_NAMESPACES.items():
+                        full_xpath = xpath.replace('cte:', f'{{{uri}}}')
+                        found = element.find(full_xpath)
+                        if found is not None and found.text:
+                            return found.text
+                    
+                    found = element.find(xpath.replace('cte:', ''))
+                    if found is not None and found.text:
+                        return found.text
+                    return None
+                except Exception:
+                    return None
+            
+            # Extrai dados do CT-e
+            nCT = find_text(root, './/cte:nCT')
+            dhEmi = find_text(root, './/cte:dhEmi')
+            cMunIni = find_text(root, './/cte:cMunIni')
+            UFIni = find_text(root, './/cte:UFIni')
+            cMunFim = find_text(root, './/cte:cMunFim')
+            UFFim = find_text(root, './/cte:UFFim')
+            emit_xNome = find_text(root, './/cte:emit/cte:xNome')
+            vTPrest = find_text(root, './/cte:vTPrest')
+            rem_xNome = find_text(root, './/cte:rem/cte:xNome')
+            
+            # Extrai dados do destinatário
+            dest_xNome = find_text(root, './/cte:dest/cte:xNome')
+            dest_CNPJ = find_text(root, './/cte:dest/cte:CNPJ')
+            dest_CPF = find_text(root, './/cte:dest/cte:CPF')
+            
             documento_destinatario = dest_CNPJ or dest_CPF or 'N/A'
-
+            
+            # Extrai endereço do destinatário
+            dest_xLgr = find_text(root, './/cte:dest/cte:enderDest/cte:xLgr')
+            dest_nro = find_text(root, './/cte:dest/cte:enderDest/cte:nro')
+            dest_xBairro = find_text(root, './/cte:dest/cte:enderDest/cte:xBairro')
+            dest_cMun = find_text(root, './/cte:dest/cte:enderDest/cte:cMun')
+            dest_xMun = find_text(root, './/cte:dest/cte:enderDest/cte:xMun')
+            dest_CEP = find_text(root, './/cte:dest/cte:enderDest/cte:CEP')
+            dest_UF = find_text(root, './/cte:dest/cte:enderDest/cte:UF')
+            
+            # Monta endereço completo
             endereco_destinatario = ""
             if dest_xLgr:
                 endereco_destinatario += f"{dest_xLgr}"
-                if dest_nro:     endereco_destinatario += f", {dest_nro}"
-                if dest_xBairro: endereco_destinatario += f" - {dest_xBairro}"
-                if dest_xMun:    endereco_destinatario += f", {dest_xMun}"
-                if dest_UF:      endereco_destinatario += f"/{dest_UF}"
-                if dest_CEP:     endereco_destinatario += f" - CEP: {dest_CEP}"
+                if dest_nro:
+                    endereco_destinatario += f", {dest_nro}"
+                if dest_xBairro:
+                    endereco_destinatario += f" - {dest_xBairro}"
+                if dest_xMun:
+                    endereco_destinatario += f", {dest_xMun}"
+                if dest_UF:
+                    endereco_destinatario += f"/{dest_UF}"
+                if dest_CEP:
+                    endereco_destinatario += f" - CEP: {dest_CEP}"
+            
             if not endereco_destinatario:
                 endereco_destinatario = "N/A"
-
+            
+            infNFe_chave = find_text(root, './/cte:infNFe/cte:chave')
             numero_nfe = self.extract_nfe_number_from_key(infNFe_chave) if infNFe_chave else None
-            peso_bruto = self.extract_peso_bruto(root)
-
+            
+            # EXTRAI O PESO BRUTO - AGORA COM BUSCA EM MÚLTIPLOS CAMPOS
+            peso_bruto, tipo_peso_encontrado = self.extract_peso_bruto(root)
+            
+            # Formata data
             data_formatada = None
             if dhEmi:
                 try:
-                    data_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
+                    try:
+                        data_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
+                    except:
+                        try:
+                            data_obj = datetime.strptime(dhEmi[:10], '%d/%m/%Y')
+                        except:
+                            data_obj = datetime.strptime(dhEmi[:10], '%d/%m/%y')
                     data_formatada = data_obj.strftime('%d/%m/%y')
                 except:
-                    try:
-                        data_obj = datetime.strptime(dhEmi[:10], '%d/%m/%Y')
-                        data_formatada = data_obj.strftime('%d/%m/%y')
-                    except:
-                        data_formatada = dhEmi[:10]
-
+                    data_formatada = dhEmi[:10]
+            
+            # Converte valor para decimal
             try:
                 vTPrest = float(vTPrest) if vTPrest else 0.0
             except (ValueError, TypeError):
                 vTPrest = 0.0
-
+            
             return {
                 'Arquivo': filename,
                 'nCT': nCT or 'N/A',
@@ -218,6 +486,7 @@ class CTeProcessor:
                 'Emitente': emit_xNome or 'N/A',
                 'Valor Prestação': vTPrest,
                 'Peso Bruto (kg)': peso_bruto,
+                'Tipo de Peso Encontrado': tipo_peso_encontrado,  # NOVO CAMPO
                 'Remetente': rem_xNome or 'N/A',
                 'Destinatário': dest_xNome or 'N/A',
                 'Documento Destinatário': documento_destinatario,
@@ -228,348 +497,1446 @@ class CTeProcessor:
                 'Número NFe': numero_nfe or 'N/A',
                 'Data Processamento': datetime.now().strftime('%d/%m/%Y %H:%M:%S')
             }
+            
         except Exception as e:
+            st.error(f"Erro ao extrair dados do CT-e {filename}: {str(e)}")
             return None
-
-    # IGUAL AO TKINTER — glob não-recursivo, encoding utf-8
-    def process_xml_files_from_directory(self, directory_path, log_callback):
-        xml_files = list(Path(directory_path).glob('*.xml'))
-        log_callback(f"   📄 {len(xml_files)} XMLs encontrados")
-        for xml_file in xml_files:
-            try:
-                with open(xml_file, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                if 'CTe' in content or 'conhecimento' in content.lower():
-                    data = self.extract_cte_data(content, xml_file.name)
-                    if data:
-                        self.processed_data.append(data)
-            except Exception:
-                pass
-
-    # IGUAL AO TKINTER — mas retorna bytes em vez de salvar em disco
-    def export_to_excel(self):
+    
+    def process_single_file(self, uploaded_file):
+        """Processa um único arquivo XML de CT-e"""
+        try:
+            file_content = uploaded_file.getvalue()
+            filename = uploaded_file.name
+            
+            if not filename.lower().endswith('.xml'):
+                return False, "Arquivo não é XML"
+            
+            content_str = file_content.decode('utf-8', errors='ignore')
+            if 'CTe' not in content_str and 'conhecimento' not in content_str.lower():
+                return False, "Arquivo não parece ser um CT-e"
+            
+            cte_data = self.extract_cte_data(content_str, filename)
+            
+            if cte_data:
+                self.processed_data.append(cte_data)
+                return True, f"CT-e {filename} processado com sucesso!"
+            else:
+                return False, f"Erro ao processar CT-e {filename}"
+                
+        except Exception as e:
+            return False, f"Erro ao processar arquivo {filename}: {str(e)}"
+    
+    def process_multiple_files(self, uploaded_files):
+        """Processa múltiplos arquivos XML de CT-e"""
+        results = {
+            'success': 0,
+            'errors': 0,
+            'messages': []
+        }
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        for i, uploaded_file in enumerate(uploaded_files):
+            status_text.text(f"Processando {i+1}/{len(uploaded_files)}: {uploaded_file.name}")
+            progress_bar.progress((i + 1) / len(uploaded_files))
+            
+            success, message = self.process_single_file(uploaded_file)
+            if success:
+                results['success'] += 1
+            else:
+                results['errors'] += 1
+            results['messages'].append(message)
+        
+        progress_bar.empty()
+        status_text.empty()
+        
+        return results
+    
+    def get_dataframe(self):
+        """Retorna os dados processados como DataFrame"""
         if self.processed_data:
-            df = pd.DataFrame(self.processed_data)
-            buf = BytesIO()
-            df.to_excel(buf, index=False, sheet_name='Dados_CTe')
-            buf.seek(0)
-            return buf.getvalue(), len(df)
-        return None, 0
-
+            return pd.DataFrame(self.processed_data)
+        return pd.DataFrame()
+    
     def clear_data(self):
+        """Limpa os dados processados"""
         self.processed_data = []
 
+def processador_cte():
+    """Interface para o sistema de CT-e com extração do peso bruto"""
+    processor = CTeProcessorDirect()
+    
+    st.title("🚚 Processador de CT-e para Power BI")
+    st.markdown("### Processa arquivos XML de CT-e e gera planilha para análise")
+    
+    with st.expander("ℹ️ Informações sobre a extração do Peso", expanded=True):
+        st.markdown("""
+        **Extração do Peso - Busca Inteligente:**
+        
+        O sistema agora busca o peso em **múltiplos campos** na seguinte ordem de prioridade:
+        
+        1. **PESO BRUTO** - Campo principal
+        2. **PESO BASE DE CALCULO** - Campo alternativo 1
+        3. **PESO BASE CÁLCULO** - Campo alternativo 2  
+        4. **PESO** - Campo genérico
+        
+        **Exemplos de campos reconhecidos:**
+        ```xml
+        <infQ>
+            <tpMed>PESO BRUTO</tpMed>
+            <qCarga>319.8000</qCarga>
+        </infQ>
+        ```
+        ```xml
+        <infQ>
+            <tpMed>PESO BASE DE CALCULO</tpMed>
+            <qCarga>250.5000</qCarga>
+        </infQ>
+        ```
+        
+        **Resultado:** O sistema mostrará qual tipo de peso foi encontrado em cada CT-e
+        """)
+    
+    tab1, tab2, tab3 = st.tabs(["📤 Upload", "👀 Visualizar Dados", "📥 Exportar"])
+    
+    with tab1:
+        st.header("Upload de CT-es")
+        upload_option = st.radio("Selecione o tipo de upload:", 
+                                ["Upload Individual", "Upload em Lote"])
+        
+        if upload_option == "Upload Individual":
+            uploaded_file = st.file_uploader("Selecione um arquivo XML de CT-e", type=['xml'], key="single_cte")
+            if uploaded_file and st.button("📊 Processar CT-e", key="process_single"):
+                show_loading_animation("Analisando estrutura do XML...")
+                show_processing_animation("Extraindo dados do CT-e...")
+                
+                success, message = processor.process_single_file(uploaded_file)
+                if success:
+                    show_success_animation("CT-e processado com sucesso!")
+                    
+                    df = processor.get_dataframe()
+                    if not df.empty:
+                        ultimo_cte = df.iloc[-1]
+                        st.info(f"""
+                        **Extração bem-sucedida:**
+                        - **Peso encontrado:** {ultimo_cte['Peso Bruto (kg)']} kg
+                        - **Tipo de peso:** {ultimo_cte['Tipo de Peso Encontrado']}
+                        """)
+                else:
+                    st.error(message)
+        
+        else:
+            uploaded_files = st.file_uploader("Selecione múltiplos arquivos XML de CT-e", 
+                                            type=['xml'], 
+                                            accept_multiple_files=True,
+                                            key="multiple_cte")
+            if uploaded_files and st.button("📊 Processar Todos", key="process_multiple"):
+                show_loading_animation(f"Iniciando processamento de {len(uploaded_files)} arquivos...")
+                
+                results = processor.process_multiple_files(uploaded_files)
+                show_success_animation("Processamento em lote concluído!")
+                
+                st.success(f"""
+                **Processamento concluído!** ✅ Sucessos: {results['success']}  
+                ❌ Erros: {results['errors']}
+                """)
+                
+                df = processor.get_dataframe()
+                if not df.empty:
+                    # Estatísticas dos tipos de peso encontrados
+                    tipos_peso = df['Tipo de Peso Encontrado'].value_counts()
+                    peso_total = df['Peso Bruto (kg)'].sum()
+                    
+                    st.info(f"""
+                    **Estatísticas de extração:**
+                    - Peso bruto total: {peso_total:,.2f} kg
+                    - Peso médio por CT-e: {df['Peso Bruto (kg)'].mean():,.2f} kg
+                    - Tipos de peso encontrados:
+                    """)
+                    
+                    for tipo, quantidade in tipos_peso.items():
+                        st.write(f"  - **{tipo}**: {quantidade} CT-e(s)")
+                
+                if results['errors'] > 0:
+                    with st.expander("Ver mensagens detalhadas"):
+                        for msg in results['messages']:
+                            st.write(f"- {msg}")
+        
+        if st.button("🗑️ Limpar Dados Processados", type="secondary"):
+            processor.clear_data()
+            st.success("Dados limpos com sucesso!")
+            time.sleep(1)
+            st.rerun()
+    
+    with tab2:
+        st.header("Dados Processados")
+        df = processor.get_dataframe()
+        
+        if not df.empty:
+            st.write(f"Total de CT-es processados: {len(df)}")
+            
+            # Filtros
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                uf_filter = st.multiselect("Filtrar por UF Início", options=df['UF Início'].unique())
+            with col2:
+                uf_destino_filter = st.multiselect("Filtrar por UF Destino", options=df['UF Destino'].unique())
+            with col3:
+                tipo_peso_filter = st.multiselect("Filtrar por Tipo de Peso", options=df['Tipo de Peso Encontrado'].unique())
+            
+            # Filtro de peso
+            st.subheader("Filtro por Peso Bruto")
+            peso_min = float(df['Peso Bruto (kg)'].min())
+            peso_max = float(df['Peso Bruto (kg)'].max())
+            peso_filter = st.slider("Selecione a faixa de peso (kg)", peso_min, peso_max, (peso_min, peso_max))
+            
+            # Aplicar filtros
+            filtered_df = df.copy()
+            if uf_filter:
+                filtered_df = filtered_df[filtered_df['UF Início'].isin(uf_filter)]
+            if uf_destino_filter:
+                filtered_df = filtered_df[filtered_df['UF Destino'].isin(uf_destino_filter)]
+            if tipo_peso_filter:
+                filtered_df = filtered_df[filtered_df['Tipo de Peso Encontrado'].isin(tipo_peso_filter)]
+            filtered_df = filtered_df[
+                (filtered_df['Peso Bruto (kg)'] >= peso_filter[0]) & 
+                (filtered_df['Peso Bruto (kg)'] <= peso_filter[1])
+            ]
+            
+            # Exibir dataframe
+            colunas_principais = [
+                'Arquivo', 'nCT', 'Data Emissão', 'Emitente', 'Remetente', 
+                'Destinatário', 'UF Início', 'UF Destino', 'Peso Bruto (kg)', 
+                'Tipo de Peso Encontrado', 'Valor Prestação'
+            ]
+            
+            st.dataframe(filtered_df[colunas_principais], use_container_width=True)
+            
+            with st.expander("📋 Ver todos os campos detalhados"):
+                st.dataframe(filtered_df, use_container_width=True)
+            
+            # Estatísticas
+            st.subheader("📈 Estatísticas")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            col1.metric("Total Valor Prestação", f"R$ {filtered_df['Valor Prestação'].sum():,.2f}")
+            col2.metric("Peso Bruto Total", f"{filtered_df['Peso Bruto (kg)'].sum():,.2f} kg")
+            col3.metric("Média Peso/CT-e", f"{filtered_df['Peso Bruto (kg)'].mean():,.2f} kg")
+            col4.metric("Tipos de Peso", f"{filtered_df['Tipo de Peso Encontrado'].nunique()}")
+            
+            # Gráficos
+            col_chart1, col_chart2 = st.columns(2)
+            
+            with col_chart1:
+                st.subheader("📊 Distribuição por Tipo de Peso")
+                if not filtered_df.empty:
+                    tipo_counts = filtered_df['Tipo de Peso Encontrado'].value_counts()
+                    fig_tipo = px.pie(
+                        values=tipo_counts.values,
+                        names=tipo_counts.index,
+                        title="Distribuição por Tipo de Peso Encontrado"
+                    )
+                    st.plotly_chart(fig_tipo, use_container_width=True)
+            
+            with col_chart2:
+                st.subheader("📈 Relação Peso x Valor")
+                if not filtered_df.empty:
+                    fig_relacao = px.scatter(
+                        filtered_df,
+                        x='Peso Bruto (kg)',
+                        y='Valor Prestação',
+                        title="Relação entre Peso Bruto e Valor da Prestação",
+                        color='Tipo de Peso Encontrado'
+                    )
+                    
+                    # Linha de tendência simples
+                    try:
+                        x = filtered_df['Peso Bruto (kg)'].values
+                        y = filtered_df['Valor Prestação'].values
+                        mask = ~np.isnan(x) & ~np.isnan(y)
+                        x_clean = x[mask]
+                        y_clean = y[mask]
+                        
+                        if len(x_clean) > 1:
+                            coefficients = np.polyfit(x_clean, y_clean, 1)
+                            polynomial = np.poly1d(coefficients)
+                            x_trend = np.linspace(x_clean.min(), x_clean.max(), 100)
+                            y_trend = polynomial(x_trend)
+                            
+                            fig_relacao.add_trace(go.Scatter(
+                                x=x_trend, 
+                                y=y_trend,
+                                mode='lines',
+                                name='Linha de Tendência',
+                                line=dict(color='red', dash='dash'),
+                                opacity=0.7
+                            ))
+                    except Exception:
+                        pass
+                    
+                    st.plotly_chart(fig_relacao, use_container_width=True)
+            
+        else:
+            st.info("Nenhum CT-e processado ainda. Faça upload de arquivos na aba 'Upload'.")
+    
+    with tab3:
+        st.header("Exportar para Excel")
+        df = processor.get_dataframe()
+        
+        if not df.empty:
+            st.success(f"Pronto para exportar {len(df)} registros")
+            
+            export_option = st.radio("Formato de exportação:", 
+                                   ["Excel (.xlsx)", "CSV (.csv)"])
+            
+            st.subheader("Selecionar Colunas para Exportação")
+            todas_colunas = df.columns.tolist()
+            colunas_selecionadas = st.multiselect(
+                "Selecione as colunas para exportar:",
+                options=todas_colunas,
+                default=todas_colunas
+            )
+            
+            df_export = df[colunas_selecionadas] if colunas_selecionadas else df
+            
+            if export_option == "Excel (.xlsx)":
+                show_processing_animation("Gerando arquivo Excel...")
+                
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                    df_export.to_excel(writer, sheet_name='Dados_CTe', index=False)
+                
+                output.seek(0)
+                
+                st.download_button(
+                    label="📥 Baixar Planilha Excel",
+                    data=output,
+                    file_name="dados_cte.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            
+            else:
+                show_processing_animation("Gerando arquivo CSV...")
+                
+                csv = df_export.to_csv(index=False).encode('utf-8')
+                
+                st.download_button(
+                    label="📥 Baixar Arquivo CSV",
+                    data=csv,
+                    file_name="dados_cte.csv",
+                    mime="text/csv"
+                )
+            
+            with st.expander("📋 Prévia dos dados a serem exportados"):
+                st.dataframe(df_export.head(10))
+                
+        else:
+            st.warning("Nenhum dado disponível para exportação.")
 
 # ==============================================================================
-# esperar_downloads — IGUAL AO TKINTER
+# PARTE 3: PARSER APP 2 (HÄFELE/EXTRATO DUIMP) - CORRIGIDO (COM BARRA DE PROGRESSO)
 # ==============================================================================
-def esperar_downloads(directory, timeout=120):
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        crdownload_files = list(Path(directory).glob('*.crdownload'))
-        if not crdownload_files:
-            return True
-        time.sleep(1)
-    return False
-
-
-# ==============================================================================
-# processar_arquivos_baixados — IGUAL AO TKINTER (método para função)
-# ==============================================================================
-def processar_arquivos_baixados(base_dir, log_callback, state):
-    log_callback("=" * 50)
-    log_callback("📦 INICIANDO PROCESSAMENTO DOS ARQUIVOS")
-    log_callback("=" * 50)
-
-    state["stage"] = "extract"
-
-    zip_files = list(Path(base_dir).glob('*.zip'))
-    log_callback(f"🔍 {len(zip_files)} arquivos ZIP encontrados")
-
-    if not zip_files:
-        log_callback("⚠ Nenhum arquivo ZIP para processar!")
-        state["error_msg"] = "Nenhum ZIP baixado. Verifique login e datas."
-        return
-
-    # IGUAL AO TKINTER
-    extract_dir = tempfile.mkdtemp(prefix="mastersaf_extracted_")
-    all_xml_dirs = []
-
-    for idx, zip_file in enumerate(zip_files):
-        try:
-            zip_name     = zip_file.stem
-            extract_path = os.path.join(extract_dir, zip_name)
-            os.makedirs(extract_path, exist_ok=True)
-            with zipfile.ZipFile(zip_file, 'r') as zip_ref:
-                zip_ref.extractall(extract_path)
-            all_xml_dirs.append(extract_path)
-            log_callback(f"   ✔ {zip_file.name}")
-        except Exception as e:
-            log_callback(f"   ❌ Erro: {zip_file.name}")
-
-    # IGUAL AO TKINTER
-    state["stage"] = "excel"
-    log_callback("📄 Processando XMLs de CT-e...")
-
-    processor = CTeProcessor()
-
-    for xml_dir in all_xml_dirs:
-        processor.process_xml_files_from_directory(xml_dir, log_callback)
-
-    total_processados = len(processor.processed_data)
-    log_callback(f"📊 Total de CT-es identificados: {total_processados}")
-    state["xml_count"] = total_processados
-
-    if total_processados > 0:
-        log_callback("📊 Gerando Excel consolidado...")
-
-        # Calcula resumo ANTES de exportar (igual ao tkinter)
-        df_tmp      = pd.DataFrame(processor.processed_data)
-        peso_total  = df_tmp['Peso Bruto (kg)'].sum()
-        valor_total = df_tmp['Valor Prestação'].sum()
-        num_registros = len(df_tmp)
-
-        excel_bytes, _ = processor.export_to_excel()
-        processor.clear_data()
-
-        state["excel_bytes"] = excel_bytes
-        state["xml_count"]   = num_registros
-        state["stage"]       = "done"
-
-        log_callback(f"✅ Excel gerado com sucesso!")
-        log_callback(f"📈 Resumo:")
-        log_callback(f"   • Registros: {num_registros}")
-        log_callback(f"   • Peso Bruto: {peso_total:,.2f} kg")
-        log_callback(f"   • Valor Total: R$ {valor_total:,.2f}")
-    else:
-        processor.clear_data()
-        log_callback("⚠ Nenhum CT-e processado")
-        state["error_msg"] = "Nenhum CT-e válido encontrado nos XMLs."
-        state["stage"]     = "done"
-
-    # Limpa pasta de extração
-    shutil.rmtree(extract_dir, ignore_errors=True)
-    log_callback("=" * 50)
-
-
-# ==============================================================================
-# rodar_automacao — IGUAL AO TKINTER (método para função de thread)
-# ==============================================================================
-def rodar_automacao(usuario, senha, dt_ini, dt_fin, loops, state):
-    temp_dir = tempfile.mkdtemp(prefix="mastersaf_downloads_")
-
-    def log(msg):
-        ts = datetime.now().strftime("%H:%M:%S")
-        state["logs"].append(f"[{ts}] {msg}")
-        state["status_msg"] = msg
-
-    log(f"📁 Pasta temporária: {os.path.basename(temp_dir)}")
-    driver = None
-
-    try:
-        # Configura Chrome — IGUAL AO TKINTER
-        chrome_options = Options()
-        chrome_options.add_argument("--headless=new")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument("--disable-notifications")
-        chrome_options.add_argument("--disable-popup-blocking")
-
-        prefs = {
-            "download.default_directory": temp_dir,
-            "download.prompt_for_download": False,
-            "download.directory_upgrade": True,
-            "safebrowsing.enabled": True,
-            "profile.default_content_setting_values.automatic_downloads": 1
+class HafelePDFParser:
+    """
+    Parser BLINDADO para o layout Extrato DUIMP (APP2.pdf).
+    Otimizado para não travar a memória em PDFs com milhares de páginas e mostrar o progresso.
+    """
+    
+    def __init__(self):
+        self.documento = {
+            'cabecalho': {},
+            'itens': [],
+            'totais': {}
         }
-        chrome_options.add_experimental_option("prefs", prefs)
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
-        chrome_options.binary_location = "/usr/bin/chromium"
+        
+    def parse_pdf(self, pdf_path: str) -> Dict:
+        try:
+            logger.info(f"Iniciando parsing do layout DUIMP/APP2: {pdf_path}")
+            
+            text_chunks = []
+            
+            # Elementos visuais para a barra de progresso no Streamlit
+            progress_text = st.empty()
+            progress_bar = st.progress(0)
+            
+            with pdfplumber.open(pdf_path) as pdf:
+                total_pages = len(pdf.pages)
+                for i, page in enumerate(pdf.pages):
+                    
+                    # Atualiza o texto e a barra de progresso
+                    progress_text.text(f"Lendo página {i+1} de {total_pages} do Extrato Detalhado...")
+                    progress_bar.progress((i + 1) / total_pages)
+                    
+                    text = page.extract_text(layout=False) 
+                    if text:
+                        text_chunks.append(text)
+            
+            # Limpa a barra de progresso da tela após concluir a extração
+            progress_text.empty()
+            progress_bar.empty()
+            
+            # Junta tudo de forma rápida e eficiente
+            full_text = "\n".join(text_chunks)
+            self._process_full_text(full_text)
+            
+            # Força a liberação da memória
+            del text_chunks
+            del full_text
+            gc.collect()
+            
+            return self.documento
+            
+        except Exception as e:
+            logger.error(f"Erro CRÍTICO no parsing: {str(e)}")
+            st.error(f"Erro ao ler o arquivo PDF: {str(e)}")
+            return self.documento
 
-        log("🌐 Iniciando navegador em segundo plano...")
-        driver = webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=chrome_options)
+    def _process_full_text(self, text: str):
+        chunks = re.split(r'(ITENS\s+DA\s+DUIMP\s*-\s*\d+)', text, flags=re.IGNORECASE)
+        items_found = []
+        
+        if len(chunks) > 1:
+            for i in range(1, len(chunks), 2):
+                header = chunks[i]
+                content = chunks[i+1]
+                item_num_match = re.search(r'(\d+)', header)
+                item_num = int(item_num_match.group(1)) if item_num_match else i
+                item_data = self._parse_item_block(item_num, content)
+                if item_data:
+                    items_found.append(item_data)
+        else:
+            st.warning("⚠️ O sistema não detectou o padrão 'ITENS DA DUIMP'. Verifique se o PDF está no formato correto.")
+        
+        self.documento['itens'] = items_found
+        self._calculate_totals()
 
-        log("🔗 Acessando MasterSAF...")
-        driver.get("https://p.dfe.mastersaf.com.br/mvc/login")
-        time.sleep(3)
+    def _parse_item_block(self, item_num: int, text: str) -> Dict:
+        try:
+            item = {
+                'numero_item': item_num,
+                'ncm': '',
+                'codigo_interno': '',
+                'nome_produto': '',
+                'quantidade': 0.0,
+                'quantidade_comercial': 0.0,
+                'peso_liquido': 0.0,
+                'valor_total': 0.0,
+                
+                'ii_valor_devido': 0.0, 'ii_base_calculo': 0.0, 'ii_aliquota': 0.0,
+                'ipi_valor_devido': 0.0, 'ipi_base_calculo': 0.0, 'ipi_aliquota': 0.0,
+                'pis_valor_devido': 0.0, 'pis_base_calculo': 0.0, 'pis_aliquota': 0.0,
+                'cofins_valor_devido': 0.0, 'cofins_base_calculo': 0.0, 'cofins_aliquota': 0.0,
+                
+                'frete_internacional': 0.0,
+                'seguro_internacional': 0.0,
+                'local_aduaneiro': 0.0
+            }
 
-        log("🔑 Realizando login...")
-        driver.find_element(By.XPATH, '//*[@id="nomeusuario"]').send_keys(usuario)
-        driver.find_element(By.XPATH, '//*[@id="senha"]').send_keys(senha)
-        driver.find_element(By.XPATH, '//*[@id="enter"]').click()
-        time.sleep(5)
+            # Identificadores
+            code_match = re.search(r'Código interno\s*([\d\.]+)', text, re.IGNORECASE)
+            if code_match: item['codigo_interno'] = code_match.group(1).replace('.', '')
 
-        log("📋 Acessando Listagem Receptor CTEs...")
-        driver.find_element(By.XPATH, '//*[@id="linkListagemReceptorCTEs"]/a').click()
-        time.sleep(5)
+            ncm_match = re.search(r'(\d{4}\.\d{2}\.\d{2})', text)
+            if ncm_match: item['ncm'] = ncm_match.group(1).replace('.', '')
 
-        log(f"📅 Configurando período: {dt_ini} a {dt_fin}")
-        campo_dt_inicial = driver.find_element(By.XPATH, '//*[@id="consultaDataInicial"]')
-        campo_dt_inicial.click()
-        campo_dt_inicial.send_keys(Keys.CONTROL, 'a')
-        campo_dt_inicial.send_keys(dt_ini)
+            # Valores
+            qtd_com_match = re.search(r'Qtde Unid\. Comercial\s*([\d\.,]+)', text)
+            if qtd_com_match: item['quantidade_comercial'] = self._parse_valor(qtd_com_match.group(1))
+            
+            qtd_est_match = re.search(r'Qtde Unid\. Estatística\s*([\d\.,]+)', text)
+            if qtd_est_match: item['quantidade'] = self._parse_valor(qtd_est_match.group(1))
+            else: item['quantidade'] = item['quantidade_comercial']
 
-        campo_dt_final = driver.find_element(By.XPATH, '//*[@id="consultaDataFinal"]')
-        campo_dt_final.click()
-        campo_dt_final.send_keys(Keys.CONTROL, 'a')
-        campo_dt_final.send_keys(dt_fin)
-        time.sleep(2)
+            val_match = re.search(r'Valor Tot\. Cond Venda\s*([\d\.,]+)', text)
+            if val_match: item['valor_total'] = self._parse_valor(val_match.group(1))
 
-        log("🔄 Atualizando listagem...")
-        driver.find_element(By.XPATH, '//*[@id="listagem_atualiza"]').click()
-        time.sleep(5)
+            peso_match = re.search(r'Peso Líquido \(KG\)\s*([\d\.,]+)', text, re.IGNORECASE)
+            if peso_match: item['peso_liquido'] = self._parse_valor(peso_match.group(1))
 
-        log("⚙️ Configurando exibição (200 itens por página)...")
-        select_element = driver.find_element(By.XPATH, '//*[@id="plistagem_center"]/table/tbody/tr/td[8]/select')
-        select_element.click()
-        time.sleep(1)
-        select_element.find_element(By.XPATH, './/option[@value="200"]').click()
-        time.sleep(3)
+            frete_match = re.search(r'Frete Internac\. \(R\$\)\s*([\d\.,]+)', text)
+            if frete_match: item['frete_internacional'] = self._parse_valor(frete_match.group(1))
 
-        log(f"📥 Iniciando downloads ({loops} páginas)...")
+            seg_match = re.search(r'Seguro Internac\. \(R\$\)\s*([\d\.,]+)', text)
+            if seg_match: item['seguro_internacional'] = self._parse_valor(seg_match.group(1))
 
-        for i in range(loops):
-            state["stage"] = "download"
-            log(f"📄 Página {i + 1}/{loops}")
+            aduana_match = re.search(r'Local Aduaneiro \(R\$\)\s*([\d\.,]+)', text)
+            if aduana_match: item['local_aduaneiro'] = self._parse_valor(aduana_match.group(1))
 
-            # Seleciona todos os checkboxes — IGUAL AO TKINTER
-            try:
-                checkbox = driver.find_element(By.XPATH, '//*[@id="jqgh_listagem_checkBox"]/div/input')
-                if not checkbox.is_selected():
-                    checkbox.click()
-                time.sleep(3)
-            except:
-                pass
+            # --- IMPOSTOS (REGEX MELHORADO) ---
+            tax_patterns = re.findall(
+                r'Base de Cálculo.*?\(R\$\)\s*([\d\.,]+).*?% Alíquota\s*([\d\.,]+).*?Valor.*?(?:Devido|A Recolher|Calculado).*?\(R\$\)\s*([\d\.,]+)', 
+                text, 
+                re.DOTALL | re.IGNORECASE
+            )
 
-            # Clica no botão de download múltiplo — IGUAL AO TKINTER
-            try:
-                driver.find_element(By.XPATH, '//*[@id="xml_multiplos"]/h3').click()
-                time.sleep(3)
-                driver.find_element(By.XPATH, '//*[@id="downloadEmMassaXml"]').click()
-                time.sleep(3)
-            except:
-                log("   ⚠ Erro no botão de download")
+            for base_str, aliq_str, val_str in tax_patterns:
+                base = self._parse_valor(base_str)
+                aliq = self._parse_valor(aliq_str)
+                val = self._parse_valor(val_str)
 
-            # Aguarda downloads terminarem — IGUAL AO TKINTER
-            esperar_downloads(temp_dir)
+                if 1.60 <= aliq <= 3.00: 
+                    item['pis_aliquota'] = aliq
+                    item['pis_base_calculo'] = base
+                    item['pis_valor_devido'] = val
+                elif 7.00 <= aliq <= 12.00:
+                    item['cofins_aliquota'] = aliq
+                    item['cofins_base_calculo'] = base
+                    item['cofins_valor_devido'] = val
+                elif aliq > 12.00: # II (Ex: 16%)
+                    item['ii_aliquota'] = aliq
+                    item['ii_base_calculo'] = base
+                    item['ii_valor_devido'] = val
+                elif aliq >= 0:
+                    if item['ipi_aliquota'] == 0: 
+                        item['ipi_aliquota'] = aliq
+                        item['ipi_base_calculo'] = base
+                        item['ipi_valor_devido'] = val
 
-            # Desmarca checkbox — IGUAL AO TKINTER
-            try:
-                checkbox = driver.find_element(By.XPATH, '//*[@id="jqgh_listagem_checkBox"]/div/input')
-                if checkbox.is_selected():
-                    checkbox.click()
-                time.sleep(1)
-            except:
-                pass
+            item['total_impostos'] = (item['ii_valor_devido'] + item['ipi_valor_devido'] + 
+                                    item['pis_valor_devido'] + item['cofins_valor_devido'])
+            item['valor_total_com_impostos'] = item['valor_total'] + item['total_impostos']
 
-            # Avança para próxima página — IGUAL AO TKINTER
-            if i < loops - 1:
+            return item
+            
+        except Exception as e:
+            logger.error(f"Erro item {item_num}: {e}")
+            return None
+
+    def _parse_valor(self, valor_str: str) -> float:
+        try:
+            if not valor_str: return 0.0
+            limpo = valor_str.replace('.', '').replace(',', '.')
+            return float(limpo)
+        except: return 0.0
+
+    def _calculate_totals(self):
+        if self.documento['itens']:
+            self.documento['totais'] = {
+                'valor_total_mercadoria': sum(i['valor_total'] for i in self.documento['itens']),
+                'total_impostos': sum(i['total_impostos'] for i in self.documento['itens'])
+            }
+
+# ==============================================================================
+# PARTE 4: PARSER APP 1 (DUIMP) E FUNÇÕES AUXILIARES
+# ==============================================================================
+
+# --- FUNÇÃO SOLICITADA ---
+def montar_descricao_final(desc_complementar, codigo_extra, detalhamento):
+    """
+    Concatena: Descrição Complementar - Código - Detalhamento
+    Retorna string limpa, sem espaços desnecessários nas pontas.
+    """
+    parte1 = str(desc_complementar).strip()
+    parte2 = str(codigo_extra).strip()
+    parte3 = str(detalhamento).strip()
+    
+    return f"{parte1} - {parte2} - {parte3}"
+
+class DuimpPDFParser:
+    """Parser do App 1 (Mantido original + Correção Leitura Qtd Comercial e Memória)"""
+    def __init__(self, file_stream):
+        self.doc = fitz.open(stream=file_stream, filetype="pdf")
+        self.full_text = ""
+        self.header = {}
+        self.items = []
+
+    def preprocess(self):
+        clean_lines = []
+        for page in self.doc:
+            text = page.get_text("text")
+            lines = text.split('\n')
+            for line in lines:
+                l_strip = line.strip()
+                if "Extrato da DUIMP" in l_strip: continue
+                if "Data, hora e responsável" in l_strip: continue
+                if re.match(r'^\d+\s*/\s*\d+$', l_strip): continue
+                clean_lines.append(line)
+        self.full_text = "\n".join(clean_lines)
+        
+        # OTIMIZAÇÃO: Fechamento do documento e liberação de memória
+        self.doc.close()
+        gc.collect()
+
+    def extract_header(self):
+        txt = self.full_text
+        self.header["numeroDUIMP"] = self._regex(r"Extrato da Duimp\s+([\w\-\/]+)", txt)
+        self.header["cnpj"] = self._regex(r"CNPJ do importador:\s*([\d\.\/\-]+)", txt)
+        self.header["nomeImportador"] = self._regex(r"Nome do importador:\s*\n?(.+)", txt)
+        self.header["pesoBruto"] = self._regex(r"Peso Bruto \(kg\):\s*([\d\.,]+)", txt)
+        self.header["pesoLiquido"] = self._regex(r"Peso Liquido \(kg\):\s*([\d\.,]+)", txt)
+        self.header["urf"] = self._regex(r"Unidade de despacho:\s*([\d]+)", txt)
+        self.header["paisProcedencia"] = self._regex(r"País de Procedência:\s*\n?(.+)", txt)
+
+    def extract_items(self):
+        chunks = re.split(r"Item\s+(\d+)", self.full_text)
+        if len(chunks) > 1:
+            for i in range(1, len(chunks), 2):
+                num = chunks[i]
+                content = chunks[i+1]
+                item = {"numeroAdicao": num}
+                
+                item["ncm"] = self._regex(r"NCM:\s*([\d\.]+)", content)
+                item["paisOrigem"] = self._regex(r"País de origem:\s*\n?(.+)", content)
+                
+                # --- LÊ AS DUAS QUANTIDADES DO APP 1 ---
+                item["quantidade"] = self._regex(r"Quantidade na unidade estatística:\s*([\d\.,]+)", content)
+                item["quantidade_comercial"] = self._regex(r"Quantidade na unidade comercializada:\s*([\d\.,]+)", content)
+                
+                item["unidade"] = self._regex(r"Unidade estatística:\s*(.+)", content)
+                item["pesoLiq"] = self._regex(r"Peso líquido \(kg\):\s*([\d\.,]+)", content)
+                item["valorUnit"] = self._regex(r"Valor unitário na condição de venda:\s*([\d\.,]+)", content)
+                item["valorTotal"] = self._regex(r"Valor total na condição de venda:\s*([\d\.,]+)", content)
+                item["moeda"] = self._regex(r"Moeda negociada:\s*(.+)", content)
+                
+                exp_match = re.search(r"Código do Exportador Estrangeiro:\s*(.+?)(?=\n\s*(?:Endereço|Dados))", content, re.DOTALL)
+                item["fornecedor_raw"] = exp_match.group(1).strip() if exp_match else ""
+                
+                addr_match = re.search(r"Endereço:\s*(.+?)(?=\n\s*(?:Dados da Mercadoria|Aplicação))", content, re.DOTALL)
+                item["endereco_raw"] = addr_match.group(1).strip() if addr_match else ""
+
+                desc_match = re.search(r"Detalhamento do Produto:\s*(.+?)(?=\n\s*(?:Número de Identificação|Versão|Código de Class|Descrição complementar))", content, re.DOTALL)
+                item["descricao"] = desc_match.group(1).strip() if desc_match else ""
+
+                # --- ALTERAÇÃO AQUI: Captura da Descrição Complementar ---
+                compl_match = re.search(r"Descrição complementar da mercadoria:\s*(.+?)(?=\n|$)", content, re.DOTALL)
+                item["desc_complementar"] = compl_match.group(1).strip() if compl_match else ""
+                # --------------------------------------------------------
+                
+                self.items.append(item)
+
+    def _regex(self, pattern, text):
+        match = re.search(pattern, text)
+        return match.group(1).strip() if match else ""
+
+# ==============================================================================
+# PARTE 5: XML BUILDER E CONSTANTES
+# ==============================================================================
+
+ADICAO_FIELDS_ORDER = [
+    {"tag": "acrescimo", "type": "complex", "children": [
+        {"tag": "codigoAcrescimo", "default": "17"},
+        {"tag": "denominacao", "default": "OUTROS ACRESCIMOS AO VALOR ADUANEIRO"},
+        {"tag": "moedaNegociadaCodigo", "default": "978"},
+        {"tag": "moedaNegociadaNome", "default": "EURO/COM.EUROPEIA"},
+        {"tag": "valorMoedaNegociada", "default": "000000000000000"},
+        {"tag": "valorReais", "default": "000000000000000"}
+    ]},
+    {"tag": "cideValorAliquotaEspecifica", "default": "00000000000"},
+    {"tag": "cideValorDevido", "default": "000000000000000"},
+    {"tag": "cideValorRecolher", "default": "000000000000000"},
+    {"tag": "codigoRelacaoCompradorVendedor", "default": "3"},
+    {"tag": "codigoVinculoCompradorVendedor", "default": "1"},
+    {"tag": "cofinsAliquotaAdValorem", "default": "00965"},
+    {"tag": "cofinsAliquotaEspecificaQuantidadeUnidade", "default": "000000000"},
+    {"tag": "cofinsAliquotaEspecificaValor", "default": "0000000000"},
+    {"tag": "cofinsAliquotaReduzida", "default": "00000"},
+    {"tag": "cofinsAliquotaValorDevido", "default": "000000000000000"},
+    {"tag": "cofinsAliquotaValorRecolher", "default": "000000000000000"},
+    {"tag": "condicaoVendaIncoterm", "default": "FCA"},
+    {"tag": "condicaoVendaLocal", "default": ""},
+    {"tag": "condicaoVendaMetodoValoracaoCodigo", "default": "01"},
+    {"tag": "condicaoVendaMetodoValoracaoNome", "default": "METODO 1 - ART. 1 DO ACORDO (DECRETO 92930/86)"},
+    {"tag": "condicaoVendaMoedaCodigo", "default": "978"},
+    {"tag": "condicaoVendaMoedaNome", "default": "EURO/COM.EUROPEIA"},
+    {"tag": "condicaoVendaValorMoeda", "default": "000000000000000"},
+    {"tag": "condicaoVendaValorReais", "default": "000000000000000"},
+    {"tag": "dadosCambiaisCoberturaCambialCodigo", "default": "1"},
+    {"tag": "dadosCambiaisCoberturaCambialNome", "default": "COM COBERTURA CAMBIAL E PAGAMENTO FINAL A PRAZO DE ATE' 180"},
+    {"tag": "dadosCambiaisInstituicaoFinanciadoraCodigo", "default": "00"},
+    {"tag": "dadosCambiaisInstituicaoFinanciadoraNome", "default": "N/I"},
+    {"tag": "dadosCambiaisMotivoSemCoberturaCodigo", "default": "00"},
+    {"tag": "dadosCambiaisMotivoSemCoberturaNome", "default": "N/I"},
+    {"tag": "dadosCambiaisValorRealCambio", "default": "000000000000000"},
+    {"tag": "dadosCargaPaisProcedenciaCodigo", "default": "000"},
+    {"tag": "dadosCargaUrfEntradaCodigo", "default": "0000000"},
+    {"tag": "dadosCargaViaTransporteCodigo", "default": "01"},
+    {"tag": "dadosCargaViaTransporteNome", "default": "MARÍTIMA"},
+    {"tag": "dadosMercadoriaAplicacao", "default": "REVENDA"},
+    {"tag": "dadosMercadoriaCodigoNaladiNCCA", "default": "0000000"},
+    {"tag": "dadosMercadoriaCodigoNaladiSH", "default": "00000000"},
+    {"tag": "dadosMercadoriaCodigoNcm", "default": "00000000"},
+    {"tag": "dadosMercadoriaCondicao", "default": "NOVA"},
+    {"tag": "dadosMercadoriaDescricaoTipoCertificado", "default": "Sem Certificado"},
+    {"tag": "dadosMercadoriaIndicadorTipoCertificado", "default": "1"},
+    {"tag": "dadosMercadoriaMedidaEstatisticaQuantidade", "default": "00000000000000"},
+    {"tag": "dadosMercadoriaMedidaEstatisticaUnidade", "default": "UNIDADE"},
+    {"tag": "dadosMercadoriaNomeNcm", "default": "DESCRIÇÃO PADRÃO NCM"},
+    {"tag": "dadosMercadoriaPesoLiquido", "default": "000000000000000"},
+    {"tag": "dcrCoeficienteReducao", "default": "00000"},
+    {"tag": "dcrIdentificacao", "default": "00000000"},
+    {"tag": "dcrValorDevido", "default": "000000000000000"},
+    {"tag": "dcrValorDolar", "default": "000000000000000"},
+    {"tag": "dcrValorReal", "default": "000000000000000"},
+    {"tag": "dcrValorRecolher", "default": "000000000000000"},
+    {"tag": "fornecedorCidade", "default": ""},
+    {"tag": "fornecedorLogradouro", "default": ""},
+    {"tag": "fornecedorNome", "default": ""},
+    {"tag": "fornecedorNumero", "default": ""},
+    {"tag": "freteMoedaNegociadaCodigo", "default": "978"},
+    {"tag": "freteMoedaNegociadaNome", "default": "EURO/COM.EUROPEIA"},
+    {"tag": "freteValorMoedaNegociada", "default": "000000000000000"},
+    {"tag": "freteValorReais", "default": "000000000000000"},
+    {"tag": "iiAcordoTarifarioTipoCodigo", "default": "0"},
+    {"tag": "iiAliquotaAcordo", "default": "00000"},
+    {"tag": "iiAliquotaAdValorem", "default": "00000"},
+    {"tag": "iiAliquotaPercentualReducao", "default": "00000"},
+    {"tag": "iiAliquotaReduzida", "default": "00000"},
+    {"tag": "iiAliquotaValorCalculado", "default": "000000000000000"},
+    {"tag": "iiAliquotaValorDevido", "default": "000000000000000"},
+    {"tag": "iiAliquotaValorRecolher", "default": "000000000000000"},
+    {"tag": "iiAliquotaValorReduzido", "default": "000000000000000"},
+    {"tag": "iiBaseCalculo", "default": "000000000000000"},
+    {"tag": "iiFundamentoLegalCodigo", "default": "00"},
+    {"tag": "iiMotivoAdmissaoTemporariaCodigo", "default": "00"},
+    {"tag": "iiRegimeTributacaoCodigo", "default": "1"},
+    {"tag": "iiRegimeTributacaoNome", "default": "RECOLHIMENTO INTEGRAL"},
+    {"tag": "ipiAliquotaAdValorem", "default": "00000"},
+    {"tag": "ipiAliquotaEspecificaCapacidadeRecipciente", "default": "00000"},
+    {"tag": "ipiAliquotaEspecificaQuantidadeUnidadeMedida", "default": "000000000"},
+    {"tag": "ipiAliquotaEspecificaTipoRecipienteCodigo", "default": "00"},
+    {"tag": "ipiAliquotaEspecificaValorUnidadeMedida", "default": "0000000000"},
+    {"tag": "ipiAliquotaNotaComplementarTIPI", "default": "00"},
+    {"tag": "ipiAliquotaReduzida", "default": "00000"},
+    {"tag": "ipiAliquotaValorDevido", "default": "000000000000000"},
+    {"tag": "ipiAliquotaValorRecolher", "default": "000000000000000"},
+    {"tag": "ipiRegimeTributacaoCodigo", "default": "4"},
+    {"tag": "ipiRegimeTributacaoNome", "default": "SEM BENEFICIO"},
+    {"tag": "mercadoria", "type": "complex", "children": [
+        {"tag": "descricaoMercadoria", "default": ""},
+        {"tag": "numeroSequencialItem", "default": "01"},
+        {"tag": "quantidade", "default": "00000000000000"},
+        {"tag": "unidadeMedida", "default": "UNIDADE"},
+        {"tag": "valorUnitario", "default": "00000000000000000000"}
+    ]},
+    {"tag": "numeroAdicao", "default": "001"},
+    {"tag": "numeroDUIMP", "default": ""},
+    {"tag": "numeroLI", "default": "0000000000"},
+    {"tag": "paisAquisicaoMercadoriaCodigo", "default": "000"},
+    {"tag": "paisAquisicaoMercadoriaNome", "default": ""},
+    {"tag": "paisOrigemMercadoriaCodigo", "default": "000"},
+    {"tag": "paisOrigemMercadoriaNome", "default": ""},
+    {"tag": "pisCofinsBaseCalculoAliquotaICMS", "default": "00000"},
+    {"tag": "pisCofinsBaseCalculoFundamentoLegalCodigo", "default": "00"},
+    {"tag": "pisCofinsBaseCalculoPercentualReducao", "default": "00000"},
+    {"tag": "pisCofinsBaseCalculoValor", "default": "000000000000000"},
+    {"tag": "pisCofinsFundamentoLegalReducaoCodigo", "default": "00"},
+    {"tag": "pisCofinsRegimeTributacaoCodigo", "default": "1"},
+    {"tag": "pisCofinsRegimeTributacaoNome", "default": "RECOLHIMENTO INTEGRAL"},
+    {"tag": "pisPasepAliquotaAdValorem", "default": "00000"},
+    {"tag": "pisPasepAliquotaEspecificaQuantidadeUnidade", "default": "000000000"},
+    {"tag": "pisPasepAliquotaEspecificaValor", "default": "0000000000"},
+    {"tag": "pisPasepAliquotaReduzida", "default": "00000"},
+    {"tag": "pisPasepAliquotaValorDevido", "default": "000000000000000"},
+    {"tag": "pisPasepAliquotaValorRecolher", "default": "000000000000000"},
+    {"tag": "icmsBaseCalculoValor", "default": "000000000000000"},
+    {"tag": "icmsBaseCalculoAliquota", "default": "00000"},
+    {"tag": "icmsBaseCalculoValorImposto", "default": "00000000000000"},
+    {"tag": "icmsBaseCalculoValorDiferido", "default": "00000000000000"},
+    {"tag": "cbsIbsCst", "default": "000"},
+    {"tag": "cbsIbsClasstrib", "default": "000001"},
+    {"tag": "cbsBaseCalculoValor", "default": "000000000000000"},
+    {"tag": "cbsBaseCalculoAliquota", "default": "00000"},
+    {"tag": "cbsBaseCalculoAliquotaReducao", "default": "00000"},
+    {"tag": "cbsBaseCalculoValorImposto", "default": "00000000000000"},
+    {"tag": "ibsBaseCalculoValor", "default": "000000000000000"},
+    {"tag": "ibsBaseCalculoAliquota", "default": "00000"},
+    {"tag": "ibsBaseCalculoAliquotaReducao", "default": "00000"},
+    {"tag": "ibsBaseCalculoValorImposto", "default": "00000000000000"},
+    {"tag": "relacaoCompradorVendedor", "default": "Fabricante é desconhecido"},
+    {"tag": "seguroMoedaNegociadaCodigo", "default": "220"},
+    {"tag": "seguroMoedaNegociadaNome", "default": "DOLAR DOS EUA"},
+    {"tag": "seguroValorMoedaNegociada", "default": "000000000000000"},
+    {"tag": "seguroValorReais", "default": "000000000000000"},
+    {"tag": "sequencialRetificacao", "default": "00"},
+    {"tag": "valorMultaARecolher", "default": "000000000000000"},
+    {"tag": "valorMultaARecolherAjustado", "default": "000000000000000"},
+    {"tag": "valorReaisFreteInternacional", "default": "000000000000000"},
+    {"tag": "valorReaisSeguroInternacional", "default": "000000000000000"},
+    {"tag": "valorTotalCondicaoVenda", "default": "00000000000"},
+    {"tag": "vinculoCompradorVendedor", "default": "Não há vinculação entre comprador e vendedor."}
+]
+
+FOOTER_TAGS = {
+    "armazem": {"tag": "nomeArmazem", "default": "TCP"},
+    "armazenamentoRecintoAduaneiroCodigo": "9801303",
+    "armazenamentoRecintoAduaneiroNome": "TCP - TERMINAL",
+    "armazenamentoSetor": "002",
+    "canalSelecaoParametrizada": "001",
+    "caracterizacaoOperacaoCodigoTipo": "1",
+    "caracterizacaoOperacaoDescricaoTipo": "Importação Própria",
+    "cargaDataChegada": "20251120",
+    "cargaNumeroAgente": "N/I",
+    "cargaPaisProcedenciaCodigo": "386",
+    "cargaPaisProcedenciaNome": "",
+    "cargaPesoBruto": "000000000000000",
+    "cargaPesoLiquido": "000000000000000",
+    "cargaUrfEntradaCodigo": "0917800",
+    "cargaUrfEntradaNome": "PORTO DE PARANAGUA",
+    "conhecimentoCargaEmbarqueData": "20251025",
+    "conhecimentoCargaEmbarqueLocal": "EXTERIOR",
+    "conhecimentoCargaId": "CE123456",
+    "conhecimentoCargaIdMaster": "CE123456",
+    "conhecimentoCargaTipoCodigo": "12",
+    "conhecimentoCargaTipoNome": "HBL - House Bill of Lading",
+    "conhecimentoCargaUtilizacao": "1",
+    "conhecimentoCargaUtilizacaoNome": "Total",
+    "dataDesembaraco": "20251124",
+    "dataRegistro": "20251124",
+    "documentoChegadaCargaCodigoTipo": "1",
+    "documentoChegadaCargaNome": "Manifesto da Carga",
+    "documentoChegadaCargaNumero": "1625502058594",
+    "embalagem": [{"tag": "codigoTipoEmbalagem", "default": "60"}, {"tag": "nomeEmbalagem", "default": "PALLETS"}, {"tag": "quantidadeVolume", "default": "00001"}],
+    "freteCollect": "000000000000000",
+    "freteEmTerritorioNacional": "000000000000000",
+    "freteMoedaNegociadaCodigo": "978",
+    "freteMoedaNegociadaNome": "EURO/COM.EUROPEIA",
+    "fretePrepaid": "000000000000000",
+    "freteTotalDolares": "000000000000000",
+    "freteTotalMoeda": "000000000000000",
+    "freteTotalReais": "000000000000000",
+    "icms": [{"tag": "agenciaIcms", "default": "00000"}, {"tag": "codigoTipoRecolhimentoIcms", "default": "3"}, {"tag": "nomeTipoRecolhimentoIcms", "default": "Exoneração do ICMS"}, {"tag": "numeroSequencialIcms", "default": "001"}, {"tag": "ufIcms", "default": "PR"}, {"tag": "valorTotalIcms", "default": "000000000000000"}],
+    "importadorCodigoTipo": "1",
+    "importadorCpfRepresentanteLegal": "00000000000",
+    "importadorEnderecoBairro": "CENTRO",
+    "importadorEnderecoCep": "00000000",
+    "importadorEnderecoComplemento": "",
+    "importadorEnderecoLogradouro": "RUA PRINCIPAL",
+    "importadorEnderecoMunicipio": "CIDADE",
+    "importadorEnderecoNumero": "00",
+    "importadorEnderecoUf": "PR",
+    "importadorNome": "",
+    "importadorNomeRepresentanteLegal": "REPRESENTANTE",
+    "importadorNumero": "",
+    "importadorNumeroTelefone": "0000000000",
+    "informacaoComplementar": "Informações extraídas do Extrato DUIMP.",
+    "localDescargaTotalDolares": "000000000000000",
+    "localDescargaTotalReais": "000000000000000",
+    "localEmbarqueTotalDolares": "000000000000000",
+    "localEmbarqueTotalReais": "000000000000000",
+    "modalidadeDespachoCodigo": "1",
+    "modalidadeDespachoNome": "Normal",
+    "numeroDUIMP": "",
+    "operacaoFundap": "N",
+    "pagamento": [], 
+    "seguroMoedaNegociadaCodigo": "220",
+    "seguroMoedaNegociadaNome": "DOLAR DOS EUA",
+    "seguroTotalDolares": "000000000000000",
+    "seguroTotalMoedaNegociada": "000000000000000",
+    "seguroTotalReais": "000000000000000",
+    "sequencialRetificacao": "00",
+    "situacaoEntregaCarga": "ENTREGA CONDICIONADA",
+    "tipoDeclaracaoCodigo": "01",
+    "tipoDeclaracaoNome": "CONSUMO",
+    "totalAdicoes": "000",
+    "urfDespachoCodigo": "0917800",
+    "urfDespachoNome": "PORTO DE PARANAGUA",
+    "valorTotalMultaARecolherAjustado": "000000000000000",
+    "viaTransporteCodigo": "01",
+    "viaTransporteMultimodal": "N",
+    "viaTransporteNome": "MARÍTIMA",
+    "viaTransporteNomeTransportador": "MAERSK A/S",
+    "viaTransporteNomeVeiculo": "MAERSK",
+    "viaTransportePaisTransportadorCodigo": "741",
+    "viaTransportePaisTransportadorNome": "CINGAPURA"
+}
+
+class DataFormatter:
+    @staticmethod
+    def clean_text(text):
+        if not text: return ""
+        text = text.replace('\n', ' ').replace('\r', '')
+        return re.sub(r'\s+', ' ', text).strip()
+
+    @staticmethod
+    def format_number(value, length=15):
+        if not value: return "0" * length
+        clean = re.sub(r'\D', '', str(value))
+        if not clean: return "0" * length
+        return clean.zfill(length)
+    
+    @staticmethod
+    def format_ncm(value):
+        if not value: return "00000000"
+        return re.sub(r'\D', '', value)[:8]
+
+    @staticmethod
+    def format_input_fiscal(value, length=15, is_percent=False):
+        try:
+            if isinstance(value, str):
+                value = value.replace('.', '')
+                value = value.replace(',', '.')
+            
+            val_float = float(value)
+            val_int = int(round(val_float * 100))
+            return str(val_int).zfill(length)
+        except:
+            return "0" * length
+
+    @staticmethod
+    def format_high_precision(value, length=15):
+        try:
+            if isinstance(value, str):
+                value = value.replace('.', '')
+                value = value.replace(',', '.')
+            
+            val_float = float(value)
+            val_int = int(round(val_float * 10000000))
+            return str(val_int).zfill(length)
+        except:
+            return "0" * length
+
+    @staticmethod
+    def format_quantity(value, length=14):
+        try:
+            if isinstance(value, str):
+                value = value.replace('.', '')
+                value = value.replace(',', '.')
+            
+            val_float = float(value)
+            val_int = int(round(val_float * 100000))
+            return str(val_int).zfill(length)
+        except:
+            return "0" * length
+
+    @staticmethod
+    def calculate_cbs_ibs(base_xml_string):
+        try:
+            base_int = int(base_xml_string)
+            base_float = base_int / 100.0
+            
+            cbs_val = base_float * 0.009
+            cbs_str = str(int(round(cbs_val * 100))).zfill(14)
+            
+            ibs_val = base_float * 0.001
+            ibs_str = str(int(round(ibs_val * 100))).zfill(14)
+            
+            return cbs_str, ibs_str
+        except:
+            return "0".zfill(14), "0".zfill(14)
+
+    @staticmethod
+    def parse_supplier_info(raw_name, raw_addr):
+        data = {"fornecedorNome": "", "fornecedorLogradouro": "", "fornecedorNumero": "S/N", "fornecedorCidade": ""}
+        if raw_name:
+            parts = raw_name.split('-', 1)
+            data["fornecedorNome"] = parts[-1].strip() if len(parts) > 1 else raw_name.strip()
+        if raw_addr:
+            clean_addr = DataFormatter.clean_text(raw_addr)
+            parts_dash = clean_addr.rsplit('-', 1)
+            if len(parts_dash) > 1:
+                data["fornecedorCidade"] = parts_dash[1].strip()
+                street_part = parts_dash[0].strip()
+            else:
+                data["fornecedorCidade"] = "EXTERIOR"
+                street_part = clean_addr
+            comma_split = street_part.rsplit(',', 1)
+            if len(comma_split) > 1:
+                data["fornecedorLogradouro"] = comma_split[0].strip()
+                num_match = re.search(r'\d+', comma_split[1])
+                if num_match: data["fornecedorNumero"] = num_match.group(0)
+            else:
+                data["fornecedorLogradouro"] = street_part
+        return data
+
+class XMLBuilder:
+    def __init__(self, parser, edited_items=None):
+        self.p = parser
+        self.items_to_use = edited_items if edited_items else self.p.items
+        self.root = etree.Element("ListaDeclaracoes")
+        self.duimp = etree.SubElement(self.root, "duimp")
+
+    def build(self, user_inputs=None):
+        h = self.p.header
+        duimp_fmt = h.get("numeroDUIMP", "").split("/")[0].replace("-", "").replace(".", "")
+        
+        totals = {"frete": 0.0, "seguro": 0.0, "ii": 0.0, "ipi": 0.0, "pis": 0.0, "cofins": 0.0}
+
+        def get_float(val):
+            try: 
+                if isinstance(val, str): val = val.replace('.', '').replace(',', '.')
+                return float(val)
+            except: return 0.0
+
+        for it in self.items_to_use:
+            totals["frete"] += get_float(it.get("Frete (R$)"))
+            totals["seguro"] += get_float(it.get("Seguro (R$)"))
+            totals["ii"] += get_float(it.get("II (R$)"))
+            totals["ipi"] += get_float(it.get("IPI (R$)"))
+            totals["pis"] += get_float(it.get("PIS (R$)"))
+            totals["cofins"] += get_float(it.get("COFINS (R$)"))
+
+        for it in self.items_to_use:
+            adicao = etree.SubElement(self.duimp, "adicao")
+            
+            input_number = str(it.get("NUMBER", "")).strip()
+            original_desc = DataFormatter.clean_text(it.get("descricao", ""))
+            
+            desc_compl = DataFormatter.clean_text(it.get("desc_complementar", ""))
+            final_desc = montar_descricao_final(desc_compl, input_number, original_desc)
+
+            val_total_venda_fmt = DataFormatter.format_high_precision(it.get("valorTotal", "0"), 11)
+            val_unit_fmt = DataFormatter.format_high_precision(it.get("valorUnit", "0"), 20)
+            
+            qtd_comercial_raw = it.get("quantidade_comercial")
+            if not qtd_comercial_raw: qtd_comercial_raw = it.get("quantidade")
+            
+            qtd_comercial_fmt = DataFormatter.format_quantity(qtd_comercial_raw, 14)
+            qtd_estatistica_fmt = DataFormatter.format_quantity(it.get("quantidade"), 14)
+
+            peso_liq_fmt = DataFormatter.format_quantity(it.get("pesoLiq"), 15)
+            base_total_reais_fmt = DataFormatter.format_input_fiscal(it.get("valorTotal", "0"), 15)
+            
+            raw_frete = get_float(it.get("Frete (R$)", 0))
+            raw_seguro = get_float(it.get("Seguro (R$)", 0))
+            raw_aduaneiro = get_float(it.get("Aduaneiro (R$)", 0))
+            
+            frete_fmt = DataFormatter.format_input_fiscal(raw_frete)
+            seguro_fmt = DataFormatter.format_input_fiscal(raw_seguro)
+            aduaneiro_fmt = DataFormatter.format_input_fiscal(raw_aduaneiro)
+
+            ii_base_fmt = DataFormatter.format_input_fiscal(it.get("II Base (R$)", 0))
+            ii_aliq_fmt = DataFormatter.format_input_fiscal(it.get("II Alíq. (%)", 0), 5, True)
+            ii_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("II (R$)", 0)))
+
+            ipi_aliq_fmt = DataFormatter.format_input_fiscal(it.get("IPI Alíq. (%)", 0), 5, True)
+            ipi_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("IPI (R$)", 0)))
+
+            pis_base_fmt = DataFormatter.format_input_fiscal(it.get("PIS Base (R$)", 0))
+            pis_aliq_fmt = DataFormatter.format_input_fiscal(it.get("PIS Alíq. (%)", 0), 5, True)
+            pis_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("PIS (R$)", 0)))
+
+            cofins_aliq_fmt = DataFormatter.format_input_fiscal(it.get("COFINS Alíq. (%)", 0), 5, True)
+            cofins_val_fmt = DataFormatter.format_input_fiscal(get_float(it.get("COFINS (R$)", 0)))
+
+            icms_base_valor = ii_base_fmt if int(ii_base_fmt) > 0 else base_total_reais_fmt
+            cbs_imposto, ibs_imposto = DataFormatter.calculate_cbs_ibs(icms_base_valor)
+            
+            supplier_data = DataFormatter.parse_supplier_info(it.get("fornecedor_raw"), it.get("endereco_raw"))
+
+            extracted_map = {
+                "numeroAdicao": str(it["numeroAdicao"])[-3:],
+                "numeroDUIMP": duimp_fmt,
+                "dadosMercadoriaCodigoNcm": DataFormatter.format_ncm(it.get("ncm")),
+                "dadosMercadoriaMedidaEstatisticaQuantidade": qtd_estatistica_fmt, 
+                "dadosMercadoriaMedidaEstatisticaUnidade": it.get("unidade", "").upper(),
+                "dadosMercadoriaPesoLiquido": peso_liq_fmt,
+                "condicaoVendaMoedaNome": it.get("moeda", "").upper(),
+                "valorTotalCondicaoVenda": val_total_venda_fmt,
+                "valorUnitario": val_unit_fmt,
+                "condicaoVendaValorMoeda": base_total_reais_fmt,
+                "condicaoVendaValorReais": aduaneiro_fmt if int(aduaneiro_fmt) > 0 else base_total_reais_fmt,
+                "paisOrigemMercadoriaNome": it.get("paisOrigem", "").upper(),
+                "paisAquisicaoMercadoriaNome": it.get("paisOrigem", "").upper(),
+                "descricaoMercadoria": final_desc,
+                "quantidade": qtd_comercial_fmt, 
+                "unidadeMedida": it.get("unidade", "").upper(),
+                "dadosCargaUrfEntradaCodigo": h.get("urf", "0917800"),
+                "fornecedorNome": supplier_data["fornecedorNome"][:60],
+                "fornecedorLogradouro": supplier_data["fornecedorLogradouro"][:60],
+                "fornecedorNumero": supplier_data["fornecedorNumero"][:10],
+                "fornecedorCidade": supplier_data["fornecedorCidade"][:30],
+                "freteValorReais": frete_fmt,
+                "seguroValorReais": seguro_fmt,
+                "iiBaseCalculo": ii_base_fmt,
+                "iiAliquotaAdValorem": ii_aliq_fmt,
+                "iiAliquotaValorCalculado": ii_val_fmt,
+                "iiAliquotaValorDevido": ii_val_fmt,
+                "iiAliquotaValorRecolher": ii_val_fmt,
+                "ipiAliquotaAdValorem": ipi_aliq_fmt,
+                "ipiAliquotaValorDevido": ipi_val_fmt,
+                "ipiAliquotaValorRecolher": ipi_val_fmt,
+                "pisCofinsBaseCalculoValor": pis_base_fmt,
+                "pisPasepAliquotaAdValorem": pis_aliq_fmt,
+                "pisPasepAliquotaValorDevido": pis_val_fmt,
+                "pisPasepAliquotaValorRecolher": pis_val_fmt,
+                "cofinsAliquotaAdValorem": cofins_aliq_fmt,
+                "cofinsAliquotaValorDevido": cofins_val_fmt,
+                "cofinsAliquotaValorRecolher": cofins_val_fmt,
+                "icmsBaseCalculoValor": icms_base_valor,
+                "icmsBaseCalculoAliquota": "01800",
+                "cbsIbsClasstrib": "000001",
+                "cbsBaseCalculoValor": icms_base_valor,
+                "cbsBaseCalculoAliquota": "00090",
+                "cbsBaseCalculoValorImposto": cbs_imposto,
+                "ibsBaseCalculoValor": icms_base_valor,
+                "ibsBaseCalculoAliquota": "00010",
+                "ibsBaseCalculoValorImposto": ibs_imposto
+            }
+
+            for field in ADICAO_FIELDS_ORDER:
+                tag_name = field["tag"]
+                if field.get("type") == "complex":
+                    parent = etree.SubElement(adicao, tag_name)
+                    for child in field["children"]:
+                        c_tag = child["tag"]
+                        val = extracted_map.get(c_tag, child["default"])
+                        etree.SubElement(parent, c_tag).text = val
+                else:
+                    val = extracted_map.get(tag_name, field["default"])
+                    etree.SubElement(adicao, tag_name).text = val
+
+        peso_bruto_fmt = DataFormatter.format_quantity(h.get("pesoBruto"), 15)
+        peso_liq_total_fmt = DataFormatter.format_quantity(h.get("pesoLiquido"), 15)
+
+        footer_map = {
+            "numeroDUIMP": duimp_fmt,
+            "importadorNome": h.get("nomeImportador", ""),
+            "importadorNumero": DataFormatter.format_number(h.get("cnpj"), 14),
+            "cargaPesoBruto": peso_bruto_fmt,
+            "cargaPesoLiquido": peso_liq_total_fmt,
+            "cargaPaisProcedenciaNome": h.get("paisProcedencia", "").upper(),
+            "totalAdicoes": str(len(self.items_to_use)).zfill(3),
+            "freteTotalReais": DataFormatter.format_input_fiscal(totals["frete"]),
+            "seguroTotalReais": DataFormatter.format_input_fiscal(totals["seguro"]),
+        }
+
+        if user_inputs:
+            footer_map["cargaDataChegada"] = user_inputs.get("cargaDataChegada", "20251120")
+            footer_map["dataDesembaraco"] = user_inputs.get("dataDesembaraco", "20251124")
+            footer_map["dataRegistro"] = user_inputs.get("dataRegistro", "20251124")
+            footer_map["conhecimentoCargaEmbarqueData"] = user_inputs.get("conhecimentoCargaEmbarqueData", "20251025")
+            footer_map["cargaPesoBruto"] = user_inputs.get("cargaPesoBruto", peso_bruto_fmt)
+            footer_map["cargaPesoLiquido"] = user_inputs.get("cargaPesoLiquido", peso_liq_total_fmt)
+            footer_map["localDescargaTotalDolares"] = user_inputs.get("localDescargaTotalDolares", "000000000000000")
+            footer_map["localDescargaTotalReais"] = user_inputs.get("localDescargaTotalReais", "000000000000000")
+            footer_map["localEmbarqueTotalDolares"] = user_inputs.get("localEmbarqueTotalDolares", "000000000000000")
+            footer_map["localEmbarqueTotalReais"] = user_inputs.get("localEmbarqueTotalReais", "000000000000000")
+
+        receita_codes = [
+            {"code": "0086", "val": totals["ii"]},
+            {"code": "1038", "val": totals["ipi"]},
+            {"code": "5602", "val": totals["pis"]},
+            {"code": "5629", "val": totals["cofins"]}
+        ]
+
+        if user_inputs and user_inputs.get("valorReceita7811", "0") != "0":
+             receita_codes.append({"code": "7811", "val": float(user_inputs.get("valorReceita7811"))})
+
+        for tag, default_val in FOOTER_TAGS.items():
+            if tag == "embalagem" and user_inputs:
+                parent = etree.SubElement(self.duimp, tag)
+                for subfield in default_val:
+                    val_to_use = subfield["default"]
+                    if subfield["tag"] == "quantidadeVolume":
+                        val_to_use = user_inputs.get("quantidadeVolume", val_to_use)
+                    etree.SubElement(parent, subfield["tag"]).text = val_to_use
+                continue
+
+            if tag == "pagamento":
+                agencia = "3715"
+                banco = "341"
+                if user_inputs:
+                    agencia = user_inputs.get("agenciaPagamento", "3715")
+                    banco = user_inputs.get("bancoPagamento", "341")
+
+                for rec in receita_codes:
+                    if rec["val"] > 0:
+                        pag = etree.SubElement(self.duimp, "pagamento")
+                        etree.SubElement(pag, "agenciaPagamento").text = agencia
+                        etree.SubElement(pag, "bancoPagamento").text = banco
+                        etree.SubElement(pag, "codigoReceita").text = rec["code"]
+                        if rec["code"] == "7811" and user_inputs:
+                             etree.SubElement(pag, "valorReceita").text = user_inputs.get("valorReceita7811").zfill(15)
+                        else:
+                             etree.SubElement(pag, "valorReceita").text = DataFormatter.format_input_fiscal(rec["val"])
+                continue
+
+            if tag in footer_map:
+                val = footer_map[tag]
+                etree.SubElement(self.duimp, tag).text = val
+                continue
+
+            if user_inputs and tag in user_inputs:
+                etree.SubElement(self.duimp, tag).text = user_inputs[tag]
+                continue
+
+            if isinstance(default_val, list):
+                parent = etree.SubElement(self.duimp, tag)
+                for subfield in default_val:
+                    etree.SubElement(parent, subfield["tag"]).text = subfield["default"]
+            elif isinstance(default_val, dict):
+                parent = etree.SubElement(self.duimp, tag)
+                etree.SubElement(parent, default_val["tag"]).text = default_val["default"]
+            else:
+                val = footer_map.get(tag, default_val)
+                etree.SubElement(self.duimp, tag).text = val
+        
+        xml_content = etree.tostring(self.root, pretty_print=True, encoding="UTF-8", xml_declaration=False)
+        header = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        return header + xml_content
+
+# ==============================================================================
+# PARTE 6: SISTEMA INTEGRADO DUIMP
+# ==============================================================================
+def sistema_integrado_duimp():
+    st.markdown('<div class="main-header">Sistema Integrado DUIMP 2026 (Versão Final Restaurada)</div>', unsafe_allow_html=True)
+
+    tab1, tab2, tab3 = st.tabs(["📂 Upload e Vinculação", "📋 Conferência Detalhada", "💾 Exportar XML"])
+
+    with tab1:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown('<div class="section-card">', unsafe_allow_html=True)
+            st.info("Passo 1: Carregue o Extrato DUIMP (Siscomex)")
+            file_duimp = st.file_uploader("Arquivo DUIMP (.pdf)", type="pdf", key="u1")
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+        with col2:
+            st.markdown('<div class="section-card">', unsafe_allow_html=True)
+            st.info("Passo 2: Carregue o Relatório Häfele (ou Extrato Detalhado)")
+            file_hafele = st.file_uploader("Arquivo APP2 (.pdf)", type="pdf", key="u2")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # Processamento DUIMP (APP 1)
+        if file_duimp:
+            if st.session_state["parsed_duimp"] is None or file_duimp.name != getattr(st.session_state.get("last_duimp"), "name", ""):
                 try:
-                    driver.find_element(By.XPATH, '//*[@id="next_plistagem"]/span').click()
-                    time.sleep(5)
-                except:
-                    log("   ⚠ Fim das páginas disponíveis")
-                    break
+                    p = DuimpPDFParser(file_duimp.read())
+                    p.preprocess()
+                    p.extract_header()
+                    p.extract_items()
+                    st.session_state["parsed_duimp"] = p
+                    st.session_state["last_duimp"] = file_duimp
+                    
+                    df = pd.DataFrame(p.items)
+                    cols_fiscais = [
+                        "NUMBER", "Frete (R$)", "Seguro (R$)", 
+                        "II (R$)", "II Base (R$)", "II Alíq. (%)",
+                        "IPI (R$)", "IPI Base (R$)", "IPI Alíq. (%)",
+                        "PIS (R$)", "PIS Base (R$)", "PIS Alíq. (%)",
+                        "COFINS (R$)", "COFINS Base (R$)", "COFINS Alíq. (%)",
+                        "Aduaneiro (R$)"
+                    ]
+                    for col in cols_fiscais:
+                        df[col] = 0.00 if col != "NUMBER" else ""
+                    
+                    st.session_state["merged_df"] = df
+                    st.markdown(f'<div class="success-box">✅ DUIMP Lida com Sucesso! {len(p.items)} adições encontradas.</div>', unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"Erro ao ler DUIMP: {e}")
 
-            state["page_atual"] = i + 1
+        # Processamento Häfele (APP 2)
+        if file_hafele and st.session_state["parsed_hafele"] is None:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                tmp.write(file_hafele.getvalue())
+                tmp_path = tmp.name
+            
+            try:
+                parser_h = HafelePDFParser()
+                doc_h = parser_h.parse_pdf(tmp_path)
+                st.session_state["parsed_hafele"] = doc_h
+                
+                qtd_itens = len(doc_h['itens'])
+                if qtd_itens > 0:
+                    st.markdown(f'<div class="success-box">✅ APP2 (Extrato) Lido com Sucesso! {qtd_itens} itens encontrados.</div>', unsafe_allow_html=True)
+                else:
+                    st.warning("O PDF foi lido, mas nenhum item 'ITENS DA DUIMP' foi identificado automaticamente. Verifique se o PDF está no layout padrão.")
+                    
+            except Exception as e:
+                st.error(f"Erro ao ler APP2: {e}")
+            finally:
+                if os.path.exists(tmp_path): 
+                    try:
+                        os.unlink(tmp_path)
+                    except: pass
 
-        log("✅ Downloads concluídos!")
+        st.divider()
 
-        # Processamento pós-download — IGUAL AO TKINTER
-        processar_arquivos_baixados(temp_dir, log, state)
+        if st.button("🔗 VINCULAR DADOS (Cruzamento Automático)", type="primary", use_container_width=True):
+            if st.session_state["merged_df"] is not None and st.session_state["parsed_hafele"] is not None:
+                try:
+                    df_dest = st.session_state["merged_df"].copy()
+                    
+                    src_map = {}
+                    for item in st.session_state["parsed_hafele"]['itens']:
+                        try:
+                            idx = int(item['numero_item'])
+                            src_map[idx] = item
+                        except: pass
+                    
+                    count = 0
+                    for idx, row in df_dest.iterrows():
+                        try:
+                            raw_num = str(row['numeroAdicao']).strip()
+                            item_num = int(raw_num)
+                            
+                            if item_num in src_map:
+                                src = src_map[item_num]
+                                
+                                df_dest.at[idx, 'NUMBER'] = src.get('codigo_interno', '')
+                                df_dest.at[idx, 'Frete (R$)'] = src.get('frete_internacional', 0.0)
+                                df_dest.at[idx, 'Seguro (R$)'] = src.get('seguro_internacional', 0.0)
+                                df_dest.at[idx, 'Aduaneiro (R$)'] = src.get('local_aduaneiro', 0.0)
+                                
+                                df_dest.at[idx, 'II (R$)'] = src.get('ii_valor_devido', 0.0)
+                                df_dest.at[idx, 'II Base (R$)'] = src.get('ii_base_calculo', 0.0)
+                                df_dest.at[idx, 'II Alíq. (%)'] = src.get('ii_aliquota', 0.0)
+                                
+                                df_dest.at[idx, 'IPI (R$)'] = src.get('ipi_valor_devido', 0.0)
+                                df_dest.at[idx, 'IPI Base (R$)'] = src.get('ipi_base_calculo', 0.0)
+                                df_dest.at[idx, 'IPI Alíq. (%)'] = src.get('ipi_aliquota', 0.0)
+                                
+                                df_dest.at[idx, 'PIS (R$)'] = src.get('pis_valor_devido', 0.0)
+                                df_dest.at[idx, 'PIS Base (R$)'] = src.get('pis_base_calculo', 0.0)
+                                df_dest.at[idx, 'PIS Alíq. (%)'] = src.get('pis_aliquota', 0.0)
+                                
+                                df_dest.at[idx, 'COFINS (R$)'] = src.get('cofins_valor_devido', 0.0)
+                                df_dest.at[idx, 'COFINS Base (R$)'] = src.get('cofins_base_calculo', 0.0)
+                                df_dest.at[idx, 'COFINS Alíq. (%)'] = src.get('cofins_aliquota', 0.0)
+                                
+                                count += 1
+                        except Exception as e:
+                            continue
+                    
+                    st.session_state["merged_df"] = df_dest
+                    st.success(f"Sucesso! {count} itens foram vinculados e preenchidos.")
+                    
+                except Exception as e:
+                    st.error(f"Erro na vinculação: {e}")
+            else:
+                st.warning("Carregue os dois arquivos antes de vincular.")
 
-    except Exception as e:
-        import traceback
-        log(f"❌ ERRO: {str(e)}")
-        log(traceback.format_exc())
-        state["error_msg"] = str(e)
-        state["stage"]     = "done"
-    finally:
-        log("🔒 Fechando navegador...")
-        if driver:
-            try: driver.quit()
-            except: pass
-        state["running"] = False
-        state["done"]    = True
-        # Limpa downloads
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        log("=" * 50)
+    with tab2:
+        st.subheader("Conferência e Edição")
+        if st.session_state["merged_df"] is not None:
+            col_config = {
+                "numeroAdicao": st.column_config.TextColumn("Item", width="small", disabled=True),
+                "NUMBER": st.column_config.TextColumn("Código Interno", width="medium"),
+                "Frete (R$)": st.column_config.NumberColumn(format="R$ %.2f"),
+                "Seguro (R$)": st.column_config.NumberColumn(format="R$ %.2f"),
+                "II (R$)": st.column_config.NumberColumn(label="II Vlr", format="R$ %.2f"),
+            }
+            
+            edited_df = st.data_editor(
+                st.session_state["merged_df"],
+                hide_index=True,
+                column_config=col_config,
+                use_container_width=True,
+                height=600
+            )
 
+            taxes = ['II', 'IPI', 'PIS', 'COFINS']
+            for tax in taxes:
+                base_col = f"{tax} Base (R$)"
+                aliq_col = f"{tax} Alíq. (%)"
+                val_col = f"{tax} (R$)"
+                
+                if base_col in edited_df.columns and aliq_col in edited_df.columns:
+                    edited_df[base_col] = pd.to_numeric(edited_df[base_col], errors='coerce').fillna(0.0)
+                    edited_df[aliq_col] = pd.to_numeric(edited_df[aliq_col], errors='coerce').fillna(0.0)
+                    edited_df[val_col] = edited_df[base_col] * (edited_df[aliq_col] / 100.0)
+
+            st.session_state["merged_df"] = edited_df
+
+        else:
+            st.info("Nenhum dado para exibir.")
+
+    with tab3:
+        st.subheader("Gerar XML Final (Configurações Manuais)")
+        st.markdown("### Preenchimento Obrigatório das Tags")
+        
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("**QUANTIDADE**")
+            inp_qtd_volume = st.text_input("Quantidade Volume", value="00001", help="Preenche <quantidadeVolume>")
+            
+            st.markdown("**DATAS**")
+            inp_dt_chegada = st.text_input("Data Chegada", value="20251120", help="Preenche <cargaDataChegada>")
+            inp_dt_desemb = st.text_input("Data Desembaraço", value="20251124", help="Preenche <dataDesembaraco>")
+            inp_dt_reg = st.text_input("Data Registro", value="20251124", help="Preenche <dataRegistro>")
+            inp_dt_emb = st.text_input("Data Embarque", value="20251025", help="Preenche <conhecimentoCargaEmbarqueData>")
+
+        with c2:
+            st.markdown("**PESO (KG)**")
+            inp_peso_bruto = st.text_input("Peso Bruto", value="000002114187000", help="Preenche <cargaPesoBruto>")
+            inp_peso_liq = st.text_input("Peso Líquido", value="000002114187000", help="Preenche <cargaPesoLiquido>")
+
+            st.markdown("**LOCAIS (Reais/Dólares)**")
+            inp_loc_desc_dol = st.text_input("Local Descarga Total Dólares", value="000000000000000")
+            inp_loc_desc_rea = st.text_input("Local Descarga Total Reais", value="000000000000000")
+            inp_loc_emb_dol = st.text_input("Local Embarque Total Dólares", value="000000000000000")
+            inp_loc_emb_rea = st.text_input("Local Embarque Total Reais", value="000000000000000")
+
+        with c3:
+            st.markdown("**SISCOMEX**")
+            inp_agencia = st.text_input("Agência Pagamento", value="3715", help="Preenche <agenciaPagamento>")
+            inp_banco = st.text_input("Banco Pagamento", value="341", help="Preenche <bancoPagamento>")
+            st.markdown("---")
+            st.markdown("**SISCOMEX 7811**")
+            st.text("Preenche <codigoReceita>7811</codigoReceita>")
+            inp_valor_7811 = st.text_input("Valor Receita 7811", value="000000000000000", help="Preenche <valorReceita> para o código 7811")
+
+        user_xml_config = {
+            "quantidadeVolume": inp_qtd_volume,
+            "cargaDataChegada": inp_dt_chegada,
+            "dataDesembaraco": inp_dt_desemb,
+            "dataRegistro": inp_dt_reg,
+            "conhecimentoCargaEmbarqueData": inp_dt_emb,
+            "cargaPesoBruto": inp_peso_bruto,
+            "cargaPesoLiquido": inp_peso_liq,
+            "agenciaPagamento": inp_agencia,
+            "bancoPagamento": inp_banco,
+            "valorReceita7811": inp_valor_7811,
+            "localDescargaTotalDolares": inp_loc_desc_dol,
+            "localDescargaTotalReais": inp_loc_desc_rea,
+            "localEmbarqueTotalDolares": inp_loc_emb_dol,
+            "localEmbarqueTotalReais": inp_loc_emb_rea
+        }
+
+        if st.session_state["merged_df"] is not None:
+            if st.button("Gerar XML (Layout 8686)", type="primary"):
+                try:
+                    p = st.session_state["parsed_duimp"]
+                    records = st.session_state["merged_df"].to_dict("records")
+                    
+                    for i, item in enumerate(p.items):
+                        if i < len(records):
+                            item.update(records[i])
+                    
+                    builder = XMLBuilder(p)
+                    xml_bytes = builder.build(user_inputs=user_xml_config)
+                    
+                    duimp_num = p.header.get("numeroDUIMP", "0000").replace("/", "-")
+                    file_name = f"DUIMP_{duimp_num}_INTEGRADO.xml"
+                    
+                    st.download_button(
+                        label="⬇️ Baixar XML",
+                        data=xml_bytes,
+                        file_name=file_name,
+                        mime="text/xml"
+                    )
+                    st.success("XML Gerado com sucesso!")
+                    
+                except Exception as e:
+                    st.error(f"Erro na geração do XML: {e}")
+        else:
+            st.warning("Realize a vinculação primeiro.")
 
 # ==============================================================================
-# DISPARO DA THREAD
+# APLICAÇÃO PRINCIPAL
 # ==============================================================================
-if iniciar:
-    if not usuario or not senha:
-        st.error("⚠️ Preencha o usuário e a senha para continuar.")
-    else:
-        st.session_state.running     = True
-        st.session_state.done        = False
-        st.session_state.error_msg   = ""
-        st.session_state.page_atual  = 0
-        st.session_state.page_total  = int(qtd_loops)
-        st.session_state.status_msg  = "Iniciando..."
-        st.session_state.stage       = "download"
-        st.session_state.xml_count   = 0
-        st.session_state.excel_bytes = None
-        st.session_state.logs        = []
-
-        t = threading.Thread(
-            target=rodar_automacao,
-            args=(usuario, senha, data_ini, data_fin, int(qtd_loops), st.session_state),
-            daemon=True,
-        )
-        t.start()
-        st.rerun()
-
-# ==============================================================================
-# PAINEL DE PROGRESSO
-# ==============================================================================
-if st.session_state.running or st.session_state.done:
-    total = st.session_state.page_total or 1
-    atual = st.session_state.page_atual
-    stage = st.session_state.stage
-
-    pct = {"download": (atual/total)*0.65, "extract": 0.78,
-           "excel": 0.92, "done": 1.0}.get(stage, 0.0)
-
-    if st.session_state.error_msg:
-        st.error(f"❌ {st.session_state.error_msg}")
-    elif stage == "done" and st.session_state.excel_bytes:
-        st.success(f"✅ {st.session_state.status_msg}")
-    elif stage == "done":
-        st.warning(f"⚠️ {st.session_state.status_msg}")
-    else:
-        st.info(f"⏳ {st.session_state.status_msg}")
-
-    st.progress(pct)
-
-    st.markdown(f"""
-    <div class="stat-row">
-      <div class="stat-card"><div class="stat-label">Páginas Baixadas</div><div class="stat-value green">{atual}</div></div>
-      <div class="stat-card"><div class="stat-label">Total Programado</div><div class="stat-value">{total}</div></div>
-      <div class="stat-card"><div class="stat-label">CT-es Extraídos</div><div class="stat-value blue">{st.session_state.xml_count}</div></div>
-      <div class="stat-card"><div class="stat-label">Etapa</div><div class="stat-value" style="font-size:0.9rem;padding-top:0.4rem">{stage.upper()}</div></div>
+def main():
+    load_css()
+    
+    st.markdown("""
+    <div class="cover-container">
+        <img src="https://raw.githubusercontent.com/DaniloNs-creator/final/7ea6ab2a610ef8f0c11be3c34f046e7ff2cdfc6a/haefele_logo.png" class="cover-logo">
+        <h1 class="cover-title">Sistema de Processamento Unificado 2026</h1>
+        <p class="cover-subtitle">Processamento de TXT, CT-e e DUIMP para análise de dados</p>
     </div>
     """, unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["📄 Processador TXT", "🚚 Processador CT-e", "📊 Sistema Integrado DUIMP"])
+    
+    with tab1: processador_txt()
+    with tab2: processador_cte()
+    with tab3: sistema_integrado_duimp()
 
-    # Log terminal
-    log_html = "\n".join(st.session_state.logs[-120:]) or "// aguardando..."
-    st.markdown(f'<div class="log-box">{log_html}</div>', unsafe_allow_html=True)
-
-    # Download Excel
-    if stage == "done" and st.session_state.excel_bytes:
-        st.markdown("---")
-        periodo = f"{data_ini.replace('/','_')}_a_{data_fin.replace('/','_')}"
-        st.download_button(
-            label=f"📥  BAIXAR EXCEL — {st.session_state.xml_count} CT-e(s)",
-            data=st.session_state.excel_bytes,
-            file_name=f"CTe_MasterSAF_{periodo}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-
-    if st.session_state.running:
-        time.sleep(3)
-        st.rerun()
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        st.error(f"Ocorreu um erro inesperado: {str(e)}")
+        st.code(traceback.format_exc())
