@@ -4,10 +4,12 @@ import shutil
 import zipfile
 import time
 import threading
+import tempfile
 import xml.etree.ElementTree as ET
-from datetime import datetime
-from io import BytesIO
 import pandas as pd
+from io import BytesIO
+from pathlib import Path
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -46,7 +48,6 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 [data-testid="stSidebar"] * { color: #c4ccd8 !important; }
 
-/* ── Hero ── */
 .hero {
     padding: 2.5rem 0 1.5rem;
     border-bottom: 1px solid #1e2535;
@@ -76,7 +77,6 @@ html, body, [data-testid="stAppViewContainer"] {
     font-weight: 300;
 }
 
-/* ── Pipeline ── */
 .pipeline {
     display: flex;
     align-items: center;
@@ -100,7 +100,6 @@ html, body, [data-testid="stAppViewContainer"] {
 .step.done   { border-color: #0070f3; color: #0070f3; }
 .step-arrow  { color: #1e2535; font-size: 1.1rem; padding: 0 0.3rem; font-family: monospace; }
 
-/* ── Progress bar ── */
 [data-testid="stProgress"] > div > div {
     background: linear-gradient(90deg, #00e5a0, #0070f3) !important;
     border-radius: 4px !important;
@@ -111,7 +110,6 @@ html, body, [data-testid="stAppViewContainer"] {
     height: 6px !important;
 }
 
-/* ── Inputs ── */
 [data-testid="stTextInput"] input,
 [data-testid="stNumberInput"] input {
     background: #070910 !important;
@@ -134,7 +132,6 @@ html, body, [data-testid="stAppViewContainer"] {
     color: #4a5568 !important;
 }
 
-/* ── Botões ── */
 [data-testid="stSidebar"] .stButton button {
     background: linear-gradient(135deg, #00e5a0, #0070f3) !important;
     color: #020408 !important;
@@ -161,7 +158,6 @@ html, body, [data-testid="stAppViewContainer"] {
     border: none !important;
 }
 
-/* ── Alertas ── */
 [data-testid="stAlert"] {
     background: #0e1117 !important;
     border-radius: 8px !important;
@@ -170,7 +166,6 @@ html, body, [data-testid="stAppViewContainer"] {
     font-size: 0.8rem !important;
 }
 
-/* ── Labels de seção ── */
 .section-label {
     font-family: 'Space Mono', monospace;
     font-size: 0.65rem;
@@ -183,7 +178,6 @@ html, body, [data-testid="stAppViewContainer"] {
     padding-bottom: 0.4rem;
 }
 
-/* ── Logo sidebar ── */
 .sidebar-logo {
     font-family: 'Space Mono', monospace;
     font-size: 0.95rem;
@@ -196,7 +190,6 @@ html, body, [data-testid="stAppViewContainer"] {
 }
 .sidebar-logo span { color: #00e5a0; }
 
-/* ── Cards de métricas ── */
 .stat-row {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -279,7 +272,6 @@ def render_pipeline():
     ]
     order = [s[0] for s in steps]
     cur_idx = order.index(stage) if stage in order else -1
-
     html = '<div class="pipeline">'
     for i, (key, label) in enumerate(steps):
         idx = order.index(key)
@@ -302,18 +294,14 @@ render_pipeline()
 # ==============================================================================
 with st.sidebar:
     st.markdown('<div class="sidebar-logo">MASTER<span>SAF</span> //</div>', unsafe_allow_html=True)
-
     st.markdown('<div class="section-label">Credenciais</div>', unsafe_allow_html=True)
     usuario   = st.text_input("Usuário", placeholder="login@empresa.com.br", disabled=st.session_state.running)
-    senha     = st.text_input("Senha", type="password", placeholder="••••••••",  disabled=st.session_state.running)
-
+    senha     = st.text_input("Senha", type="password", placeholder="••••••••", disabled=st.session_state.running)
     st.markdown('<div class="section-label">Período</div>', unsafe_allow_html=True)
     data_ini  = st.text_input("Data Inicial", value="08/05/2026", disabled=st.session_state.running)
     data_fin  = st.text_input("Data Final",   value="08/05/2026", disabled=st.session_state.running)
-
     st.markdown('<div class="section-label">Parâmetros</div>', unsafe_allow_html=True)
     qtd_loops = st.number_input("Qtd. Páginas (Loops)", min_value=1, max_value=1000, value=5, disabled=st.session_state.running)
-
     st.markdown("<br>", unsafe_allow_html=True)
     if not st.session_state.running:
         iniciar = st.button("⚡ Iniciar Automação")
@@ -322,199 +310,200 @@ with st.sidebar:
         iniciar = False
 
 # ==============================================================================
-# PARSER CT-e — lógica idêntica ao CTeProcessorDirect do app conversor
+# PARSER CT-e — lógica extraída do app tkinter que funciona
 # ==============================================================================
 CTE_NAMESPACES = {'cte': 'http://www.portalfiscal.inf.br/cte'}
 
-def _find_text(root, xpath):
-    """Busca texto com e sem namespace."""
-    for prefix, uri in CTE_NAMESPACES.items():
-        found = root.find(xpath.replace('cte:', f'{{{uri}}}'))
-        if found is not None and found.text:
-            return found.text
-    found = root.find(xpath.replace('cte:', ''))
-    return found.text if found is not None and found.text else None
+class CTeProcessor:
+    """
+    Idêntico ao CTeProcessor do app tkinter funcional.
+    Processa arquivos XML de CT-e extraindo os mesmos campos.
+    """
+    def __init__(self):
+        self.processed_data = []
 
-def _extract_nfe_number_from_key(chave_acesso):
-    if not chave_acesso or len(chave_acesso) != 44:
-        return None
-    try:
-        return chave_acesso[25:34]
-    except Exception:
-        return None
+    def extract_nfe_number_from_key(self, chave_acesso):
+        if not chave_acesso or len(chave_acesso) != 44:
+            return None
+        try:
+            return chave_acesso[25:34]
+        except Exception:
+            return None
 
-def _extract_peso_bruto(root):
-    """Busca peso em múltiplos campos: PESO BRUTO → PESO BASE DE CALCULO → PESO."""
-    tipos_peso = ['PESO BRUTO', 'PESO BASE DE CALCULO', 'PESO BASE CÁLCULO', 'PESO']
-    try:
-        # com namespace
-        for prefix, uri in CTE_NAMESPACES.items():
-            for infQ in root.findall(f'.//{{{uri}}}infQ'):
-                tpMed  = infQ.find(f'{{{uri}}}tpMed')
-                qCarga = infQ.find(f'{{{uri}}}qCarga')
+    def extract_peso_bruto(self, root):
+        try:
+            tipos_peso = ['PESO BRUTO', 'PESO BASE DE CALCULO', 'PESO BASE CÁLCULO', 'PESO']
+            # Com namespace
+            for prefix, uri in CTE_NAMESPACES.items():
+                infQ_elements = root.findall(f'.//{{{uri}}}infQ')
+                for infQ in infQ_elements:
+                    tpMed  = infQ.find(f'{{{uri}}}tpMed')
+                    qCarga = infQ.find(f'{{{uri}}}qCarga')
+                    if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
+                        for tipo_peso in tipos_peso:
+                            if tipo_peso in tpMed.text.upper():
+                                return float(qCarga.text)
+            # Sem namespace
+            for infQ in root.findall('.//infQ'):
+                tpMed  = infQ.find('tpMed')
+                qCarga = infQ.find('qCarga')
                 if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
-                    for tp in tipos_peso:
-                        if tp in tpMed.text.upper():
-                            return float(qCarga.text), tp
-        # sem namespace
-        for infQ in root.findall('.//infQ'):
-            tpMed  = infQ.find('tpMed')
-            qCarga = infQ.find('qCarga')
-            if tpMed is not None and tpMed.text and qCarga is not None and qCarga.text:
-                for tp in tipos_peso:
-                    if tp in tpMed.text.upper():
-                        return float(qCarga.text), tp
-    except Exception:
-        pass
-    return 0.0, "Não encontrado"
+                    for tipo_peso in tipos_peso:
+                        if tipo_peso in tpMed.text.upper():
+                            return float(qCarga.text)
+            return 0.0
+        except Exception:
+            return 0.0
 
-def extract_cte_data(xml_content: str, filename: str):
-    """Extrai todos os campos do CT-e — idêntico ao CTeProcessorDirect.extract_cte_data."""
-    try:
-        root = ET.fromstring(xml_content)
-        for prefix, uri in CTE_NAMESPACES.items():
-            ET.register_namespace(prefix, uri)
+    def extract_cte_data(self, xml_content, filename):
+        try:
+            root = ET.fromstring(xml_content)
 
-        nCT          = _find_text(root, './/cte:nCT')
-        dhEmi        = _find_text(root, './/cte:dhEmi')
-        cMunIni      = _find_text(root, './/cte:cMunIni')
-        UFIni        = _find_text(root, './/cte:UFIni')
-        cMunFim      = _find_text(root, './/cte:cMunFim')
-        UFFim        = _find_text(root, './/cte:UFFim')
-        emit_xNome   = _find_text(root, './/cte:emit/cte:xNome')
-        vTPrest      = _find_text(root, './/cte:vTPrest')
-        rem_xNome    = _find_text(root, './/cte:rem/cte:xNome')
-        dest_xNome   = _find_text(root, './/cte:dest/cte:xNome')
-        dest_CNPJ    = _find_text(root, './/cte:dest/cte:CNPJ')
-        dest_CPF     = _find_text(root, './/cte:dest/cte:CPF')
-        dest_xLgr    = _find_text(root, './/cte:dest/cte:enderDest/cte:xLgr')
-        dest_nro     = _find_text(root, './/cte:dest/cte:enderDest/cte:nro')
-        dest_xBairro = _find_text(root, './/cte:dest/cte:enderDest/cte:xBairro')
-        dest_xMun    = _find_text(root, './/cte:dest/cte:enderDest/cte:xMun')
-        dest_CEP     = _find_text(root, './/cte:dest/cte:enderDest/cte:CEP')
-        dest_UF      = _find_text(root, './/cte:dest/cte:enderDest/cte:UF')
-        infNFe_chave = _find_text(root, './/cte:infNFe/cte:chave')
-
-        doc_dest = dest_CNPJ or dest_CPF or 'N/A'
-
-        # Endereço completo
-        endereco = 'N/A'
-        if dest_xLgr:
-            partes = [dest_xLgr]
-            if dest_nro:     partes.append(f", {dest_nro}")
-            if dest_xBairro: partes.append(f" - {dest_xBairro}")
-            if dest_xMun:    partes.append(f", {dest_xMun}")
-            if dest_UF:      partes.append(f"/{dest_UF}")
-            if dest_CEP:     partes.append(f" - CEP: {dest_CEP}")
-            endereco = "".join(partes)
-
-        # Formata data
-        data_fmt = None
-        if dhEmi:
-            for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d/%m/%y'):
+            def find_text(element, xpath):
                 try:
-                    data_fmt = datetime.strptime(dhEmi[:10], fmt).strftime('%d/%m/%y')
-                    break
+                    for prefix, uri in CTE_NAMESPACES.items():
+                        full_xpath = xpath.replace('cte:', f'{{{uri}}}')
+                        found = element.find(full_xpath)
+                        if found is not None and found.text:
+                            return found.text
+                    found = element.find(xpath.replace('cte:', ''))
+                    if found is not None and found.text:
+                        return found.text
+                    return None
                 except Exception:
-                    pass
+                    return None
 
-        # Valor prestação
-        try:
-            vTPrest_f = float(vTPrest) if vTPrest else 0.0
+            nCT          = find_text(root, './/cte:nCT')
+            dhEmi        = find_text(root, './/cte:dhEmi')
+            cMunIni      = find_text(root, './/cte:cMunIni')
+            UFIni        = find_text(root, './/cte:UFIni')
+            cMunFim      = find_text(root, './/cte:cMunFim')
+            UFFim        = find_text(root, './/cte:UFFim')
+            emit_xNome   = find_text(root, './/cte:emit/cte:xNome')
+            vTPrest      = find_text(root, './/cte:vTPrest')
+            rem_xNome    = find_text(root, './/cte:rem/cte:xNome')
+            dest_xNome   = find_text(root, './/cte:dest/cte:xNome')
+            dest_CNPJ    = find_text(root, './/cte:dest/cte:CNPJ')
+            dest_CPF     = find_text(root, './/cte:dest/cte:CPF')
+            dest_xLgr    = find_text(root, './/cte:dest/cte:enderDest/cte:xLgr')
+            dest_nro     = find_text(root, './/cte:dest/cte:enderDest/cte:nro')
+            dest_xBairro = find_text(root, './/cte:dest/cte:enderDest/cte:xBairro')
+            dest_xMun    = find_text(root, './/cte:dest/cte:enderDest/cte:xMun')
+            dest_UF      = find_text(root, './/cte:dest/cte:enderDest/cte:UF')
+            dest_CEP     = find_text(root, './/cte:dest/cte:enderDest/cte:CEP')
+            infNFe_chave = find_text(root, './/cte:infNFe/cte:chave')
+
+            documento_destinatario = dest_CNPJ or dest_CPF or 'N/A'
+
+            endereco_destinatario = ""
+            if dest_xLgr:
+                endereco_destinatario += f"{dest_xLgr}"
+                if dest_nro:     endereco_destinatario += f", {dest_nro}"
+                if dest_xBairro: endereco_destinatario += f" - {dest_xBairro}"
+                if dest_xMun:    endereco_destinatario += f", {dest_xMun}"
+                if dest_UF:      endereco_destinatario += f"/{dest_UF}"
+                if dest_CEP:     endereco_destinatario += f" - CEP: {dest_CEP}"
+            if not endereco_destinatario:
+                endereco_destinatario = "N/A"
+
+            numero_nfe = self.extract_nfe_number_from_key(infNFe_chave) if infNFe_chave else None
+            peso_bruto = self.extract_peso_bruto(root)
+
+            # Formata data — mesma lógica do tkinter
+            data_formatada = None
+            if dhEmi:
+                try:
+                    data_obj = datetime.strptime(dhEmi[:10], '%Y-%m-%d')
+                    data_formatada = data_obj.strftime('%d/%m/%y')
+                except:
+                    try:
+                        data_obj = datetime.strptime(dhEmi[:10], '%d/%m/%Y')
+                        data_formatada = data_obj.strftime('%d/%m/%y')
+                    except:
+                        data_formatada = dhEmi[:10]
+
+            try:
+                vTPrest = float(vTPrest) if vTPrest else 0.0
+            except (ValueError, TypeError):
+                vTPrest = 0.0
+
+            return {
+                'Arquivo':                 filename,
+                'nCT':                     nCT or 'N/A',
+                'Data Emissão':            data_formatada or dhEmi or 'N/A',
+                'Código Município Início': cMunIni or 'N/A',
+                'UF Início':               UFIni or 'N/A',
+                'Código Município Fim':    cMunFim or 'N/A',
+                'UF Fim':                  UFFim or 'N/A',
+                'Emitente':                emit_xNome or 'N/A',
+                'Valor Prestação':         vTPrest,
+                'Peso Bruto (kg)':         peso_bruto,
+                'Remetente':               rem_xNome or 'N/A',
+                'Destinatário':            dest_xNome or 'N/A',
+                'Documento Destinatário':  documento_destinatario,
+                'Endereço Destinatário':   endereco_destinatario,
+                'Município Destino':       dest_xMun or 'N/A',
+                'UF Destino':              dest_UF or 'N/A',
+                'Chave NFe':               infNFe_chave or 'N/A',
+                'Número NFe':              numero_nfe or 'N/A',
+                'Data Processamento':      datetime.now().strftime('%d/%m/%Y %H:%M:%S'),
+            }
         except Exception:
-            vTPrest_f = 0.0
+            return None
 
-        peso_bruto, tipo_peso = _extract_peso_bruto(root)
-        numero_nfe = _extract_nfe_number_from_key(infNFe_chave) if infNFe_chave else None
+    def process_xml_files_from_directory(self, directory_path):
+        """
+        Idêntico ao process_xml_files_from_directory do tkinter.
+        Varre o diretório recursivamente buscando XMLs de CT-e.
+        """
+        xml_files = list(Path(directory_path).rglob('*.xml'))
+        for xml_file in xml_files:
+            try:
+                with open(xml_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                if 'CTe' in content or 'conhecimento' in content.lower():
+                    data = self.extract_cte_data(content, xml_file.name)
+                    if data:
+                        self.processed_data.append(data)
+            except Exception:
+                pass
 
-        return {
-            'Arquivo':                 filename,
-            'nCT':                     nCT or 'N/A',
-            'Data Emissão':            data_fmt or (dhEmi[:10] if dhEmi else 'N/A'),
-            'Código Município Início': cMunIni or 'N/A',
-            'UF Início':               UFIni or 'N/A',
-            'Código Município Fim':    cMunFim or 'N/A',
-            'UF Fim':                  UFFim or 'N/A',
-            'Emitente':                emit_xNome or 'N/A',
-            'Valor Prestação':         vTPrest_f,
-            'Peso Bruto (kg)':         peso_bruto,
-            'Tipo de Peso Encontrado': tipo_peso,
-            'Remetente':               rem_xNome or 'N/A',
-            'Destinatário':            dest_xNome or 'N/A',
-            'Documento Destinatário':  doc_dest,
-            'Endereço Destinatário':   endereco,
-            'Município Destino':       dest_xMun or 'N/A',
-            'UF Destino':              dest_UF or 'N/A',
-            'Chave NFe':               infNFe_chave or 'N/A',
-            'Número NFe':              numero_nfe or 'N/A',
-            'Data Processamento':      datetime.now().strftime('%d/%m/%Y %H:%M:%S'),
-        }
-    except Exception:
-        return None
-
-def xmls_to_excel(xml_folder: str):
-    """
-    Varre a pasta de XMLs extraídos, parseia cada CT-e com o mesmo parser
-    do app conversor e devolve (bytes_excel, total_registros).
-    """
-    rows = []
-    for fname in sorted(os.listdir(xml_folder)):
-        if not fname.lower().endswith('.xml'):
-            continue
-        fpath = os.path.join(xml_folder, fname)
-        try:
-            with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-            data = extract_cte_data(content, fname)
-            if data:
-                rows.append(data)
-        except Exception:
-            pass
-
-    df = pd.DataFrame(rows) if rows else pd.DataFrame()
-    buf = BytesIO()
-
-    with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
-        sheet = 'Dados_CTe'
-        if not df.empty:
-            df.to_excel(writer, sheet_name=sheet, index=False)
+    def export_to_excel_bytes(self):
+        """Exporta para bytes em memória (ao invés de salvar em disco)."""
+        if not self.processed_data:
+            return None, 0
+        df = pd.DataFrame(self.processed_data)
+        buf = BytesIO()
+        with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name='Dados_CTe')
             wb = writer.book
-            ws = writer.sheets[sheet]
-
-            # Formatos
+            ws = writer.sheets['Dados_CTe']
+            # Formatação
             header_fmt = wb.add_format({
-                'bold': True,
-                'bg_color': '#0e1117',
-                'font_color': '#00e5a0',
-                'border': 1,
-                'border_color': '#1e2535',
-                'align': 'center',
-                'valign': 'vcenter',
+                'bold': True, 'bg_color': '#0e1117', 'font_color': '#00e5a0',
+                'border': 1, 'border_color': '#1e2535', 'align': 'center', 'valign': 'vcenter',
             })
             money_fmt  = wb.add_format({'num_format': 'R$ #,##0.00'})
             weight_fmt = wb.add_format({'num_format': '#,##0.000'})
-            default_fmt = wb.add_format({'valign': 'vcenter'})
-
+            plain_fmt  = wb.add_format({'valign': 'vcenter'})
             for col_num, col_name in enumerate(df.columns):
                 ws.write(0, col_num, col_name, header_fmt)
-                col_w = max(len(col_name) + 2, 16)
                 if col_name == 'Valor Prestação':
                     ws.set_column(col_num, col_num, 20, money_fmt)
                 elif 'Peso' in col_name:
                     ws.set_column(col_num, col_num, 18, weight_fmt)
                 else:
-                    ws.set_column(col_num, col_num, col_w, default_fmt)
-
+                    ws.set_column(col_num, col_num, max(len(col_name) + 2, 16), plain_fmt)
             ws.freeze_panes(1, 0)
             ws.autofilter(0, 0, len(df), len(df.columns) - 1)
-        else:
-            pd.DataFrame([{"Aviso": "Nenhum CT-e válido encontrado nos XMLs baixados."}]).to_excel(
-                writer, sheet_name=sheet, index=False)
+        return buf.getvalue(), len(df)
 
-    return buf.getvalue(), len(rows)
+    def clear_data(self):
+        self.processed_data = []
+
 
 # ==============================================================================
-# DRIVER — idêntico ao código funcional que funciona
+# DRIVER — idêntico ao app funcional MasterSAF
 # ==============================================================================
 def get_driver(download_path):
     chrome_options = Options()
@@ -532,109 +521,170 @@ def get_driver(download_path):
         "download.prompt_for_download": False,
         "directory_upgrade": True,
         "safebrowsing.enabled": False,
+        "profile.default_content_setting_values.automatic_downloads": 1,
     }
     chrome_options.add_experimental_option("prefs", prefs)
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
     chrome_options.binary_location = "/usr/bin/chromium"
     return webdriver.Chrome(service=Service("/usr/bin/chromedriver"), options=chrome_options)
 
+
 # ==============================================================================
-# WORKER — roda em thread separada, isolada do ciclo de vida do Streamlit.
-# Qualquer recarga da página NÃO interrompe essa thread.
+# AGUARDA DOWNLOADS — idêntico ao esperar_downloads do tkinter
+# ==============================================================================
+def esperar_downloads(directory, timeout=120):
+    """Aguarda não haver mais arquivos .crdownload na pasta."""
+    start = time.time()
+    while time.time() - start < timeout:
+        pending = list(Path(directory).glob('*.crdownload'))
+        if not pending:
+            return True
+        time.sleep(1)
+    return False
+
+
+# ==============================================================================
+# WORKER — roda em thread separada isolada do Streamlit
 #
-# ETAPA 1: Download (lógica 100% idêntica ao app funcional)
-# ETAPA 2: Extração dos XMLs dos ZIPs baixados
-# ETAPA 3: Conversão para Excel via parser CT-e
+# Etapa 1: Download  (lógica idêntica ao app MasterSAF funcional)
+# Etapa 2: Extração  (idêntica ao processar_arquivos_baixados do tkinter)
+# Etapa 3: Excel     (idêntico ao export_to_excel do tkinter)
 # ==============================================================================
-def automation_worker(usuario, senha, data_ini, data_fin, qtd_loops, dl_path, xml_path, state):
+def automation_worker(usuario, senha, data_ini, data_fin, qtd_loops, dl_path, state):
     driver = None
     try:
-        # ── ETAPA 1: Download ─────────────────────────────────────────
+        # ── ETAPA 1: Download ──────────────────────────────────────────────────
         state["stage"]      = "download"
         state["status_msg"] = "Inicializando ambiente e navegador..."
         driver = get_driver(dl_path)
 
-        # Login
         state["status_msg"] = "Acessando o sistema MasterSAF e realizando autenticação..."
         driver.get("https://p.dfe.mastersaf.com.br/mvc/login")
+        time.sleep(3)
         driver.find_element(By.XPATH, '//*[@id="nomeusuario"]').send_keys(usuario)
         driver.find_element(By.XPATH, '//*[@id="senha"]').send_keys(senha)
-        driver.execute_script("arguments[0].click();", driver.find_element(By.XPATH, '//*[@id="enter"]'))
-        time.sleep(4)
+        driver.find_element(By.XPATH, '//*[@id="enter"]').click()
+        time.sleep(5)
 
-        # Navegação
         state["status_msg"] = "Navegando até o módulo de Listagem de CT-es..."
-        driver.execute_script("arguments[0].click();", driver.find_element(By.XPATH, '//*[@id="linkListagemReceptorCTEs"]/a'))
-        time.sleep(3)
+        driver.find_element(By.XPATH, '//*[@id="linkListagemReceptorCTEs"]/a').click()
+        time.sleep(5)
 
         # Datas
-        for xpath, val in [('//*[@id="consultaDataInicial"]', data_ini), ('//*[@id="consultaDataFinal"]', data_fin)]:
-            el = driver.find_element(By.XPATH, xpath)
-            el.send_keys(Keys.CONTROL, 'a', Keys.BACKSPACE)
-            el.send_keys(val)
+        campo_ini = driver.find_element(By.XPATH, '//*[@id="consultaDataInicial"]')
+        campo_ini.click()
+        campo_ini.send_keys(Keys.CONTROL, 'a')
+        campo_ini.send_keys(data_ini)
+
+        campo_fin = driver.find_element(By.XPATH, '//*[@id="consultaDataFinal"]')
+        campo_fin.click()
+        campo_fin.send_keys(Keys.CONTROL, 'a')
+        campo_fin.send_keys(data_fin)
+        time.sleep(2)
 
         state["status_msg"] = "Atualizando base de dados com as datas informadas..."
-        driver.execute_script("arguments[0].click();", driver.find_element(By.XPATH, '//*[@id="listagem_atualiza"]'))
-        time.sleep(3)
+        driver.find_element(By.XPATH, '//*[@id="listagem_atualiza"]').click()
+        time.sleep(5)
 
-        # Seleção de visualização
+        # Seleção de visualização (200 itens por página — igual ao tkinter)
+        state["status_msg"] = "Configurando exibição de 200 itens por página..."
+        select_el = driver.find_element(By.XPATH, '//*[@id="plistagem_center"]/table/tbody/tr/td[8]/select')
+        select_el.click()
+        time.sleep(1)
         driver.find_element(By.XPATH, '//*[@id="plistagem_center"]/table/tbody/tr/td[8]/select/option[5]').click()
         time.sleep(3)
 
-        # Loop de Downloads — lógica idêntica ao app funcional
+        # Loop de downloads — lógica idêntica ao tkinter
         for i in range(int(qtd_loops)):
-            state["status_msg"] = f"⏳ Processando e extraindo página {i+1} de {int(qtd_loops)}..."
+            state["status_msg"] = f"⏳ Baixando página {i+1} de {int(qtd_loops)}..."
 
-            driver.execute_script("arguments[0].click();", driver.find_element(By.XPATH, '//*[@id="jqgh_listagem_checkBox"]/div/input'))
-            driver.execute_script("arguments[0].click();", driver.find_element(By.XPATH, '//*[@id="xml_multiplos"]/h3'))
-            driver.execute_script("arguments[0].click();", driver.find_element(By.XPATH, '//*[@id="downloadEmMassaXml"]'))
+            # Seleciona checkbox
+            try:
+                checkbox = driver.find_element(By.XPATH, '//*[@id="jqgh_listagem_checkBox"]/div/input')
+                if not checkbox.is_selected():
+                    checkbox.click()
+                time.sleep(3)
+            except Exception:
+                pass
 
-            time.sleep(8)  # Aguarda o download completar
+            # Clica download múltiplo
+            try:
+                driver.find_element(By.XPATH, '//*[@id="xml_multiplos"]/h3').click()
+                time.sleep(3)
+                driver.find_element(By.XPATH, '//*[@id="downloadEmMassaXml"]').click()
+                time.sleep(3)
+            except Exception:
+                pass
 
-            driver.execute_script("arguments[0].click();", driver.find_element(By.XPATH, '//*[@id="jqgh_listagem_checkBox"]/div/input'))
-            driver.execute_script("arguments[0].click();", driver.find_element(By.XPATH, '//*[@id="next_plistagem"]/span'))
+            # Aguarda downloads terminarem (igual ao tkinter)
+            esperar_downloads(dl_path)
+
+            # Desmarca checkbox
+            try:
+                checkbox = driver.find_element(By.XPATH, '//*[@id="jqgh_listagem_checkBox"]/div/input')
+                if checkbox.is_selected():
+                    checkbox.click()
+                time.sleep(1)
+            except Exception:
+                pass
+
+            # Avança página
+            if i < int(qtd_loops) - 1:
+                try:
+                    driver.find_element(By.XPATH, '//*[@id="next_plistagem"]/span').click()
+                    time.sleep(5)
+                except Exception:
+                    pass  # Fim das páginas disponíveis
 
             state["page_atual"] = i + 1
-            time.sleep(4)
 
         driver.quit()
         driver = None
 
-        # ── ETAPA 2: Extrair XMLs dos ZIPs e arquivos soltos ─────────
+        # ── ETAPA 2: Extrai ZIPs — idêntico ao processar_arquivos_baixados ────
         state["stage"]      = "extract"
-        state["status_msg"] = "Extraindo XMLs dos arquivos baixados..."
-        os.makedirs(xml_path, exist_ok=True)
-        xml_count = 0
+        state["status_msg"] = "Extraindo XMLs dos arquivos ZIP..."
 
-        for fname in os.listdir(dl_path):
-            fpath  = os.path.join(dl_path, fname)
-            flower = fname.lower()
+        # Cria pasta de extração
+        extract_dir = os.path.join(dl_path, "extracted")
+        os.makedirs(extract_dir, exist_ok=True)
 
-            if flower.endswith('.zip'):
-                try:
-                    with zipfile.ZipFile(fpath, 'r') as zf:
-                        for member in zf.namelist():
-                            if member.lower().endswith('.xml'):
-                                # Extrai preservando apenas o nome do arquivo (sem subpastas)
-                                data = zf.read(member)
-                                dest_name = os.path.basename(member)
-                                with open(os.path.join(xml_path, dest_name), 'wb') as out:
-                                    out.write(data)
-                                xml_count += 1
-                except Exception:
-                    pass
-            elif flower.endswith('.xml'):
-                shutil.copy2(fpath, os.path.join(xml_path, fname))
-                xml_count += 1
+        zip_files = list(Path(dl_path).glob('*.zip'))
+        xml_avulsos = list(Path(dl_path).glob('*.xml'))
 
-        state["xml_count"]  = xml_count
-        state["status_msg"] = f"{xml_count} XML(s) extraídos. Convertendo para Excel..."
+        for zip_file in zip_files:
+            try:
+                zip_name  = zip_file.stem
+                dest_path = os.path.join(extract_dir, zip_name)
+                os.makedirs(dest_path, exist_ok=True)
+                with zipfile.ZipFile(zip_file, 'r') as zf:
+                    zf.extractall(dest_path)
+            except Exception:
+                pass
 
-        # ── ETAPA 3: Converter XMLs para Excel ───────────────────────
-        state["stage"]       = "excel"
-        excel_bytes, total   = xmls_to_excel(xml_path)
+        # Copia XMLs avulsos para a pasta de extração também
+        for xml_file in xml_avulsos:
+            try:
+                shutil.copy2(xml_file, os.path.join(extract_dir, xml_file.name))
+            except Exception:
+                pass
+
+        # ── ETAPA 3: Processa XMLs e gera Excel — idêntico ao tkinter ─────────
+        state["stage"]      = "excel"
+        state["status_msg"] = "Processando arquivos XML e gerando Excel..."
+
+        processor = CTeProcessor()
+        processor.process_xml_files_from_directory(extract_dir)
+
+        total = len(processor.processed_data)
+        state["xml_count"]  = total
+
+        excel_bytes, n = processor.export_to_excel_bytes()
+        processor.clear_data()
+
         state["excel_bytes"] = excel_bytes
-        state["xml_count"]   = total
-        state["status_msg"]  = f"✅ Concluído! {total} CT-e(s) convertidos para Excel."
+        state["xml_count"]   = n
+        state["status_msg"]  = f"✅ Concluído! {n} CT-e(s) convertidos para Excel."
         state["stage"]       = "done"
 
     except Exception as e:
@@ -647,6 +697,7 @@ def automation_worker(usuario, senha, data_ini, data_fin, qtd_loops, dl_path, xm
             try: driver.quit()
             except Exception: pass
 
+
 # ==============================================================================
 # DISPARO DA THREAD
 # ==============================================================================
@@ -654,11 +705,10 @@ if iniciar:
     if not usuario or not senha:
         st.error("⚠️ Preencha o usuário e a senha para continuar.")
     else:
-        dl_path  = "/tmp/downloads"
-        xml_path = "/tmp/xmls"
-        for p in [dl_path, xml_path]:
-            if os.path.exists(p): shutil.rmtree(p)
-            os.makedirs(p)
+        dl_path = "/tmp/mastersaf_downloads"
+        if os.path.exists(dl_path):
+            shutil.rmtree(dl_path)
+        os.makedirs(dl_path)
 
         st.session_state.running     = True
         st.session_state.done        = False
@@ -672,16 +722,14 @@ if iniciar:
 
         t = threading.Thread(
             target=automation_worker,
-            args=(usuario, senha, data_ini, data_fin, qtd_loops, dl_path, xml_path, st.session_state),
+            args=(usuario, senha, data_ini, data_fin, qtd_loops, dl_path, st.session_state),
             daemon=True,
         )
         t.start()
         st.rerun()
 
 # ==============================================================================
-# PAINEL DE PROGRESSO
-# Atualiza a cada 3s via rerun enquanto a thread estiver viva.
-# Qualquer recarga do browser não mata a thread.
+# PAINEL DE PROGRESSO — atualiza a cada 3s enquanto a thread roda
 # ==============================================================================
 if st.session_state.running or st.session_state.done:
     st.markdown('<div class="section-label">Execução</div>', unsafe_allow_html=True)
@@ -689,13 +737,12 @@ if st.session_state.running or st.session_state.done:
     total = st.session_state.page_total or 1
     atual = st.session_state.page_atual
 
-    # Progresso proporcional por etapa
     if st.session_state.stage == "download":
-        pct = (atual / total) * 0.70          # download = 70% do total
+        pct = (atual / total) * 0.70
     elif st.session_state.stage == "extract":
-        pct = 0.75
+        pct = 0.80
     elif st.session_state.stage == "excel":
-        pct = 0.90
+        pct = 0.92
     else:
         pct = 1.0
 
@@ -708,7 +755,6 @@ if st.session_state.running or st.session_state.done:
 
     st.progress(pct)
 
-    # Cards de métricas
     st.markdown(f"""
     <div class="stat-row">
         <div class="stat-card">
@@ -730,7 +776,6 @@ if st.session_state.running or st.session_state.done:
     </div>
     """, unsafe_allow_html=True)
 
-    # Botão de download — só aparece quando termina
     if st.session_state.stage == "done" and st.session_state.excel_bytes:
         st.markdown('<div class="section-label">Download</div>', unsafe_allow_html=True)
         periodo = f"{data_ini.replace('/', '-')}_a_{data_fin.replace('/', '-')}"
@@ -741,7 +786,6 @@ if st.session_state.running or st.session_state.done:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
-    # Auto-refresh a cada 3s enquanto a thread estiver rodando
     if st.session_state.running:
         time.sleep(3)
         st.rerun()
